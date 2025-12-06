@@ -90,11 +90,225 @@ const styles = {
   } as React.CSSProperties,
 };
 
-// Grid helper with custom styling
-function createGrid() {
-  const gridHelper = new THREE.GridHelper(100, 100, 0x444466, 0x333355);
-  gridHelper.position.y = 0;
-  return gridHelper;
+// Calculate appropriate grid spacing based on camera distance
+function calculateGridSpacing(cameraDistance: number): { major: number; minor: number; label: string } {
+  // Target: keep major grid lines roughly 40-100 pixels apart on screen
+  // At distance 100, we want spacing ~10 units
+  const baseSpacing = cameraDistance / 8;
+
+  // Snap to nice numbers: 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000...
+  const niceNumbers = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
+  let majorSpacing = niceNumbers[0];
+  for (const n of niceNumbers) {
+    if (n >= baseSpacing) {
+      majorSpacing = n;
+      break;
+    }
+    majorSpacing = n;
+  }
+
+  // Minor grid is 1/5 of major
+  const minorSpacing = majorSpacing / 5;
+
+  // Format label (assuming units are mm)
+  let label: string;
+  if (majorSpacing < 1) {
+    label = `${majorSpacing * 1000}μm`;
+  } else if (majorSpacing < 10) {
+    label = `${majorSpacing}mm`;
+  } else if (majorSpacing < 1000) {
+    label = `${majorSpacing / 10}cm`;
+  } else {
+    label = `${majorSpacing / 1000}m`;
+  }
+
+  return { major: majorSpacing, minor: minorSpacing, label };
+}
+
+// Format a numeric value as a label with appropriate units
+function formatTickLabel(value: number): string {
+  const absVal = Math.abs(value);
+  if (absVal === 0) return "0";
+  if (absVal < 1) return `${value.toFixed(1)}`;
+  if (absVal < 10) return `${value.toFixed(0)}`;
+  if (absVal < 100) return `${value.toFixed(0)}`;
+  return `${value.toFixed(0)}`;
+}
+
+// Create a text sprite for axis labels
+function createTextSprite(text: string, color: number = 0x888888): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  const size = 128;
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+
+  // Clear canvas
+  ctx.clearRect(0, 0, size, size);
+
+  // Draw text
+  ctx.font = "bold 48px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.fillText(text, size / 2, size / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const sprite = new THREE.Sprite(material);
+  return sprite;
+}
+
+// Create dynamic grid with tick marks and labels
+function createDynamicGrid(
+  spacing: { major: number; minor: number; label: string },
+  gridSize: number = 200
+): THREE.Group {
+  const group = new THREE.Group();
+
+  // Minor grid lines
+  const minorMaterial = new THREE.LineBasicMaterial({ color: 0x2a2a3a, transparent: true, opacity: 0.5 });
+  const minorPoints: THREE.Vector3[] = [];
+
+  const halfSize = gridSize / 2;
+  const minorStep = spacing.minor;
+
+  for (let i = -halfSize; i <= halfSize; i += minorStep) {
+    // Skip if this is a major line
+    if (Math.abs(i % spacing.major) < 0.001) continue;
+
+    // X-aligned lines (along Z)
+    minorPoints.push(new THREE.Vector3(i, 0, -halfSize));
+    minorPoints.push(new THREE.Vector3(i, 0, halfSize));
+
+    // Z-aligned lines (along X)
+    minorPoints.push(new THREE.Vector3(-halfSize, 0, i));
+    minorPoints.push(new THREE.Vector3(halfSize, 0, i));
+  }
+
+  if (minorPoints.length > 0) {
+    const minorGeometry = new THREE.BufferGeometry().setFromPoints(minorPoints);
+    const minorLines = new THREE.LineSegments(minorGeometry, minorMaterial);
+    group.add(minorLines);
+  }
+
+  // Major grid lines
+  const majorMaterial = new THREE.LineBasicMaterial({ color: 0x444466 });
+  const majorPoints: THREE.Vector3[] = [];
+
+  for (let i = -halfSize; i <= halfSize; i += spacing.major) {
+    // X-aligned lines (along Z)
+    majorPoints.push(new THREE.Vector3(i, 0, -halfSize));
+    majorPoints.push(new THREE.Vector3(i, 0, halfSize));
+
+    // Z-aligned lines (along X)
+    majorPoints.push(new THREE.Vector3(-halfSize, 0, i));
+    majorPoints.push(new THREE.Vector3(halfSize, 0, i));
+  }
+
+  const majorGeometry = new THREE.BufferGeometry().setFromPoints(majorPoints);
+  const majorLines = new THREE.LineSegments(majorGeometry, majorMaterial);
+  group.add(majorLines);
+
+  // Axis lines (X = red, Z = blue)
+  const xAxisMaterial = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 2 });
+  const zAxisMaterial = new THREE.LineBasicMaterial({ color: 0x4444ff, linewidth: 2 });
+
+  const xAxisGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-halfSize, 0.01, 0),
+    new THREE.Vector3(halfSize, 0.01, 0),
+  ]);
+  const zAxisGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0.01, -halfSize),
+    new THREE.Vector3(0, 0.01, halfSize),
+  ]);
+
+  group.add(new THREE.Line(xAxisGeom, xAxisMaterial));
+  group.add(new THREE.Line(zAxisGeom, zAxisMaterial));
+
+  // Tick marks along axes
+  const tickLength = spacing.major * 0.15;
+  const tickMaterial = new THREE.LineBasicMaterial({ color: 0x666688 });
+  const tickPoints: THREE.Vector3[] = [];
+
+  // Label sprite size scales with grid spacing
+  const labelSize = spacing.major * 0.8;
+  const labelOffset = spacing.major * 0.4;
+
+  for (let i = -halfSize; i <= halfSize; i += spacing.major) {
+    if (Math.abs(i) < 0.001) continue; // Skip origin
+
+    // Ticks on X axis (perpendicular to X, in Z direction)
+    tickPoints.push(new THREE.Vector3(i, 0.01, -tickLength));
+    tickPoints.push(new THREE.Vector3(i, 0.01, tickLength));
+
+    // Ticks on Z axis (perpendicular to Z, in X direction)
+    tickPoints.push(new THREE.Vector3(-tickLength, 0.01, i));
+    tickPoints.push(new THREE.Vector3(tickLength, 0.01, i));
+
+    // Add labels along positive X axis
+    if (i > 0 && i <= halfSize * 0.8) {
+      const xLabel = createTextSprite(formatTickLabel(i), 0xcc6666);
+      xLabel.position.set(i, 0.1, -labelOffset);
+      xLabel.scale.set(labelSize, labelSize, 1);
+      group.add(xLabel);
+    }
+
+    // Add labels along negative X axis
+    if (i < 0 && i >= -halfSize * 0.8) {
+      const xLabel = createTextSprite(formatTickLabel(i), 0xcc6666);
+      xLabel.position.set(i, 0.1, -labelOffset);
+      xLabel.scale.set(labelSize, labelSize, 1);
+      group.add(xLabel);
+    }
+
+    // Add labels along positive Z axis
+    if (i > 0 && i <= halfSize * 0.8) {
+      const zLabel = createTextSprite(formatTickLabel(i), 0x6666cc);
+      zLabel.position.set(-labelOffset, 0.1, i);
+      zLabel.scale.set(labelSize, labelSize, 1);
+      group.add(zLabel);
+    }
+
+    // Add labels along negative Z axis
+    if (i < 0 && i >= -halfSize * 0.8) {
+      const zLabel = createTextSprite(formatTickLabel(i), 0x6666cc);
+      zLabel.position.set(-labelOffset, 0.1, i);
+      zLabel.scale.set(labelSize, labelSize, 1);
+      group.add(zLabel);
+    }
+  }
+
+  // Add axis name labels
+  const xNameLabel = createTextSprite("X", 0xff4444);
+  xNameLabel.position.set(halfSize * 0.95, 0.1, -labelOffset * 2);
+  xNameLabel.scale.set(labelSize * 1.5, labelSize * 1.5, 1);
+  group.add(xNameLabel);
+
+  const zNameLabel = createTextSprite("Z", 0x4444ff);
+  zNameLabel.position.set(-labelOffset * 2, 0.1, halfSize * 0.95);
+  zNameLabel.scale.set(labelSize * 1.5, labelSize * 1.5, 1);
+  group.add(zNameLabel);
+
+  // Origin label
+  const originLabel = createTextSprite("0", 0x888888);
+  originLabel.position.set(-labelOffset, 0.1, -labelOffset);
+  originLabel.scale.set(labelSize, labelSize, 1);
+  group.add(originLabel);
+
+  const tickGeometry = new THREE.BufferGeometry().setFromPoints(tickPoints);
+  const tickLines = new THREE.LineSegments(tickGeometry, tickMaterial);
+  group.add(tickLines);
+
+  return group;
 }
 
 // Axes helper
@@ -285,16 +499,23 @@ export function Viewport() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshGroupRef = useRef<THREE.Group | null>(null);
   const sketchGroupRef = useRef<THREE.Group | null>(null);
+  const planeGroupRef = useRef<THREE.Group | null>(null);
+  const gridGroupRef = useRef<THREE.Group | null>(null);
+  const lastGridSpacingRef = useRef<number>(0);
+  const lastGridLabelRef = useRef<string>("");
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
   const [occApi, setOccApi] = useState<OccApi | null>(null);
+  const [hoveredPlane, setHoveredPlane] = useState<string | null>(null);
+  const [gridScale, setGridScale] = useState<string>("1cm");
 
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const editorMode = useCadStore((s) => s.editorMode);
+  const createNewSketch = useCadStore((s) => s.createNewSketch);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -350,8 +571,16 @@ export function Viewport() {
     backLight.position.set(-50, 50, -50);
     scene.add(backLight);
 
-    // Grid and axes
-    scene.add(createGrid());
+    // Dynamic grid (will be updated based on camera distance)
+    const initialSpacing = calculateGridSpacing(camera.position.length());
+    const grid = createDynamicGrid(initialSpacing);
+    scene.add(grid);
+    gridGroupRef.current = grid;
+    lastGridSpacingRef.current = initialSpacing.major;
+    lastGridLabelRef.current = initialSpacing.label;
+    setGridScale(initialSpacing.label);
+
+    // Axes helper
     scene.add(createAxes());
 
     // Mesh group for CAD geometry
@@ -364,11 +593,47 @@ export function Viewport() {
     scene.add(sketchGroup);
     sketchGroupRef.current = sketchGroup;
 
+    // Plane group for datum plane selection
+    const planeGroup = new THREE.Group();
+    scene.add(planeGroup);
+    planeGroupRef.current = planeGroup;
+
     // Animation loop
     let frameId: number;
     const animate = () => {
       frameId = requestAnimationFrame(animate);
       controls.update();
+
+      // Update grid based on camera distance
+      const cameraDistance = camera.position.length();
+      const spacing = calculateGridSpacing(cameraDistance);
+
+      // Only regenerate grid if spacing changed significantly
+      if (Math.abs(spacing.major - lastGridSpacingRef.current) > 0.001) {
+        lastGridSpacingRef.current = spacing.major;
+        // Only update React state if label changed to avoid unnecessary re-renders
+        if (spacing.label !== lastGridLabelRef.current) {
+          lastGridLabelRef.current = spacing.label;
+          setGridScale(spacing.label);
+        }
+
+        // Remove old grid
+        if (gridGroupRef.current) {
+          scene.remove(gridGroupRef.current);
+          gridGroupRef.current.traverse((child) => {
+            if (child instanceof THREE.Line || child instanceof THREE.LineSegments) {
+              child.geometry.dispose();
+              (child.material as THREE.Material).dispose();
+            }
+          });
+        }
+
+        // Create new grid
+        const newGrid = createDynamicGrid(spacing);
+        scene.add(newGrid);
+        gridGroupRef.current = newGrid;
+      }
+
       renderer.render(scene, camera);
     };
     animate();
@@ -539,8 +804,7 @@ export function Viewport() {
       }
     }
 
-    // Don't render 3D sketches when in sketch editing mode (2D overlay handles it)
-    if (editorMode === "sketch") return;
+    // Keep rendering 3D sketches even in sketch mode - they stay visible
 
     // Get the maximum operation index to show
     const maxIndex = timelinePosition ?? studio.opOrder.length - 1;
@@ -575,7 +839,131 @@ export function Viewport() {
       const sketchLines = createSketchLines(sketch, plane, 0x4dabf7, 0.5);
       sketchGroup.add(sketchLines);
     }
-  }, [studio, timelinePosition, editorMode]);
+  }, [studio, timelinePosition]);
+
+  // Show/hide datum planes based on editor mode
+  useEffect(() => {
+    if (!planeGroupRef.current) return;
+
+    const planeGroup = planeGroupRef.current;
+
+    // Clear existing planes
+    while (planeGroup.children.length > 0) {
+      const child = planeGroup.children[0];
+      planeGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    }
+
+    // Only show planes in select-plane mode
+    if (editorMode !== "select-plane") return;
+
+    const planeSize = 60;
+
+    // XY Plane (Blue) - at Z=0, normal is +Z
+    const xyGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
+    const xyMaterial = new THREE.MeshBasicMaterial({
+      color: hoveredPlane === "datum_xy" ? 0x6699ff : 0x4477cc,
+      transparent: true,
+      opacity: hoveredPlane === "datum_xy" ? 0.5 : 0.3,
+      side: THREE.DoubleSide,
+    });
+    const xyMesh = new THREE.Mesh(xyGeometry, xyMaterial);
+    xyMesh.rotation.x = -Math.PI / 2; // Rotate to lie flat on XY
+    xyMesh.position.y = 0.01; // Slight offset to avoid z-fighting with grid
+    xyMesh.userData = { planeId: "datum_xy", planeName: "XY Plane" };
+    planeGroup.add(xyMesh);
+
+    // XZ Plane (Green) - at Y=0, normal is +Y
+    const xzGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
+    const xzMaterial = new THREE.MeshBasicMaterial({
+      color: hoveredPlane === "datum_xz" ? 0x66ff66 : 0x44aa44,
+      transparent: true,
+      opacity: hoveredPlane === "datum_xz" ? 0.5 : 0.3,
+      side: THREE.DoubleSide,
+    });
+    const xzMesh = new THREE.Mesh(xzGeometry, xzMaterial);
+    // XZ plane is vertical, facing +Y (rotated to stand up)
+    xzMesh.position.z = 0.01;
+    xzMesh.userData = { planeId: "datum_xz", planeName: "XZ Plane" };
+    planeGroup.add(xzMesh);
+
+    // YZ Plane (Red) - at X=0, normal is +X
+    const yzGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
+    const yzMaterial = new THREE.MeshBasicMaterial({
+      color: hoveredPlane === "datum_yz" ? 0xff6666 : 0xcc4444,
+      transparent: true,
+      opacity: hoveredPlane === "datum_yz" ? 0.5 : 0.3,
+      side: THREE.DoubleSide,
+    });
+    const yzMesh = new THREE.Mesh(yzGeometry, yzMaterial);
+    yzMesh.rotation.y = Math.PI / 2; // Rotate to face +X
+    yzMesh.position.x = 0.01;
+    yzMesh.userData = { planeId: "datum_yz", planeName: "YZ Plane" };
+    planeGroup.add(yzMesh);
+  }, [editorMode, hoveredPlane]);
+
+  // Handle mouse events for plane selection
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (editorMode !== "select-plane") {
+      if (hoveredPlane !== null) setHoveredPlane(null);
+      return;
+    }
+
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    const planeGroup = planeGroupRef.current;
+    if (!container || !camera || !planeGroup) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObjects(planeGroup.children);
+    if (intersects.length > 0) {
+      const planeId = intersects[0].object.userData.planeId;
+      if (planeId && planeId !== hoveredPlane) {
+        setHoveredPlane(planeId);
+      }
+    } else {
+      if (hoveredPlane !== null) setHoveredPlane(null);
+    }
+  }, [editorMode, hoveredPlane]);
+
+  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (editorMode !== "select-plane") return;
+
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    const planeGroup = planeGroupRef.current;
+    if (!container || !camera || !planeGroup) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    const intersects = raycaster.intersectObjects(planeGroup.children);
+    if (intersects.length > 0) {
+      const planeId = intersects[0].object.userData.planeId;
+      if (planeId) {
+        console.log("[Viewport] Clicked plane:", planeId);
+        // Create sketch on the selected plane
+        createNewSketch(planeId);
+      }
+    }
+  }, [editorMode, createNewSketch]);
 
   // View controls
   const handleResetView = useCallback(() => {
@@ -623,7 +1011,15 @@ export function Viewport() {
   }, []);
 
   return (
-    <div ref={containerRef} style={styles.container}>
+    <div
+      ref={containerRef}
+      style={{
+        ...styles.container,
+        cursor: editorMode === "select-plane" ? (hoveredPlane ? "pointer" : "crosshair") : undefined,
+      }}
+      onMouseMove={handleMouseMove}
+      onClick={handleClick}
+    >
       {isOccLoading && (
         <div style={styles.loading}>
           <div style={{ fontSize: 24, marginBottom: 12 }}>⟳</div>
@@ -671,7 +1067,7 @@ export function Viewport() {
 
       {/* Info */}
       <div style={styles.info}>
-        {!isOccLoading && !occError && (
+        {!isOccLoading && !occError && editorMode !== "select-plane" && (
           <>
             <div>Orbit: Left Mouse</div>
             <div>Pan: Right Mouse</div>
@@ -679,6 +1075,48 @@ export function Viewport() {
           </>
         )}
       </div>
+
+      {/* Grid scale indicator */}
+      {!isOccLoading && !occError && (
+        <div style={{
+          position: "absolute",
+          bottom: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          backgroundColor: "rgba(30, 30, 60, 0.8)",
+          color: "#888",
+          padding: "4px 12px",
+          borderRadius: 4,
+          fontSize: 11,
+          fontFamily: "monospace",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span style={{ color: "#666" }}>Grid:</span>
+          <span style={{ color: "#aaa" }}>{gridScale}</span>
+        </div>
+      )}
+
+      {/* Plane selection hint */}
+      {editorMode === "select-plane" && (
+        <div style={{
+          position: "absolute",
+          bottom: 60,
+          left: "50%",
+          transform: "translateX(-50%)",
+          backgroundColor: "rgba(30, 30, 60, 0.9)",
+          color: "#fff",
+          padding: "8px 16px",
+          borderRadius: 4,
+          fontSize: 12,
+          pointerEvents: "none",
+        }}>
+          {hoveredPlane
+            ? `Click to create sketch on ${hoveredPlane === "datum_xy" ? "XY" : hoveredPlane === "datum_xz" ? "XZ" : "YZ"} Plane`
+            : "Click on a plane to create a new sketch"}
+        </div>
+      )}
     </div>
   );
 }

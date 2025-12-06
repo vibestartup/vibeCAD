@@ -39,7 +39,7 @@ import type { Kernel } from "@vibecad/kernel";
 // Store State
 // ============================================================================
 
-export type EditorMode = "object" | "sketch";
+export type EditorMode = "object" | "select-plane" | "sketch";
 
 interface CadState {
   // Document state
@@ -88,6 +88,8 @@ interface CadActions {
 
   // Mode actions
   setEditorMode: (mode: EditorMode) => void;
+  enterPlaneSelectionMode: () => void;
+  cancelPlaneSelection: () => void;
   enterSketchMode: (sketchId: SketchId) => void;
   exitSketchMode: () => void;
 
@@ -214,6 +216,22 @@ export const useCadStore = create<CadStore>((set, get) => ({
   setEditorMode: (mode) => {
     console.log("[CAD] setEditorMode:", mode);
     set({ editorMode: mode });
+  },
+
+  enterPlaneSelectionMode: () => {
+    console.log("[CAD] enterPlaneSelectionMode");
+    set({
+      editorMode: "select-plane",
+      activeTool: "sketch",
+    });
+  },
+
+  cancelPlaneSelection: () => {
+    console.log("[CAD] cancelPlaneSelection");
+    set({
+      editorMode: "object",
+      activeTool: "select",
+    });
   },
 
   enterSketchMode: (sketchId) => {

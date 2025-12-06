@@ -22,7 +22,7 @@ type DrawingState =
   | { type: "arc"; step: "center" | "start" | "end"; center?: Point2D; start?: Point2D };
 
 const styles = {
-  // Active sketch editing mode - full overlay
+  // Active sketch editing mode - transparent overlay on top of 3D viewport
   overlayActive: {
     position: "absolute",
     top: 0,
@@ -32,7 +32,7 @@ const styles = {
     pointerEvents: "auto",
     cursor: "crosshair",
     zIndex: 100,
-    backgroundColor: "rgba(20, 20, 40, 0.95)",
+    // Transparent - let 3D viewport show through
   } as React.CSSProperties,
 
   canvas: {
@@ -118,7 +118,7 @@ export function SketchCanvas() {
 
   // Determine if we're in active sketch editing mode
   const isSketchTool = ["line", "rect", "circle", "arc"].includes(activeTool);
-  const isActiveSketchMode = editorMode === "sketch" && activeSketchId && isSketchTool;
+  const isActiveSketchMode = editorMode === "sketch" && activeSketchId;
 
   // Get the active sketch (for editing mode)
   const activeSketch: Sketch | null = React.useMemo(() => {
@@ -193,64 +193,15 @@ export function SketchCanvas() {
     canvas.height = canvasSize.height * dpr;
     ctx.scale(dpr, dpr);
 
-    // Clear
+    // Clear - canvas is transparent, only draws interaction feedback
     ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
 
     const centerX = canvasSize.width / 2;
     const centerY = canvasSize.height / 2;
 
-    // In active sketch mode, draw full grid and axes
+    // In active sketch mode, only draw interaction feedback
+    // The actual sketch primitives are rendered in 3D by the Viewport
     if (isActiveSketchMode) {
-      // Draw grid
-      ctx.strokeStyle = "#333355";
-      ctx.lineWidth = 0.5;
-      const gridSpacing = GRID_SIZE * SCALE;
-
-      // Vertical lines
-      for (let x = centerX % gridSpacing; x < canvasSize.width; x += gridSpacing) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvasSize.height);
-        ctx.stroke();
-      }
-
-      // Horizontal lines
-      for (let y = centerY % gridSpacing; y < canvasSize.height; y += gridSpacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvasSize.width, y);
-        ctx.stroke();
-      }
-
-      // Draw axes
-      ctx.strokeStyle = "#666688";
-      ctx.lineWidth = 1;
-
-      // X axis
-      ctx.beginPath();
-      ctx.moveTo(0, centerY);
-      ctx.lineTo(canvasSize.width, centerY);
-      ctx.stroke();
-
-      // Y axis
-      ctx.beginPath();
-      ctx.moveTo(centerX, 0);
-      ctx.lineTo(centerX, canvasSize.height);
-      ctx.stroke();
-
-      // Draw origin
-      ctx.fillStyle = "#646cff";
-      ctx.beginPath();
-      ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Draw active sketch primitives (full opacity, thicker lines)
-      if (activeSketch && activeSketch.primitives.size > 0) {
-        for (const [id, prim] of activeSketch.primitives) {
-          drawPrimitive(ctx, prim, activeSketch, sketchToScreen, { opacity: 1.0, lineWidth: 2 });
-        }
-      }
-
       // Draw in-progress shape
       if (drawingState.type !== "idle") {
         ctx.strokeStyle = "#69db7c";

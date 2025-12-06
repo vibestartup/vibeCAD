@@ -177,7 +177,8 @@ export function Toolbar() {
   const setActiveTool = useCadStore((s) => s.setActiveTool);
   const activeSketchId = useCadStore((s) => s.activeSketchId);
   const editorMode = useCadStore((s) => s.editorMode);
-  const createNewSketch = useCadStore((s) => s.createNewSketch);
+  const enterPlaneSelectionMode = useCadStore((s) => s.enterPlaneSelectionMode);
+  const cancelPlaneSelection = useCadStore((s) => s.cancelPlaneSelection);
   const createExtrude = useCadStore((s) => s.createExtrude);
   const exitSketchMode = useCadStore((s) => s.exitSketchMode);
 
@@ -192,8 +193,8 @@ export function Toolbar() {
     console.log("[Toolbar] handleToolClick:", toolId);
     switch (toolId) {
       case "sketch":
-        // Create a new sketch on the XY plane
-        createNewSketch();
+        // Enter plane selection mode - user clicks on a plane to create sketch
+        enterPlaneSelectionMode();
         break;
       case "extrude":
         // Extrude the active sketch if one is selected
@@ -209,7 +210,7 @@ export function Toolbar() {
         setActiveTool(toolId);
         break;
     }
-  }, [activeSketchId, createNewSketch, createExtrude, setActiveTool]);
+  }, [activeSketchId, enterPlaneSelectionMode, createExtrude, setActiveTool]);
 
   // Filter tools based on current mode
   const visibleTools = React.useMemo(() => {
@@ -266,6 +267,18 @@ export function Toolbar() {
       <div style={styles.divider} />
 
       {/* Mode indicator */}
+      {editorMode === "select-plane" && (
+        <div style={{
+          backgroundColor: "#ffa94d",
+          color: "#000",
+          padding: "4px 12px",
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 600,
+        }}>
+          SELECT PLANE
+        </div>
+      )}
       {editorMode === "sketch" && (
         <div style={{
           backgroundColor: "#4dabf7",
@@ -358,6 +371,29 @@ export function Toolbar() {
               />
             ))}
           </div>
+        </>
+      )}
+
+      {/* Cancel Plane Selection button */}
+      {editorMode === "select-plane" && (
+        <>
+          <div style={styles.divider} />
+          <button
+            style={{
+              ...styles.iconButton,
+              backgroundColor: "#ff6b6b",
+              color: "#fff",
+              padding: "4px 12px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+              width: "auto",
+            }}
+            onClick={cancelPlaneSelection}
+            title="Cancel (ESC)"
+          >
+            Cancel
+          </button>
         </>
       )}
 
