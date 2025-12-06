@@ -12,24 +12,27 @@ function nextHandle(): ShapeHandle {
   return ++handleCounter;
 }
 
-// Simple cube mesh for testing
-function createCubeMesh(size = 1): MeshData {
-  const h = size / 2;
+// Create a box mesh with custom dimensions
+function createBoxMesh(width = 1, height = 1, depth = 1, origin: Vec3 = [0, 0, 0]): MeshData {
+  const [ox, oy, oz] = origin;
+  const w = width;
+  const h = height;
+  const d = depth;
 
-  // 8 vertices of a cube
+  // 24 vertices (4 per face for proper normals)
   const positions = new Float32Array([
-    // Front face
-    -h, -h, h, h, -h, h, h, h, h, -h, h, h,
-    // Back face
-    -h, -h, -h, -h, h, -h, h, h, -h, h, -h, -h,
-    // Top face
-    -h, h, -h, -h, h, h, h, h, h, h, h, -h,
-    // Bottom face
-    -h, -h, -h, h, -h, -h, h, -h, h, -h, -h, h,
-    // Right face
-    h, -h, -h, h, h, -h, h, h, h, h, -h, h,
-    // Left face
-    -h, -h, -h, -h, -h, h, -h, h, h, -h, h, -h,
+    // Front face (z = d)
+    ox, oy, oz + d, ox + w, oy, oz + d, ox + w, oy + h, oz + d, ox, oy + h, oz + d,
+    // Back face (z = 0)
+    ox, oy, oz, ox, oy + h, oz, ox + w, oy + h, oz, ox + w, oy, oz,
+    // Top face (y = h)
+    ox, oy + h, oz, ox, oy + h, oz + d, ox + w, oy + h, oz + d, ox + w, oy + h, oz,
+    // Bottom face (y = 0)
+    ox, oy, oz, ox + w, oy, oz, ox + w, oy, oz + d, ox, oy, oz + d,
+    // Right face (x = w)
+    ox + w, oy, oz, ox + w, oy + h, oz, ox + w, oy + h, oz + d, ox + w, oy, oz + d,
+    // Left face (x = 0)
+    ox, oy, oz, ox, oy, oz + d, ox, oy + h, oz + d, ox, oy + h, oz,
   ]);
 
   const normals = new Float32Array([
@@ -195,8 +198,42 @@ export function createOccStub(): OccApi {
     },
 
     // Meshing
-    mesh(_shape: ShapeHandle, _deflection: number): MeshData {
-      return createCubeMesh(10);
+    mesh(shapeHandle: ShapeHandle, _deflection: number): MeshData {
+      const shape = shapes.get(shapeHandle);
+
+      // Try to create a meaningful mesh based on shape type
+      if (shape?.type === "extrude") {
+        const data = shape.data as { face: ShapeHandle; direction: Vec3; depth: number };
+        const faceShape = shapes.get(data.face);
+
+        if (faceShape?.type === "face") {
+          const wireHandle = faceShape.data as ShapeHandle;
+          const wireShape = shapes.get(wireHandle);
+
+          if (wireShape?.type === "polygon") {
+            const points = wireShape.data as Vec3[];
+            // Calculate bounding box of the profile
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            for (const [x, y] of points) {
+              minX = Math.min(minX, x);
+              maxX = Math.max(maxX, x);
+              minY = Math.min(minY, y);
+              maxY = Math.max(maxY, y);
+            }
+
+            const width = maxX - minX;
+            const height = maxY - minY;
+            const depth = data.depth;
+
+            // Create box at the correct origin
+            return createBoxMesh(width, height, depth, [minX, minY, 0]);
+          }
+        }
+      }
+
+      // Default: 100x100x100 cube (10cm x 10cm x 10cm)
+      return createBoxMesh(100, 100, 100, [0, 0, 0]);
     },
 
     // Memory

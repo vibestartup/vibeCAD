@@ -2,11 +2,13 @@
  * Part Studio - contains sketches and operations that define geometry.
  */
 
-import { OpId, PartStudioId, SketchId, SketchPlaneId, newId } from "./id";
+import { OpId, PartStudioId, SketchId, SketchPlaneId, PrimitiveId, newId } from "./id";
 import { Vec3 } from "./math";
-import { SketchPlane, getDatumPlanes } from "./plane";
-import { Sketch } from "./sketch";
-import { Op, TopoRef } from "./op";
+import { SketchPlane, getDatumPlanes, DATUM_XY } from "./plane";
+import { Sketch, createSketch } from "./sketch";
+import { Op, TopoRef, SketchOp, ExtrudeOp } from "./op";
+import { PointPrimitive, LinePrimitive } from "./primitive";
+import { dimLiteral } from "./constraint";
 
 // ============================================================================
 // Mesh Data
@@ -92,6 +94,90 @@ export function createPartStudio(name: string): PartStudio {
     opGraph: new Map(),
     opOrder: [],
   };
+}
+
+/**
+ * Create a part studio with a default 10cm x 10cm x 10cm cube.
+ * The cube is created from a sketch on the XY plane with a square, extruded 100mm.
+ */
+export function createPartStudioWithCube(name: string): PartStudio {
+  const studio = createPartStudio(name);
+
+  // Create 4 corner points for the 10cm x 10cm square (100mm x 100mm)
+  const p1Id = newId("Primitive") as PrimitiveId;
+  const p2Id = newId("Primitive") as PrimitiveId;
+  const p3Id = newId("Primitive") as PrimitiveId;
+  const p4Id = newId("Primitive") as PrimitiveId;
+
+  const p1: PointPrimitive = { id: p1Id, type: "point", x: 0, y: 0, construction: false };
+  const p2: PointPrimitive = { id: p2Id, type: "point", x: 100, y: 0, construction: false };
+  const p3: PointPrimitive = { id: p3Id, type: "point", x: 100, y: 100, construction: false };
+  const p4: PointPrimitive = { id: p4Id, type: "point", x: 0, y: 100, construction: false };
+
+  // Create 4 lines connecting the points
+  const l1Id = newId("Primitive") as PrimitiveId;
+  const l2Id = newId("Primitive") as PrimitiveId;
+  const l3Id = newId("Primitive") as PrimitiveId;
+  const l4Id = newId("Primitive") as PrimitiveId;
+
+  const l1: LinePrimitive = { id: l1Id, type: "line", start: p1Id, end: p2Id, construction: false };
+  const l2: LinePrimitive = { id: l2Id, type: "line", start: p2Id, end: p3Id, construction: false };
+  const l3: LinePrimitive = { id: l3Id, type: "line", start: p3Id, end: p4Id, construction: false };
+  const l4: LinePrimitive = { id: l4Id, type: "line", start: p4Id, end: p1Id, construction: false };
+
+  // Create the sketch on XY plane
+  const sketch = createSketch("Sketch 1", DATUM_XY.id);
+  sketch.primitives.set(p1Id, p1);
+  sketch.primitives.set(p2Id, p2);
+  sketch.primitives.set(p3Id, p3);
+  sketch.primitives.set(p4Id, p4);
+  sketch.primitives.set(l1Id, l1);
+  sketch.primitives.set(l2Id, l2);
+  sketch.primitives.set(l3Id, l3);
+  sketch.primitives.set(l4Id, l4);
+
+  // Set solved positions (since we don't have constraints driving them, they're already solved)
+  sketch.solvedPositions = new Map([
+    [p1Id, [0, 0]],
+    [p2Id, [100, 0]],
+    [p3Id, [100, 100]],
+    [p4Id, [0, 100]],
+  ]);
+  sketch.solveStatus = "ok";
+  sketch.dof = 0;
+
+  studio.sketches.set(sketch.id, sketch);
+
+  // Create sketch operation
+  const sketchOpId = newId("Op") as OpId;
+  const sketchOp: SketchOp = {
+    id: sketchOpId,
+    type: "sketch",
+    name: "Sketch 1",
+    suppressed: false,
+    sketchId: sketch.id,
+    planeRef: DATUM_XY.id,
+  };
+
+  // Create extrude operation (100mm = 10cm depth)
+  const extrudeOpId = newId("Op") as OpId;
+  const extrudeOp: ExtrudeOp = {
+    id: extrudeOpId,
+    type: "extrude",
+    name: "Extrude 1",
+    suppressed: false,
+    sketchId: sketch.id,
+    profiles: [], // Empty means all closed loops
+    direction: "normal",
+    depth: dimLiteral(100),
+  };
+
+  // Add operations to the graph (tree structure - extrude depends on sketch)
+  studio.opGraph.set(sketchOpId, { op: sketchOp, deps: [] });
+  studio.opGraph.set(extrudeOpId, { op: extrudeOp, deps: [sketchOpId] });
+  studio.opOrder = [sketchOpId, extrudeOpId];
+
+  return studio;
 }
 
 /**

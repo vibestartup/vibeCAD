@@ -266,9 +266,9 @@ export function Viewport() {
     })();
   }, []);
 
-  // Create a demo box when OCC is loaded
+  // Build and render geometry from the part studio operations
   useEffect(() => {
-    if (!occApi || !meshGroupRef.current) return;
+    if (!occApi || !meshGroupRef.current || !studio) return;
 
     // Clear existing meshes
     const meshGroup = meshGroupRef.current;
@@ -279,43 +279,99 @@ export function Viewport() {
         child.geometry.dispose();
         (child.material as THREE.Material).dispose();
       }
+      if (child instanceof THREE.LineSegments) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
     }
 
     try {
-      // Create a demo box
-      const points: [number, number, number][] = [
-        [0, 0, 0],
-        [20, 0, 0],
-        [20, 20, 0],
-        [0, 20, 0],
-      ];
+      // Process each operation in order
+      for (const opId of studio.opOrder) {
+        const opNode = studio.opGraph.get(opId);
+        if (!opNode || opNode.op.suppressed) continue;
 
-      const wire = occApi.makePolygon(points);
-      const face = occApi.makeFace(wire);
-      const box = occApi.extrude(face, [0, 0, 1], 15);
+        const op = opNode.op;
 
-      // Mesh the shape
-      const meshData = occApi.mesh(box, 0.5);
+        // Handle extrude operations
+        if (op.type === "extrude") {
+          const sketch = studio.sketches.get(op.sketchId);
+          if (!sketch) continue;
 
-      // Create Three.js mesh
-      const mesh = createMeshFromData(meshData);
-      mesh.position.set(-10, 0, 0); // Center the box
+          // Build profile from sketch lines
+          // Get all lines and build a polygon from them
+          const lines: Array<{ start: string; end: string }> = [];
+          const points: Map<string, [number, number]> = new Map();
 
-      // Add edges
-      const edges = createEdges(mesh.geometry);
-      edges.position.copy(mesh.position);
+          // Collect points and lines from sketch
+          for (const [id, prim] of sketch.primitives) {
+            if (prim.type === "point") {
+              const pos = sketch.solvedPositions?.get(id) || [prim.x, prim.y];
+              points.set(id, pos);
+            } else if (prim.type === "line") {
+              lines.push({ start: prim.start, end: prim.end });
+            }
+          }
 
-      meshGroup.add(mesh);
-      meshGroup.add(edges);
+          // Order the lines into a closed loop
+          if (lines.length < 3) continue;
 
-      // Free OCC shapes
-      occApi.freeShape(wire);
-      occApi.freeShape(face);
-      occApi.freeShape(box);
+          const orderedPoints: [number, number, number][] = [];
+          let currentEnd = lines[0].start;
+
+          for (let i = 0; i < lines.length; i++) {
+            const nextLine = lines.find(
+              (l) => l.start === currentEnd || l.end === currentEnd
+            );
+            if (!nextLine) break;
+
+            if (nextLine.start === currentEnd) {
+              const pos = points.get(nextLine.start);
+              if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+              currentEnd = nextLine.end;
+            } else {
+              const pos = points.get(nextLine.end);
+              if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+              currentEnd = nextLine.start;
+            }
+            lines.splice(lines.indexOf(nextLine), 1);
+            i = -1; // restart the search
+          }
+
+          if (orderedPoints.length < 3) continue;
+
+          // Get extrude depth
+          const depth = op.depth.value;
+          const direction: [number, number, number] =
+            op.direction === "reverse" ? [0, 0, -1] : [0, 0, 1];
+
+          // Create geometry using OCC
+          const wire = occApi.makePolygon(orderedPoints);
+          const face = occApi.makeFace(wire);
+          const solid = occApi.extrude(face, direction, depth);
+
+          // Mesh the shape
+          const meshData = occApi.mesh(solid, 0.5);
+
+          // Create Three.js mesh
+          const mesh = createMeshFromData(meshData);
+
+          // Add edges
+          const edges = createEdges(mesh.geometry);
+
+          meshGroup.add(mesh);
+          meshGroup.add(edges);
+
+          // Free OCC shapes
+          occApi.freeShape(wire);
+          occApi.freeShape(face);
+          occApi.freeShape(solid);
+        }
+      }
     } catch (err) {
-      console.error("Failed to create demo geometry:", err);
+      console.error("Failed to create geometry:", err);
     }
-  }, [occApi]);
+  }, [occApi, studio]);
 
   // View controls
   const handleResetView = useCallback(() => {

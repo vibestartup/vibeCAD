@@ -14,8 +14,7 @@ import type {
   Parameter,
 } from "@vibecad/core";
 import {
-  createDocumentWithStudio,
-  createParamEnv,
+  createDocumentWithCube,
   getDefaultStudio,
   createParam,
 } from "@vibecad/core";
@@ -84,7 +83,8 @@ export type CadStore = CadState & CadActions;
 // ============================================================================
 
 function createInitialState(): CadState {
-  const document = createDocumentWithStudio("Untitled");
+  // Create a document with a default 10cm cube to get users started
+  const document = createDocumentWithCube("Untitled");
   const defaultStudio = getDefaultStudio(document);
 
   return {

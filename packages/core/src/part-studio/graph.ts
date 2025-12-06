@@ -1,11 +1,15 @@
 /**
- * Operation graph - dependency management and topological sorting.
+ * Operation tree - dependency management and topological sorting.
+ *
+ * Note: The op graph is actually a tree (or forest). Each operation depends only
+ * on operations that were created before it. Cycles are structurally impossible
+ * because you can only reference existing operations when creating a new one.
  */
 
 import { OpId, OpNode, Op, getOpDependencies } from "../types";
 
 // ============================================================================
-// Graph Building
+// Tree Building
 // ============================================================================
 
 /**
@@ -19,94 +23,41 @@ export function buildOpNode(op: Op): OpNode {
 }
 
 /**
- * Compute the topological order of operations.
- * Returns operation IDs in evaluation order.
+ * Compute the evaluation order of operations using depth-first traversal.
+ * Since the op structure is a tree, this is a simple DFS post-order traversal.
+ * Returns operation IDs in evaluation order (dependencies before dependents).
  */
 export function buildOpOrder(opGraph: Map<OpId, OpNode>): OpId[] {
   const visited = new Set<OpId>();
-  const visiting = new Set<OpId>();
   const order: OpId[] = [];
 
-  function visit(opId: OpId): boolean {
-    if (visited.has(opId)) return true;
-    if (visiting.has(opId)) return false; // Cycle
-
-    visiting.add(opId);
+  function visit(opId: OpId): void {
+    if (visited.has(opId)) return;
+    visited.add(opId);
 
     const node = opGraph.get(opId);
     if (node) {
+      // Visit all dependencies first
       for (const depId of node.deps) {
-        if (opGraph.has(depId) && !visit(depId)) {
-          return false;
+        if (opGraph.has(depId)) {
+          visit(depId);
         }
       }
     }
 
-    visiting.delete(opId);
-    visited.add(opId);
     order.push(opId);
-    return true;
   }
 
+  // Visit all nodes
   for (const opId of opGraph.keys()) {
-    if (!visit(opId)) {
-      // Cycle detected - return partial order
-      break;
-    }
+    visit(opId);
   }
 
   return order;
 }
 
 // ============================================================================
-// Cycle Detection
-// ============================================================================
-
-/**
- * Detect cycles in the operation graph.
- * Returns the cycle path if found, or null if no cycle exists.
- */
-export function detectCycles(opGraph: Map<OpId, OpNode>): OpId[] | null {
-  const visited = new Set<OpId>();
-  const visiting = new Set<OpId>();
-  const path: OpId[] = [];
-
-  function findCycle(opId: OpId): OpId[] | null {
-    if (visited.has(opId)) return null;
-    if (visiting.has(opId)) {
-      const cycleStart = path.indexOf(opId);
-      return [...path.slice(cycleStart), opId];
-    }
-
-    visiting.add(opId);
-    path.push(opId);
-
-    const node = opGraph.get(opId);
-    if (node) {
-      for (const depId of node.deps) {
-        if (opGraph.has(depId)) {
-          const cycle = findCycle(depId);
-          if (cycle) return cycle;
-        }
-      }
-    }
-
-    path.pop();
-    visiting.delete(opId);
-    visited.add(opId);
-    return null;
-  }
-
-  for (const opId of opGraph.keys()) {
-    const cycle = findCycle(opId);
-    if (cycle) return cycle;
-  }
-
-  return null;
-}
-
-// ============================================================================
-// Graph Operations
+// Tree Operations
 // ============================================================================
 
 /**
@@ -191,8 +142,8 @@ export function getAllDependencies(
 }
 
 /**
- * Check if an operation can be moved to a new position.
- * Returns true if moving wouldn't create a cycle.
+ * Check if an operation can be moved to a new position in the timeline.
+ * The operation must stay after all its dependencies and before all its dependents.
  */
 export function canMoveOp(
   opGraph: Map<OpId, OpNode>,
@@ -203,22 +154,25 @@ export function canMoveOp(
   const node = opGraph.get(opId);
   if (!node) return false;
 
-  // Check that all dependencies come before the new position
+  // Find the range where this op can be placed
+  // It must be after all dependencies
+  let minIndex = 0;
   for (const depId of node.deps) {
     const depIndex = currentOrder.indexOf(depId);
-    if (depIndex >= newIndex) {
-      return false; // Dependency would come after
+    if (depIndex !== -1) {
+      minIndex = Math.max(minIndex, depIndex + 1);
     }
   }
 
-  // Check that all dependents come after the new position
+  // It must be before all dependents
+  let maxIndex = currentOrder.length;
   const dependents = getDependents(opGraph, opId);
   for (const depId of dependents) {
     const depIndex = currentOrder.indexOf(depId);
-    if (depIndex !== -1 && depIndex <= newIndex) {
-      return false; // Dependent would come before
+    if (depIndex !== -1) {
+      maxIndex = Math.min(maxIndex, depIndex);
     }
   }
 
-  return true;
+  return newIndex >= minIndex && newIndex < maxIndex;
 }

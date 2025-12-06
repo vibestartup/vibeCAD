@@ -1,12 +1,14 @@
 /**
- * Part studio module - operation graph and rebuild.
+ * Part studio module - operation tree and rebuild.
+ *
+ * The operation structure is a tree (not a general graph) since each operation
+ * can only depend on operations that were created before it.
  */
 
-// Graph operations
+// Tree operations
 export {
   buildOpNode,
   buildOpOrder,
-  detectCycles,
   addOp,
   removeOp,
   updateOp,

@@ -10,7 +10,7 @@ import {
   newId,
 } from "./id";
 import { ParamEnv, createParamEnv } from "./params";
-import { PartStudio, createPartStudio } from "./part-studio";
+import { PartStudio, createPartStudio, createPartStudioWithCube } from "./part-studio";
 import { Part } from "./part";
 import { Assembly } from "./assembly";
 
@@ -67,11 +67,22 @@ export function createDocument(name: string): Document {
 }
 
 /**
- * Create a document with a default part studio.
+ * Create a document with a default part studio (empty).
  */
 export function createDocumentWithStudio(name: string): Document {
   const doc = createDocument(name);
   const studio = createPartStudio("Part Studio 1");
+  doc.partStudios.set(studio.id, studio);
+  return doc;
+}
+
+/**
+ * Create a document with a default part studio containing a 10cm cube.
+ * This is the default for new users to have something to start with.
+ */
+export function createDocumentWithCube(name: string): Document {
+  const doc = createDocument(name);
+  const studio = createPartStudioWithCube("Part Studio 1");
   doc.partStudios.set(studio.id, studio);
   return doc;
 }
