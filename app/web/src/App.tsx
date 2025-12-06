@@ -1,10 +1,8 @@
-import React from 'react';
-import './styles/app.css';
+import React from "react";
+import { Editor } from "./pages/Editor";
 
 export const App: React.FC = () => {
-  return (
-    <div>
-      <h1>Hello World</h1>
-    </div>
-  );
+  return <Editor />;
 };
+
+export default App;
