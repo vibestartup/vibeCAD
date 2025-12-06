@@ -35,17 +35,6 @@ const styles = {
     backgroundColor: "rgba(20, 20, 40, 0.95)",
   } as React.CSSProperties,
 
-  // Passive display mode - transparent, non-interactive
-  overlayPassive: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
-    pointerEvents: "none",
-    zIndex: 50,
-  } as React.CSSProperties,
-
   canvas: {
     width: "100%",
     height: "100%",
@@ -138,14 +127,6 @@ export function SketchCanvas() {
     if (!studio) return null;
     return studio.sketches.get(activeSketchId) ?? null;
   }, [document, activeStudioId, activeSketchId]);
-
-  // Get all sketches in the studio (for object mode display)
-  const allSketches: Sketch[] = React.useMemo(() => {
-    if (!activeStudioId) return [];
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return [];
-    return Array.from(studio.sketches.values());
-  }, [document, activeStudioId]);
 
   // Convert screen coords to sketch coords (centered origin)
   const screenToSketch = useCallback((screenX: number, screenY: number): Point2D => {
@@ -331,17 +312,8 @@ export function SketchCanvas() {
       ctx.beginPath();
       ctx.arc(cursorScreen.x, cursorScreen.y, 3, 0, Math.PI * 2);
       ctx.fill();
-    } else {
-      // Object mode: draw all sketches with transparent, thin lines
-      for (const sketch of allSketches) {
-        if (sketch.primitives.size > 0) {
-          for (const [id, prim] of sketch.primitives) {
-            drawPrimitive(ctx, prim, sketch, sketchToScreen, { opacity: 0.4, lineWidth: 1 });
-          }
-        }
-      }
     }
-  }, [canvasSize, activeSketch, allSketches, isActiveSketchMode, drawingState, mousePos, sketchToScreen]);
+  }, [canvasSize, activeSketch, isActiveSketchMode, drawingState, mousePos, sketchToScreen]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -439,43 +411,29 @@ export function SketchCanvas() {
     }
   }, [activeSketchId, activeTool, drawingState, mousePos, addLine, addRectangle, addCircle, addArc]);
 
-  // Always show the canvas - but different modes have different interactivity
-  const hasSketchesToShow = allSketches.length > 0 && allSketches.some(s => s.primitives.size > 0);
-
-  // Don't render at all if nothing to show in object mode
-  if (!isActiveSketchMode && !hasSketchesToShow) {
+  // Only render in active sketch editing mode
+  // Object mode sketch rendering is now handled by Viewport in 3D
+  if (!isActiveSketchMode) {
     return null;
   }
 
   // In active sketch mode, render interactive overlay
-  if (isActiveSketchMode) {
-    return (
-      <div
-        ref={containerRef}
-        style={styles.overlayActive}
-        onMouseMove={handleMouseMove}
-        onClick={handleClick}
-      >
-        <canvas ref={canvasRef} style={styles.canvas} />
-
-        <div style={styles.hint}>
-          {getHint(activeTool, drawingState)}
-        </div>
-
-        <div style={styles.coords}>
-          X: {mousePos.x.toFixed(0)}mm, Y: {mousePos.y.toFixed(0)}mm
-        </div>
-      </div>
-    );
-  }
-
-  // In object mode, render passive overlay showing sketch geometry
   return (
     <div
       ref={containerRef}
-      style={styles.overlayPassive}
+      style={styles.overlayActive}
+      onMouseMove={handleMouseMove}
+      onClick={handleClick}
     >
       <canvas ref={canvasRef} style={styles.canvas} />
+
+      <div style={styles.hint}>
+        {getHint(activeTool, drawingState)}
+      </div>
+
+      <div style={styles.coords}>
+        X: {mousePos.x.toFixed(0)}mm, Y: {mousePos.y.toFixed(0)}mm
+      </div>
     </div>
   );
 }

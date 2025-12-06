@@ -8,6 +8,14 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useCadStore } from "../store";
 import { loadOcc, getOcc } from "@vibecad/kernel";
 import type { MeshData, OccApi } from "@vibecad/kernel";
+import {
+  sketch as sketchUtils,
+  getDatumPlanes,
+  DATUM_XY,
+  DATUM_XZ,
+  DATUM_YZ,
+} from "@vibecad/core";
+import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, Vec2, Vec3 } from "@vibecad/core";
 
 const styles = {
   container: {
@@ -143,6 +151,132 @@ function createEdges(geometry: THREE.BufferGeometry): THREE.LineSegments {
   return line;
 }
 
+// Get plane by ID (datum planes or custom)
+function getPlaneById(planeId: SketchPlaneId, customPlanes?: Map<SketchPlaneId, SketchPlane>): SketchPlane | undefined {
+  // Check datum planes first
+  const datumPlanes = getDatumPlanes();
+  if (datumPlanes.has(planeId)) {
+    return datumPlanes.get(planeId);
+  }
+  // Check custom planes
+  if (customPlanes?.has(planeId)) {
+    return customPlanes.get(planeId);
+  }
+  // Default to XY plane
+  return DATUM_XY;
+}
+
+// Convert sketch 2D point to 3D world coordinates using plane
+function sketchPointTo3D(point: Vec2, plane: SketchPlane): THREE.Vector3 {
+  const world = sketchUtils.sketchToWorld(point, plane);
+  return new THREE.Vector3(world[0], world[2], world[1]); // Swap Y/Z for Three.js (Y is up)
+}
+
+// Create 3D line geometry from sketch primitives
+function createSketchLines(
+  sketch: Sketch,
+  plane: SketchPlane,
+  color: number = 0x4dabf7,
+  opacity: number = 0.5
+): THREE.Group {
+  const group = new THREE.Group();
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    linewidth: 1,
+  });
+
+  // Get point position helper
+  const getPointPos = (id: string): Vec2 | undefined => {
+    const solved = sketch.solvedPositions?.get(id as any);
+    if (solved) return solved;
+    const prim = sketch.primitives.get(id as any);
+    if (prim?.type === "point") return [prim.x, prim.y];
+    return undefined;
+  };
+
+  // Draw each primitive
+  for (const [, prim] of sketch.primitives) {
+    if (prim.type === "line") {
+      const startPos = getPointPos(prim.start);
+      const endPos = getPointPos(prim.end);
+      if (startPos && endPos) {
+        const geometry = new THREE.BufferGeometry().setFromPoints([
+          sketchPointTo3D(startPos, plane),
+          sketchPointTo3D(endPos, plane),
+        ]);
+        const line = new THREE.Line(geometry, material);
+        group.add(line);
+      }
+    } else if (prim.type === "circle") {
+      const centerPos = getPointPos(prim.center);
+      if (centerPos) {
+        // Create circle as line segments
+        const segments = 32;
+        const points: THREE.Vector3[] = [];
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const x = centerPos[0] + Math.cos(angle) * prim.radius;
+          const y = centerPos[1] + Math.sin(angle) * prim.radius;
+          points.push(sketchPointTo3D([x, y], plane));
+        }
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, material);
+        group.add(line);
+      }
+    } else if (prim.type === "arc") {
+      const centerPos = getPointPos(prim.center);
+      const startPos = getPointPos(prim.start);
+      const endPos = getPointPos(prim.end);
+      if (centerPos && startPos && endPos) {
+        const dx1 = startPos[0] - centerPos[0];
+        const dy1 = startPos[1] - centerPos[1];
+        const radius = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const startAngle = Math.atan2(dy1, dx1);
+        const dx2 = endPos[0] - centerPos[0];
+        const dy2 = endPos[1] - centerPos[1];
+        const endAngle = Math.atan2(dy2, dx2);
+
+        // Create arc as line segments
+        const segments = 24;
+        const points: THREE.Vector3[] = [];
+        let sweep = endAngle - startAngle;
+        if (prim.clockwise) {
+          if (sweep > 0) sweep -= Math.PI * 2;
+        } else {
+          if (sweep < 0) sweep += Math.PI * 2;
+        }
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const angle = startAngle + sweep * t;
+          const x = centerPos[0] + Math.cos(angle) * radius;
+          const y = centerPos[1] + Math.sin(angle) * radius;
+          points.push(sketchPointTo3D([x, y], plane));
+        }
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, material);
+        group.add(line);
+      }
+    } else if (prim.type === "point") {
+      // Draw points as small circles
+      const pos: Vec2 = [prim.x, prim.y];
+      const worldPos = sketchPointTo3D(pos, plane);
+      const pointGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+      const pointMaterial = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity,
+      });
+      const sphere = new THREE.Mesh(pointGeometry, pointMaterial);
+      sphere.position.copy(worldPos);
+      group.add(sphere);
+    }
+  }
+
+  return group;
+}
+
 export function Viewport() {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -150,6 +284,7 @@ export function Viewport() {
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshGroupRef = useRef<THREE.Group | null>(null);
+  const sketchGroupRef = useRef<THREE.Group | null>(null);
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
@@ -159,6 +294,7 @@ export function Viewport() {
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
   const timelinePosition = useCadStore((s) => s.timelinePosition);
+  const editorMode = useCadStore((s) => s.editorMode);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -222,6 +358,11 @@ export function Viewport() {
     const meshGroup = new THREE.Group();
     scene.add(meshGroup);
     meshGroupRef.current = meshGroup;
+
+    // Sketch group for 3D sketch visualization
+    const sketchGroup = new THREE.Group();
+    scene.add(sketchGroup);
+    sketchGroupRef.current = sketchGroup;
 
     // Animation loop
     let frameId: number;
@@ -378,6 +519,63 @@ export function Viewport() {
       console.error("Failed to create geometry:", err);
     }
   }, [occApi, studio, timelinePosition]);
+
+  // Render sketches in 3D space
+  useEffect(() => {
+    if (!sketchGroupRef.current || !studio) return;
+
+    // Clear existing sketch lines
+    const sketchGroup = sketchGroupRef.current;
+    while (sketchGroup.children.length > 0) {
+      const child = sketchGroup.children[0];
+      sketchGroup.remove(child);
+      if (child instanceof THREE.Line) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    }
+
+    // Don't render 3D sketches when in sketch editing mode (2D overlay handles it)
+    if (editorMode === "sketch") return;
+
+    // Get the maximum operation index to show
+    const maxIndex = timelinePosition ?? studio.opOrder.length - 1;
+
+    // Build a map of sketchId -> operation index for sketch operations
+    const sketchOpIndices = new Map<string, number>();
+    for (let i = 0; i < studio.opOrder.length; i++) {
+      const opId = studio.opOrder[i];
+      const opNode = studio.opGraph.get(opId);
+      if (opNode?.op.type === "sketch") {
+        const sketchOp = opNode.op as SketchOp;
+        sketchOpIndices.set(sketchOp.sketchId, i);
+      }
+    }
+
+    // Render each sketch that's within the timeline position
+    for (const [sketchId, sketch] of studio.sketches) {
+      // Check if this sketch's operation is within the timeline position
+      const sketchIndex = sketchOpIndices.get(sketchId);
+      if (sketchIndex === undefined || sketchIndex > maxIndex) {
+        continue; // Skip sketches beyond the timeline position
+      }
+
+      // Skip if sketch has no primitives
+      if (sketch.primitives.size === 0) continue;
+
+      // Get the plane for this sketch
+      const plane = getPlaneById(sketch.planeId, studio.planes);
+      if (!plane) continue;
+
+      // Create 3D lines for the sketch with transparent style
+      const sketchLines = createSketchLines(sketch, plane, 0x4dabf7, 0.5);
+      sketchGroup.add(sketchLines);
+    }
+  }, [studio, timelinePosition, editorMode]);
 
   // View controls
   const handleResetView = useCallback(() => {
