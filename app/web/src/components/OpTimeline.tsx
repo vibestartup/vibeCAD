@@ -5,7 +5,7 @@
 
 import React from "react";
 import { useCadStore } from "../store";
-import type { Op, OpId } from "@vibecad/core";
+import type { Op, OpId, SketchOp } from "@vibecad/core";
 
 // Operation type icons
 const OP_ICONS: Record<string, string> = {
@@ -186,7 +186,60 @@ const styles = {
     color: "#888",
     marginBottom: 4,
   } as React.CSSProperties,
+
+  contextMenu: {
+    position: "fixed",
+    backgroundColor: "#2a2a4a",
+    border: "1px solid #444",
+    borderRadius: 4,
+    padding: "4px 0",
+    zIndex: 1000,
+    minWidth: 120,
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.3)",
+  } as React.CSSProperties,
+
+  contextMenuItem: {
+    padding: "8px 12px",
+    fontSize: 12,
+    color: "#fff",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } as React.CSSProperties,
+
+  contextMenuItemHover: {
+    backgroundColor: "#3a3a5a",
+  } as React.CSSProperties,
 };
+
+// Context menu item component
+function ContextMenuItem({
+  label,
+  icon,
+  onClick
+}: {
+  label: string;
+  icon?: string;
+  onClick: () => void;
+}) {
+  const [isHovered, setIsHovered] = React.useState(false);
+
+  return (
+    <div
+      style={{
+        ...styles.contextMenuItem,
+        ...(isHovered ? styles.contextMenuItemHover : {}),
+      }}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {icon && <span>{icon}</span>}
+      <span>{label}</span>
+    </div>
+  );
+}
 
 interface OpItemProps {
   op: Op;
@@ -195,9 +248,10 @@ interface OpItemProps {
   isCurrent: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function OpItem({ op, index, isSelected, isCurrent, onClick, onDoubleClick }: OpItemProps) {
+function OpItem({ op, index, isSelected, isCurrent, onClick, onDoubleClick, onContextMenu }: OpItemProps) {
   const [isHovered, setIsHovered] = React.useState(false);
 
   const icon = OP_ICONS[op.type] || "?";
@@ -215,6 +269,7 @@ function OpItem({ op, index, isSelected, isCurrent, onClick, onDoubleClick }: Op
       }}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
@@ -239,6 +294,14 @@ function OpItem({ op, index, isSelected, isCurrent, onClick, onDoubleClick }: Op
   );
 }
 
+// Context menu state
+interface ContextMenuState {
+  visible: boolean;
+  x: number;
+  y: number;
+  op: Op | null;
+}
+
 export function OpTimeline() {
   const activeStudioId = useCadStore((s) => s.activeStudioId);
   const studio = useCadStore((s) =>
@@ -248,6 +311,15 @@ export function OpTimeline() {
   const setSelection = useCadStore((s) => s.setSelection);
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const setTimelinePosition = useCadStore((s) => s.setTimelinePosition);
+  const enterSketchMode = useCadStore((s) => s.enterSketchMode);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = React.useState<ContextMenuState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    op: null,
+  });
 
   const ops = React.useMemo(() => {
     if (!studio) return [];
@@ -263,11 +335,51 @@ export function OpTimeline() {
     setTimelinePosition(index);
   };
 
-  const handleOpDoubleClick = (opId: OpId) => {
-    // Double-click to edit operation
-    console.log("Edit operation:", opId);
-    // TODO: Open edit panel
+  const handleOpDoubleClick = (op: Op) => {
+    // Double-click on sketch to enter sketch mode
+    if (op.type === "sketch") {
+      const sketchOp = op as SketchOp;
+      console.log("[OpTimeline] Double-click to enter sketch mode:", sketchOp.sketchId);
+      enterSketchMode(sketchOp.sketchId);
+    } else {
+      console.log("[OpTimeline] Double-click to edit:", op.id);
+      // TODO: Open edit panel for non-sketch operations
+    }
   };
+
+  const handleContextMenu = (e: React.MouseEvent, op: Op) => {
+    e.preventDefault();
+    setContextMenu({
+      visible: true,
+      x: e.clientX,
+      y: e.clientY,
+      op,
+    });
+  };
+
+  const closeContextMenu = () => {
+    setContextMenu({ visible: false, x: 0, y: 0, op: null });
+  };
+
+  const handleEnterSketchMode = () => {
+    if (contextMenu.op?.type === "sketch") {
+      const sketchOp = contextMenu.op as SketchOp;
+      enterSketchMode(sketchOp.sketchId);
+    }
+    closeContextMenu();
+  };
+
+  // Close context menu when clicking elsewhere
+  React.useEffect(() => {
+    const handleClickOutside = () => {
+      if (contextMenu.visible) {
+        closeContextMenu();
+      }
+    };
+
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [contextMenu.visible]);
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value, 10);
@@ -312,7 +424,8 @@ export function OpTimeline() {
               isSelected={selection.has(op.id)}
               isCurrent={index === currentIndex}
               onClick={() => handleOpClick(op.id, index)}
-              onDoubleClick={() => handleOpDoubleClick(op.id)}
+              onDoubleClick={() => handleOpDoubleClick(op)}
+              onContextMenu={(e) => handleContextMenu(e, op)}
             />
           ))
         )}
@@ -330,6 +443,42 @@ export function OpTimeline() {
             value={currentIndex}
             onChange={handleSliderChange}
             style={styles.slider}
+          />
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu.visible && contextMenu.op && (
+        <div
+          style={{
+            ...styles.contextMenu,
+            left: contextMenu.x,
+            top: contextMenu.y,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {contextMenu.op.type === "sketch" && (
+            <ContextMenuItem
+              label="Edit Sketch"
+              icon="✎"
+              onClick={handleEnterSketchMode}
+            />
+          )}
+          <ContextMenuItem
+            label="Suppress"
+            icon={contextMenu.op.suppressed ? "✓" : "○"}
+            onClick={() => {
+              // TODO: Toggle suppressed state
+              closeContextMenu();
+            }}
+          />
+          <ContextMenuItem
+            label="Delete"
+            icon="×"
+            onClick={() => {
+              // TODO: Delete operation
+              closeContextMenu();
+            }}
           />
         </div>
       )}

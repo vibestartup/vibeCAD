@@ -1,11 +1,12 @@
 /**
  * SketchCanvas - 2D overlay for sketching on the viewport.
  * Handles mouse interactions for drawing lines, rectangles, circles, and arcs.
+ * Also displays sketches in object mode with transparent lines.
  */
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useCadStore } from "../store";
-import type { Sketch, SketchPrimitive, Vec2 } from "@vibecad/core";
+import type { Sketch, SketchPrimitive, Vec2, SketchId } from "@vibecad/core";
 
 interface Point2D {
   x: number;
@@ -21,7 +22,8 @@ type DrawingState =
   | { type: "arc"; step: "center" | "start" | "end"; center?: Point2D; start?: Point2D };
 
 const styles = {
-  overlay: {
+  // Active sketch editing mode - full overlay
+  overlayActive: {
     position: "absolute",
     top: 0,
     left: 0,
@@ -29,8 +31,19 @@ const styles = {
     height: "100%",
     pointerEvents: "auto",
     cursor: "crosshair",
-    zIndex: 100, // Above the 3D viewport
-    backgroundColor: "rgba(20, 20, 40, 0.95)", // Semi-transparent dark background to indicate sketch mode
+    zIndex: 100,
+    backgroundColor: "rgba(20, 20, 40, 0.95)",
+  } as React.CSSProperties,
+
+  // Passive display mode - transparent, non-interactive
+  overlayPassive: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+    zIndex: 50,
   } as React.CSSProperties,
 
   canvas: {
@@ -103,6 +116,7 @@ export function SketchCanvas() {
   const activeStudioId = useCadStore((s) => s.activeStudioId);
   const document = useCadStore((s) => s.document);
   const activeTool = useCadStore((s) => s.activeTool);
+  const editorMode = useCadStore((s) => s.editorMode);
   const addLine = useCadStore((s) => s.addLine);
   const addRectangle = useCadStore((s) => s.addRectangle);
   const addCircle = useCadStore((s) => s.addCircle);
@@ -113,13 +127,25 @@ export function SketchCanvas() {
   const [mousePos, setMousePos] = useState<Point2D>({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
-  // Get the active sketch
-  const sketch: Sketch | null = React.useMemo(() => {
+  // Determine if we're in active sketch editing mode
+  const isSketchTool = ["line", "rect", "circle", "arc"].includes(activeTool);
+  const isActiveSketchMode = editorMode === "sketch" && activeSketchId && isSketchTool;
+
+  // Get the active sketch (for editing mode)
+  const activeSketch: Sketch | null = React.useMemo(() => {
     if (!activeStudioId || !activeSketchId) return null;
     const studio = document.partStudios.get(activeStudioId);
     if (!studio) return null;
     return studio.sketches.get(activeSketchId) ?? null;
   }, [document, activeStudioId, activeSketchId]);
+
+  // Get all sketches in the studio (for object mode display)
+  const allSketches: Sketch[] = React.useMemo(() => {
+    if (!activeStudioId) return [];
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return [];
+    return Array.from(studio.sketches.values());
+  }, [document, activeStudioId]);
 
   // Convert screen coords to sketch coords (centered origin)
   const screenToSketch = useCallback((screenX: number, screenY: number): Point2D => {
@@ -192,123 +218,130 @@ export function SketchCanvas() {
     const centerX = canvasSize.width / 2;
     const centerY = canvasSize.height / 2;
 
-    // Draw grid
-    ctx.strokeStyle = "#333355";
-    ctx.lineWidth = 0.5;
-    const gridSpacing = GRID_SIZE * SCALE;
+    // In active sketch mode, draw full grid and axes
+    if (isActiveSketchMode) {
+      // Draw grid
+      ctx.strokeStyle = "#333355";
+      ctx.lineWidth = 0.5;
+      const gridSpacing = GRID_SIZE * SCALE;
 
-    // Vertical lines
-    for (let x = centerX % gridSpacing; x < canvasSize.width; x += gridSpacing) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvasSize.height);
-      ctx.stroke();
-    }
-
-    // Horizontal lines
-    for (let y = centerY % gridSpacing; y < canvasSize.height; y += gridSpacing) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvasSize.width, y);
-      ctx.stroke();
-    }
-
-    // Draw axes
-    ctx.strokeStyle = "#666688";
-    ctx.lineWidth = 1;
-
-    // X axis
-    ctx.beginPath();
-    ctx.moveTo(0, centerY);
-    ctx.lineTo(canvasSize.width, centerY);
-    ctx.stroke();
-
-    // Y axis
-    ctx.beginPath();
-    ctx.moveTo(centerX, 0);
-    ctx.lineTo(centerX, canvasSize.height);
-    ctx.stroke();
-
-    // Draw origin
-    ctx.fillStyle = "#646cff";
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Draw existing sketch primitives
-    if (sketch && sketch.primitives.size > 0) {
-      console.log("[SketchCanvas] Drawing", sketch.primitives.size, "primitives");
-      ctx.strokeStyle = "#4dabf7";
-      ctx.lineWidth = 2;
-
-      for (const [id, prim] of sketch.primitives) {
-        drawPrimitive(ctx, prim, sketch, sketchToScreen);
+      // Vertical lines
+      for (let x = centerX % gridSpacing; x < canvasSize.width; x += gridSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvasSize.height);
+        ctx.stroke();
       }
-    }
 
-    // Draw in-progress shape
-    if (drawingState.type !== "idle") {
-      ctx.strokeStyle = "#69db7c";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
+      // Horizontal lines
+      for (let y = centerY % gridSpacing; y < canvasSize.height; y += gridSpacing) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvasSize.width, y);
+        ctx.stroke();
+      }
 
-      if (drawingState.type === "line") {
-        const start = sketchToScreen(drawingState.start.x, drawingState.start.y);
-        const end = sketchToScreen(mousePos.x, mousePos.y);
-        ctx.beginPath();
-        ctx.moveTo(start.x, start.y);
-        ctx.lineTo(end.x, end.y);
-        ctx.stroke();
-      } else if (drawingState.type === "rect") {
-        const p1 = sketchToScreen(drawingState.start.x, drawingState.start.y);
-        const p2 = sketchToScreen(mousePos.x, mousePos.y);
-        const x = Math.min(p1.x, p2.x);
-        const y = Math.min(p1.y, p2.y);
-        const w = Math.abs(p2.x - p1.x);
-        const h = Math.abs(p2.y - p1.y);
-        ctx.strokeRect(x, y, w, h);
-      } else if (drawingState.type === "circle") {
-        const center = sketchToScreen(drawingState.center.x, drawingState.center.y);
-        const dx = mousePos.x - drawingState.center.x;
-        const dy = mousePos.y - drawingState.center.y;
-        const radius = Math.sqrt(dx * dx + dy * dy) * SCALE;
-        ctx.beginPath();
-        ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (drawingState.type === "arc" && drawingState.center) {
-        const center = sketchToScreen(drawingState.center.x, drawingState.center.y);
-        if (drawingState.start) {
-          const dx1 = drawingState.start.x - drawingState.center.x;
-          const dy1 = drawingState.start.y - drawingState.center.y;
-          const radius = Math.sqrt(dx1 * dx1 + dy1 * dy1) * SCALE;
-          const startAngle = Math.atan2(-dy1, dx1);
-          const dx2 = mousePos.x - drawingState.center.x;
-          const dy2 = mousePos.y - drawingState.center.y;
-          const endAngle = Math.atan2(-dy2, dx2);
-          ctx.beginPath();
-          ctx.arc(center.x, center.y, radius, startAngle, endAngle);
-          ctx.stroke();
-        } else {
-          // Just show radius line
-          const end = sketchToScreen(mousePos.x, mousePos.y);
-          ctx.beginPath();
-          ctx.moveTo(center.x, center.y);
-          ctx.lineTo(end.x, end.y);
-          ctx.stroke();
+      // Draw axes
+      ctx.strokeStyle = "#666688";
+      ctx.lineWidth = 1;
+
+      // X axis
+      ctx.beginPath();
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(canvasSize.width, centerY);
+      ctx.stroke();
+
+      // Y axis
+      ctx.beginPath();
+      ctx.moveTo(centerX, 0);
+      ctx.lineTo(centerX, canvasSize.height);
+      ctx.stroke();
+
+      // Draw origin
+      ctx.fillStyle = "#646cff";
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw active sketch primitives (full opacity, thicker lines)
+      if (activeSketch && activeSketch.primitives.size > 0) {
+        for (const [id, prim] of activeSketch.primitives) {
+          drawPrimitive(ctx, prim, activeSketch, sketchToScreen, { opacity: 1.0, lineWidth: 2 });
         }
       }
 
-      ctx.setLineDash([]);
+      // Draw in-progress shape
+      if (drawingState.type !== "idle") {
+        ctx.strokeStyle = "#69db7c";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+
+        if (drawingState.type === "line") {
+          const start = sketchToScreen(drawingState.start.x, drawingState.start.y);
+          const end = sketchToScreen(mousePos.x, mousePos.y);
+          ctx.beginPath();
+          ctx.moveTo(start.x, start.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        } else if (drawingState.type === "rect") {
+          const p1 = sketchToScreen(drawingState.start.x, drawingState.start.y);
+          const p2 = sketchToScreen(mousePos.x, mousePos.y);
+          const x = Math.min(p1.x, p2.x);
+          const y = Math.min(p1.y, p2.y);
+          const w = Math.abs(p2.x - p1.x);
+          const h = Math.abs(p2.y - p1.y);
+          ctx.strokeRect(x, y, w, h);
+        } else if (drawingState.type === "circle") {
+          const center = sketchToScreen(drawingState.center.x, drawingState.center.y);
+          const dx = mousePos.x - drawingState.center.x;
+          const dy = mousePos.y - drawingState.center.y;
+          const radius = Math.sqrt(dx * dx + dy * dy) * SCALE;
+          ctx.beginPath();
+          ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (drawingState.type === "arc" && drawingState.center) {
+          const center = sketchToScreen(drawingState.center.x, drawingState.center.y);
+          if (drawingState.start) {
+            const dx1 = drawingState.start.x - drawingState.center.x;
+            const dy1 = drawingState.start.y - drawingState.center.y;
+            const radius = Math.sqrt(dx1 * dx1 + dy1 * dy1) * SCALE;
+            const startAngle = Math.atan2(-dy1, dx1);
+            const dx2 = mousePos.x - drawingState.center.x;
+            const dy2 = mousePos.y - drawingState.center.y;
+            const endAngle = Math.atan2(-dy2, dx2);
+            ctx.beginPath();
+            ctx.arc(center.x, center.y, radius, startAngle, endAngle);
+            ctx.stroke();
+          } else {
+            // Just show radius line
+            const end = sketchToScreen(mousePos.x, mousePos.y);
+            ctx.beginPath();
+            ctx.moveTo(center.x, center.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+          }
+        }
+
+        ctx.setLineDash([]);
+      }
+
+      // Draw cursor point
+      const cursorScreen = sketchToScreen(mousePos.x, mousePos.y);
+      ctx.fillStyle = "#69db7c";
+      ctx.beginPath();
+      ctx.arc(cursorScreen.x, cursorScreen.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Object mode: draw all sketches with transparent, thin lines
+      for (const sketch of allSketches) {
+        if (sketch.primitives.size > 0) {
+          for (const [id, prim] of sketch.primitives) {
+            drawPrimitive(ctx, prim, sketch, sketchToScreen, { opacity: 0.4, lineWidth: 1 });
+          }
+        }
+      }
     }
-
-    // Draw cursor point
-    const cursorScreen = sketchToScreen(mousePos.x, mousePos.y);
-    ctx.fillStyle = "#69db7c";
-    ctx.beginPath();
-    ctx.arc(cursorScreen.x, cursorScreen.y, 3, 0, Math.PI * 2);
-    ctx.fill();
-
-  }, [canvasSize, sketch, drawingState, mousePos, sketchToScreen]);
+  }, [canvasSize, activeSketch, allSketches, isActiveSketchMode, drawingState, mousePos, sketchToScreen]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -406,34 +439,60 @@ export function SketchCanvas() {
     }
   }, [activeSketchId, activeTool, drawingState, mousePos, addLine, addRectangle, addCircle, addArc]);
 
-  // Only show when there's an active sketch and we're in a sketch tool mode
-  const isSketchTool = ["line", "rect", "circle", "arc"].includes(activeTool);
+  // Always show the canvas - but different modes have different interactivity
+  const hasSketchesToShow = allSketches.length > 0 && allSketches.some(s => s.primitives.size > 0);
 
-  if (!activeSketchId || !isSketchTool) {
+  // Don't render at all if nothing to show in object mode
+  if (!isActiveSketchMode && !hasSketchesToShow) {
     return null;
   }
 
-  // Debug: log when canvas is shown
-  console.log("[SketchCanvas] VISIBLE - sketch:", sketch?.name, "primitives:", sketch?.primitives.size);
+  // In active sketch mode, render interactive overlay
+  if (isActiveSketchMode) {
+    return (
+      <div
+        ref={containerRef}
+        style={styles.overlayActive}
+        onMouseMove={handleMouseMove}
+        onClick={handleClick}
+      >
+        <canvas ref={canvasRef} style={styles.canvas} />
 
+        <div style={styles.hint}>
+          {getHint(activeTool, drawingState)}
+        </div>
+
+        <div style={styles.coords}>
+          X: {mousePos.x.toFixed(0)}mm, Y: {mousePos.y.toFixed(0)}mm
+        </div>
+      </div>
+    );
+  }
+
+  // In object mode, render passive overlay showing sketch geometry
   return (
     <div
       ref={containerRef}
-      style={styles.overlay}
-      onMouseMove={handleMouseMove}
-      onClick={handleClick}
+      style={styles.overlayPassive}
     >
       <canvas ref={canvasRef} style={styles.canvas} />
-
-      <div style={styles.hint}>
-        {getHint(activeTool, drawingState)}
-      </div>
-
-      <div style={styles.coords}>
-        X: {mousePos.x.toFixed(0)}mm, Y: {mousePos.y.toFixed(0)}mm
-      </div>
     </div>
   );
+}
+
+// Style options for drawing primitives
+interface DrawStyle {
+  opacity: number;
+  lineWidth: number;
+}
+
+// Helper to apply opacity to a hex color
+function colorWithOpacity(hex: string, opacity: number): string {
+  // Convert hex to rgba
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
 }
 
 // Helper to draw a primitive
@@ -441,7 +500,8 @@ function drawPrimitive(
   ctx: CanvasRenderingContext2D,
   prim: SketchPrimitive,
   sketch: Sketch,
-  sketchToScreen: (x: number, y: number) => Point2D
+  sketchToScreen: (x: number, y: number) => Point2D,
+  style: DrawStyle = { opacity: 1.0, lineWidth: 2 }
 ) {
   const getPos = (id: string): Point2D | null => {
     const solved = sketch.solvedPositions?.get(id as any);
@@ -455,12 +515,17 @@ function drawPrimitive(
     return null;
   };
 
+  const normalColor = colorWithOpacity("#4dabf7", style.opacity);
+  const constructionColor = colorWithOpacity("#888888", style.opacity);
+
+  ctx.lineWidth = style.lineWidth;
+
   switch (prim.type) {
     case "point": {
       const pos = sketchToScreen(prim.x, prim.y);
-      ctx.fillStyle = prim.construction ? "#888" : "#4dabf7";
+      ctx.fillStyle = prim.construction ? constructionColor : normalColor;
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
+      ctx.arc(pos.x, pos.y, Math.max(2, style.lineWidth), 0, Math.PI * 2);
       ctx.fill();
       break;
     }
@@ -468,7 +533,7 @@ function drawPrimitive(
       const start = getPos(prim.start);
       const end = getPos(prim.end);
       if (start && end) {
-        ctx.strokeStyle = prim.construction ? "#888" : "#4dabf7";
+        ctx.strokeStyle = prim.construction ? constructionColor : normalColor;
         ctx.beginPath();
         ctx.moveTo(start.x, start.y);
         ctx.lineTo(end.x, end.y);
@@ -479,7 +544,7 @@ function drawPrimitive(
     case "circle": {
       const center = getPos(prim.center);
       if (center) {
-        ctx.strokeStyle = prim.construction ? "#888" : "#4dabf7";
+        ctx.strokeStyle = prim.construction ? constructionColor : normalColor;
         ctx.beginPath();
         ctx.arc(center.x, center.y, prim.radius * SCALE, 0, Math.PI * 2);
         ctx.stroke();
@@ -507,7 +572,7 @@ function drawPrimitive(
           const dy2 = endSketch[1] - centerSketch[1];
           const endAngle = Math.atan2(-dy2, dx2);
 
-          ctx.strokeStyle = prim.construction ? "#888" : "#4dabf7";
+          ctx.strokeStyle = prim.construction ? constructionColor : normalColor;
           ctx.beginPath();
           ctx.arc(center.x, center.y, radius, startAngle, endAngle, prim.clockwise);
           ctx.stroke();
