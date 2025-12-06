@@ -4,131 +4,8 @@
 
 import React, { useEffect } from "react";
 import { EditorLayout } from "../layouts/EditorLayout";
-import { useCadStore, selectIsRebuilding } from "../store";
-
-// Placeholder components until @vibecad/react is fully integrated
-const Viewport3D = () => (
-  <div
-    style={{
-      width: "100%",
-      height: "100%",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: "#1a1a2e",
-      color: "#666",
-    }}
-  >
-    <div style={{ textAlign: "center" }}>
-      <div style={{ fontSize: 64, marginBottom: 16 }}>&#x1F4D0;</div>
-      <div>3D Viewport</div>
-      <div style={{ fontSize: 12, color: "#444", marginTop: 8 }}>
-        Three.js integration pending
-      </div>
-    </div>
-  </div>
-);
-
-const FeatureTree = () => {
-  const studio = useCadStore((s) => {
-    const id = s.activeStudioId;
-    return id ? s.document.partStudios.get(id) : null;
-  });
-
-  return (
-    <div style={{ padding: 16 }}>
-      <div style={{ fontWeight: 600, marginBottom: 12 }}>
-        {studio?.name ?? "No Studio"}
-      </div>
-      <div style={{ color: "#666", fontSize: 12 }}>
-        {studio?.opOrder.length ?? 0} operations
-      </div>
-    </div>
-  );
-};
-
-const ParamPanel = () => {
-  const params = useCadStore((s) => s.document.params);
-  const paramCount = params.params.size;
-
-  return (
-    <div style={{ padding: 16 }}>
-      <div style={{ fontWeight: 600, marginBottom: 12 }}>Parameters</div>
-      <div style={{ color: "#666", fontSize: 12 }}>{paramCount} parameters</div>
-    </div>
-  );
-};
-
-// ============================================================================
-// Toolbar
-// ============================================================================
-
-function Toolbar() {
-  const canUndo = useCadStore((s) => s.canUndo());
-  const canRedo = useCadStore((s) => s.canRedo());
-  const undo = useCadStore((s) => s.undo);
-  const redo = useCadStore((s) => s.redo);
-  const isRebuilding = useCadStore(selectIsRebuilding);
-
-  const buttonStyle: React.CSSProperties = {
-    padding: "6px 12px",
-    border: "1px solid #333",
-    borderRadius: 4,
-    backgroundColor: "#2d2d4a",
-    color: "#fff",
-    cursor: "pointer",
-    fontSize: 13,
-    marginRight: 8,
-  };
-
-  const disabledStyle: React.CSSProperties = {
-    ...buttonStyle,
-    opacity: 0.5,
-    cursor: "not-allowed",
-  };
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      {/* Logo */}
-      <div
-        style={{
-          fontWeight: 700,
-          fontSize: 16,
-          color: "#646cff",
-          marginRight: 24,
-        }}
-      >
-        vibeCAD
-      </div>
-
-      {/* Undo/Redo */}
-      <button
-        onClick={undo}
-        disabled={!canUndo}
-        style={canUndo ? buttonStyle : disabledStyle}
-        title="Undo (Ctrl+Z)"
-      >
-        ↩️ Undo
-      </button>
-      <button
-        onClick={redo}
-        disabled={!canRedo}
-        style={canRedo ? buttonStyle : disabledStyle}
-        title="Redo (Ctrl+Y)"
-      >
-        ↪️ Redo
-      </button>
-
-      {/* Spacer */}
-      <div style={{ flex: 1 }} />
-
-      {/* Rebuild indicator */}
-      {isRebuilding && (
-        <div style={{ color: "#888", fontSize: 12 }}>Rebuilding...</div>
-      )}
-    </div>
-  );
-}
+import { Toolbar, Viewport, OpTimeline, PropertiesPanel } from "../components";
+import { useCadStore } from "../store";
 
 // ============================================================================
 // Status Bar
@@ -137,21 +14,42 @@ function Toolbar() {
 function StatusBar() {
   const selection = useCadStore((s) => s.selection);
   const rebuildError = useCadStore((s) => s.rebuildError);
+  const isRebuilding = useCadStore((s) => s.isRebuilding);
+
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+      {/* Selection info */}
       <span>
         {selection.size > 0
           ? `${selection.size} selected`
           : "No selection"}
       </span>
 
-      {rebuildError && (
-        <span style={{ color: "#ff6b6b" }}>Error: {rebuildError}</span>
+      {/* Op count */}
+      {studio && (
+        <span style={{ color: "#666" }}>
+          {studio.opOrder.length} operations
+        </span>
       )}
 
+      {/* Rebuild status */}
+      {isRebuilding && (
+        <span style={{ color: "#4dabf7" }}>⟳ Rebuilding...</span>
+      )}
+
+      {/* Error display */}
+      {rebuildError && (
+        <span style={{ color: "#ff6b6b" }}>⚠ {rebuildError}</span>
+      )}
+
+      {/* Spacer */}
       <div style={{ flex: 1 }} />
 
+      {/* Version */}
       <span>vibeCAD v0.0.1</span>
     </div>
   );
@@ -165,14 +63,39 @@ export function Editor() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle if typing in an input
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
-        if (e.key === "z") {
+        if (e.key === "z" && !e.shiftKey) {
           e.preventDefault();
           useCadStore.getState().undo();
         } else if (e.key === "y" || (e.shiftKey && e.key === "z")) {
           e.preventDefault();
           useCadStore.getState().redo();
+        } else if (e.key === "s") {
+          e.preventDefault();
+          console.log("Save (not implemented)");
         }
+      }
+
+      // Delete selected
+      if (e.key === "Delete" || e.key === "Backspace") {
+        const { selection } = useCadStore.getState();
+        if (selection.size > 0) {
+          e.preventDefault();
+          console.log("Delete selection (not implemented)");
+        }
+      }
+
+      // Escape to clear selection
+      if (e.key === "Escape") {
+        useCadStore.getState().setSelection(new Set());
       }
     };
 
@@ -183,9 +106,9 @@ export function Editor() {
   return (
     <EditorLayout
       toolbar={<Toolbar />}
-      leftPanel={<FeatureTree />}
-      rightPanel={<ParamPanel />}
-      viewport={<Viewport3D />}
+      leftPanel={<OpTimeline />}
+      rightPanel={<PropertiesPanel />}
+      viewport={<Viewport />}
       statusBar={<StatusBar />}
     />
   );

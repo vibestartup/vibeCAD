@@ -13,7 +13,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@vibecad/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
-      '@vibecad/kernel-wasm': path.resolve(__dirname, '../../packages/kernel-wasm/src/index.ts'),
+      '@vibecad/kernel': path.resolve(__dirname, '../../packages/kernel/src/index.ts'),
     },
   },
   server: {

@@ -8,13 +8,19 @@ import type {
   PartStudioId,
   SketchId,
   ParamEnv,
+  OpId,
+  Op,
+  ParamId,
+  Parameter,
 } from "@vibecad/core";
 import {
   createDocumentWithStudio,
   createParamEnv,
   getDefaultStudio,
+  createParam,
 } from "@vibecad/core";
 import { history, HistoryState, createHistory, pushState, undo, redo } from "@vibecad/core";
+import { params } from "@vibecad/core";
 import type { Kernel } from "@vibecad/kernel";
 
 // ============================================================================
@@ -61,6 +67,14 @@ interface CadActions {
   // Rebuild
   setKernel: (kernel: Kernel) => void;
   rebuild: () => Promise<void>;
+
+  // Operations
+  updateOp: (opId: OpId, updates: Partial<Op>) => void;
+
+  // Parameters
+  addParam: (name: string, value: number, unit?: string) => void;
+  updateParam: (paramId: ParamId, updates: Partial<Parameter>) => void;
+  removeParam: (paramId: ParamId) => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -197,6 +211,76 @@ export const useCadStore = create<CadStore>((set, get) => ({
         rebuildError: e instanceof Error ? e.message : String(e),
       });
     }
+  },
+
+  // Operations
+  updateOp: (opId, updates) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return;
+
+    const opNode = studio.opGraph.get(opId);
+    if (!opNode) return;
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(opId, { ...opNode, op: { ...opNode.op, ...updates } as Op });
+
+    const newStudio = { ...studio, opGraph: newOpGraph };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+  },
+
+  // Parameters
+  addParam: (name, value, unit) => {
+    const { document, historyState } = get();
+    const param = createParam(name, value, unit);
+    const newParams = params.addParam(document.params, param);
+    const newDoc = { ...document, params: newParams };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+  },
+
+  updateParam: (paramId, updates) => {
+    const { document, historyState } = get();
+    const existingParam = document.params.params.get(paramId);
+    if (!existingParam) return;
+
+    const newParamsMap = new Map(document.params.params);
+    newParamsMap.set(paramId, { ...existingParam, ...updates });
+
+    const newParams: ParamEnv = {
+      ...document.params,
+      params: newParamsMap,
+    };
+
+    // Re-evaluate if expression changed
+    const evaluatedParams = params.evaluateParams(newParams);
+
+    const newDoc = { ...document, params: evaluatedParams };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+  },
+
+  removeParam: (paramId) => {
+    const { document, historyState } = get();
+    const newParams = params.removeParam(document.params, paramId);
+    const newDoc = { ...document, params: newParams };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
   },
 }));
 
