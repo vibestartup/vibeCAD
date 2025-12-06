@@ -650,6 +650,7 @@ export function Viewport() {
   const lastGridSpacingRef = useRef<number>(0);
   const previewGroupRef = useRef<THREE.Group | null>(null);
   const cursorPointRef = useRef<THREE.Mesh | null>(null);
+  const faceHighlightRef = useRef<THREE.Mesh | null>(null);
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
@@ -668,6 +669,11 @@ export function Viewport() {
   const sketchMousePos = useCadStore((s) => s.sketchMousePos);
   const sketchDrawingState = useCadStore((s) => s.sketchDrawingState);
   const gridSnappingEnabled = useCadStore((s) => s.gridSnappingEnabled);
+  const faceSelectionTarget = useCadStore((s) => s.faceSelectionTarget);
+  const setPendingExtrudeSketch = useCadStore((s) => s.setPendingExtrudeSketch);
+  const setPendingExtrudeBodyFace = useCadStore((s) => s.setPendingExtrudeBodyFace);
+  const hoveredFace = useCadStore((s) => s.hoveredFace);
+  const setHoveredFace = useCadStore((s) => s.setHoveredFace);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -964,9 +970,14 @@ export function Viewport() {
 
           // Create Three.js mesh
           const mesh = createMeshFromData(meshData);
+          // Add userData to identify this mesh's operation
+          mesh.userData.opId = opId;
+          mesh.userData.opType = op.type;
+          mesh.userData.isBody = true;
 
           // Add edges
           const edges = createEdges(mesh.geometry);
+          edges.userData.opId = opId;
 
           meshGroup.add(mesh);
           meshGroup.add(edges);
@@ -1035,11 +1046,99 @@ export function Viewport() {
       const plane = getPlaneById(sketch.planeId, studio.planes);
       if (!plane) continue;
 
+      // Determine color and opacity based on hover state
+      const isHovered = hoveredFace?.type === "sketch" && hoveredFace.sketchId === sketchId;
+      const color = isHovered ? 0x69db7c : 0x4dabf7;
+      const opacity = isHovered ? 0.9 : 0.5;
+
       // Create 3D lines for the sketch with transparent style
-      const sketchLines = createSketchLines(sketch, plane, 0x4dabf7, 0.5);
+      const sketchLines = createSketchLines(sketch, plane, color, opacity);
+      // Add userData so we can identify this sketch on click
+      sketchLines.userData.sketchId = sketchId;
+      sketchLines.userData.isSketch = true;
       sketchGroup.add(sketchLines);
     }
-  }, [studio, timelinePosition]);
+  }, [studio, timelinePosition, hoveredFace]);
+
+  // Update body face highlight
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const meshGroup = meshGroupRef.current;
+
+    // Remove existing highlight
+    if (faceHighlightRef.current) {
+      scene?.remove(faceHighlightRef.current);
+      faceHighlightRef.current.geometry.dispose();
+      (faceHighlightRef.current.material as THREE.Material).dispose();
+      faceHighlightRef.current = null;
+    }
+
+    // Only show highlight in face selection mode for body faces
+    if (editorMode !== "select-face" || !hoveredFace || hoveredFace.type !== "body-face") {
+      return;
+    }
+
+    if (!meshGroup || !scene) return;
+
+    // Find the mesh with the matching opId
+    const bodyMeshes: THREE.Mesh[] = [];
+    meshGroup.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.userData.isBody) {
+        bodyMeshes.push(obj);
+      }
+    });
+
+    const targetMesh = bodyMeshes.find((m) => m.userData.opId === hoveredFace.opId);
+    if (!targetMesh) return;
+
+    const geometry = targetMesh.geometry as THREE.BufferGeometry;
+    const position = geometry.getAttribute("position");
+    const index = geometry.getIndex();
+
+    if (!position) return;
+
+    // Get the triangle vertices for the hovered face
+    const faceIndex = hoveredFace.faceIndex;
+    let i0: number, i1: number, i2: number;
+
+    if (index) {
+      i0 = index.getX(faceIndex * 3);
+      i1 = index.getX(faceIndex * 3 + 1);
+      i2 = index.getX(faceIndex * 3 + 2);
+    } else {
+      i0 = faceIndex * 3;
+      i1 = faceIndex * 3 + 1;
+      i2 = faceIndex * 3 + 2;
+    }
+
+    // Create a highlight triangle
+    const highlightGeo = new THREE.BufferGeometry();
+    const vertices = new Float32Array([
+      position.getX(i0), position.getY(i0), position.getZ(i0),
+      position.getX(i1), position.getY(i1), position.getZ(i1),
+      position.getX(i2), position.getY(i2), position.getZ(i2),
+    ]);
+    highlightGeo.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+
+    const highlightMat = new THREE.MeshBasicMaterial({
+      color: 0x69db7c,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    });
+
+    const highlightMesh = new THREE.Mesh(highlightGeo, highlightMat);
+    // Copy transform from target mesh
+    highlightMesh.position.copy(targetMesh.position);
+    highlightMesh.rotation.copy(targetMesh.rotation);
+    highlightMesh.scale.copy(targetMesh.scale);
+    highlightMesh.renderOrder = 999;
+
+    scene.add(highlightMesh);
+    faceHighlightRef.current = highlightMesh;
+  }, [editorMode, hoveredFace]);
 
   // Update sketch preview and cursor point
   useEffect(() => {
@@ -1357,9 +1456,79 @@ export function Viewport() {
       return;
     }
 
-    // Clear sketch mouse pos and hovered plane in other modes
+    // Handle face/sketch selection mode - detect hover over sketches and body faces
+    if (editorMode === "select-face") {
+      const sketchGroup = sketchGroupRef.current;
+      const meshGroup = meshGroupRef.current;
+
+      // First, check for body face intersections (they're in front of sketches)
+      if (meshGroup) {
+        const bodyMeshes: THREE.Mesh[] = [];
+        meshGroup.traverse((obj) => {
+          if (obj instanceof THREE.Mesh && obj.userData.isBody) {
+            bodyMeshes.push(obj);
+          }
+        });
+
+        const bodyIntersects = raycaster.intersectObjects(bodyMeshes, false);
+        if (bodyIntersects.length > 0) {
+          const hit = bodyIntersects[0];
+          const opId = hit.object.userData.opId;
+          const faceIndex = hit.faceIndex ?? -1;
+
+          if (opId && faceIndex >= 0) {
+            const newHover = { type: "body-face" as const, opId, faceIndex };
+            if (hoveredFace?.type !== "body-face" ||
+                hoveredFace.opId !== opId ||
+                hoveredFace.faceIndex !== faceIndex) {
+              setHoveredFace(newHover);
+            }
+            return;
+          }
+        }
+      }
+
+      // Then check for sketch intersections
+      if (sketchGroup && faceSelectionTarget?.type === "extrude-profile") {
+        const allSketchObjects: THREE.Object3D[] = [];
+        sketchGroup.traverse((obj) => {
+          if (obj.userData.isSketch || obj.parent?.userData.isSketch) {
+            allSketchObjects.push(obj);
+          }
+        });
+
+        const intersects = raycaster.intersectObjects(allSketchObjects, true);
+        if (intersects.length > 0) {
+          let sketchId: string | null = null;
+          let obj: THREE.Object3D | null = intersects[0].object;
+          while (obj && !sketchId) {
+            if (obj.userData.sketchId) {
+              sketchId = obj.userData.sketchId;
+            }
+            obj = obj.parent;
+          }
+
+          if (sketchId) {
+            const newHover = { type: "sketch" as const, sketchId };
+            if (hoveredFace?.type !== "sketch" || hoveredFace.sketchId !== sketchId) {
+              setHoveredFace(newHover);
+            }
+            return;
+          }
+        }
+      }
+
+      // No intersection - clear hover
+      if (hoveredFace !== null) {
+        setHoveredFace(null);
+      }
+      return;
+    }
+
+    // Clear sketch mouse pos and hovered plane/face in other modes
     if (hoveredPlane !== null) setHoveredPlane(null);
-  }, [editorMode, hoveredPlane, activeSketchPlane, setSketchMousePos]);
+    if (hoveredFace !== null) setHoveredFace(null);
+  }, [editorMode, hoveredPlane, hoveredFace, activeSketchPlane, setSketchMousePos, faceSelectionTarget, setHoveredFace]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // Handle sketch mode clicks
@@ -1394,7 +1563,21 @@ export function Viewport() {
         }
       }
     }
-  }, [editorMode, createNewSketch, handleSketchClick]);
+
+    // Handle face/sketch selection mode - use hoveredFace for click
+    if (editorMode === "select-face" && faceSelectionTarget && hoveredFace) {
+      // For extrude-profile, we want to select sketch faces or body faces
+      if (faceSelectionTarget.type === "extrude-profile") {
+        if (hoveredFace.type === "sketch") {
+          console.log("[Viewport] Selected sketch for extrude:", hoveredFace.sketchId);
+          setPendingExtrudeSketch(hoveredFace.sketchId);
+        } else if (hoveredFace.type === "body-face") {
+          console.log("[Viewport] Selected body face for extrude:", hoveredFace.opId, "face", hoveredFace.faceIndex);
+          setPendingExtrudeBodyFace({ opId: hoveredFace.opId, faceIndex: hoveredFace.faceIndex });
+        }
+      }
+    }
+  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, hoveredFace]);
 
   // View controls
   const handleResetView = useCallback(() => {
@@ -1441,12 +1624,23 @@ export function Viewport() {
     }
   }, []);
 
+  // Determine cursor style based on mode
+  const cursorStyle = React.useMemo(() => {
+    if (editorMode === "select-plane") {
+      return hoveredPlane ? "pointer" : "crosshair";
+    }
+    if (editorMode === "select-face") {
+      return hoveredFace ? "pointer" : "crosshair";
+    }
+    return undefined;
+  }, [editorMode, hoveredPlane, hoveredFace]);
+
   return (
     <div
       ref={containerRef}
       style={{
         ...styles.container,
-        cursor: editorMode === "select-plane" ? (hoveredPlane ? "pointer" : "crosshair") : undefined,
+        cursor: cursorStyle,
       }}
       onMouseMove={handleMouseMove}
       onClick={handleClick}

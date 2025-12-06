@@ -100,6 +100,8 @@ async function evalOp(op: Op, ctx: EvalContext): Promise<OpResult | null> {
       return evalSketchOp(op, ctx);
     case "extrude":
       return evalExtrudeOp(op, ctx);
+    case "faceExtrude":
+      return evalFaceExtrudeOp(op, ctx);
     case "revolve":
       return evalRevolveOp(op, ctx);
     case "boolean":
@@ -181,6 +183,52 @@ async function evalExtrudeOp(
     shape = ctx.occ.fuse(pos, neg);
   } else {
     shape = ctx.occ.extrude(face, direction, depth);
+  }
+
+  return buildOpResult(op.id, shape, ctx.occ);
+}
+
+/**
+ * Evaluate a face extrude operation.
+ * Extrudes from an existing face of a body.
+ */
+async function evalFaceExtrudeOp(
+  op: Extract<Op, { type: "faceExtrude" }>,
+  ctx: EvalContext
+): Promise<OpResult | null> {
+  // Get the source operation result
+  const sourceResult = ctx.results.get(op.faceRef.opId);
+  if (!sourceResult) throw new Error(`Source operation not found: ${op.faceRef.opId}`);
+
+  // Get the face from the source shape
+  const faces = ctx.occ.getFaces(sourceResult.shapeHandle);
+  if (op.faceRef.index >= faces.length) {
+    throw new Error(`Face index ${op.faceRef.index} out of bounds (${faces.length} faces)`);
+  }
+
+  const faceHandle = faces[op.faceRef.index];
+
+  // Get face normal for direction
+  const faceNormal = ctx.occ.faceNormal(faceHandle);
+  const [nx, ny, nz] = faceNormal;
+
+  let direction: [number, number, number] = [nx, ny, nz];
+  if (op.direction === "reverse") {
+    direction = [-nx, -ny, -nz];
+  }
+
+  // Get depth
+  const depth = evalDimValue(op.depth, ctx.params);
+
+  // Extrude the face
+  let shape: number;
+  if (op.direction === "symmetric") {
+    const half = depth / 2;
+    const pos = ctx.occ.extrude(faceHandle, faceNormal, half);
+    const neg = ctx.occ.extrude(faceHandle, [-nx, -ny, -nz], half);
+    shape = ctx.occ.fuse(pos, neg);
+  } else {
+    shape = ctx.occ.extrude(faceHandle, direction, depth);
   }
 
   return buildOpResult(op.id, shape, ctx.occ);

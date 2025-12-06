@@ -4,7 +4,7 @@
 
 import React from "react";
 import { useCadStore } from "../store";
-import type { Op, Parameter, ParamId } from "@vibecad/core";
+import type { Op, Parameter, ParamId, SketchId } from "@vibecad/core";
 
 const styles = {
   container: {
@@ -177,9 +177,345 @@ const styles = {
     fontSize: 12,
     width: "100%",
   } as React.CSSProperties,
+
+  // Face selector styles
+  faceSelector: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } as React.CSSProperties,
+
+  faceSelectorButton: {
+    flex: 1,
+    padding: "8px 12px",
+    border: "1px solid #444",
+    borderRadius: 4,
+    backgroundColor: "#252545",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 12,
+    textAlign: "left",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    transition: "border-color 0.15s, background-color 0.15s",
+  } as React.CSSProperties,
+
+  faceSelectorButtonListening: {
+    borderColor: "#da77f2",
+    backgroundColor: "#3a2a4a",
+    color: "#fff",
+  } as React.CSSProperties,
+
+  faceSelectorButtonSelected: {
+    borderColor: "#69db7c",
+    color: "#69db7c",
+  } as React.CSSProperties,
+
+  faceSelectorIcon: {
+    width: 16,
+    height: 16,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  } as React.CSSProperties,
+
+  // Pending extrude panel styles
+  pendingPanel: {
+    backgroundColor: "#252545",
+    border: "1px solid #646cff",
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  } as React.CSSProperties,
+
+  pendingPanelTitle: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#fff",
+    marginBottom: 16,
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  } as React.CSSProperties,
+
+  buttonRow: {
+    display: "flex",
+    gap: 8,
+    marginTop: 16,
+  } as React.CSSProperties,
+
+  primaryButton: {
+    flex: 1,
+    padding: "8px 16px",
+    border: "none",
+    borderRadius: 4,
+    backgroundColor: "#646cff",
+    color: "#fff",
+    cursor: "pointer",
+    fontSize: 12,
+    fontWeight: 600,
+  } as React.CSSProperties,
+
+  primaryButtonDisabled: {
+    backgroundColor: "#444",
+    cursor: "not-allowed",
+    opacity: 0.6,
+  } as React.CSSProperties,
+
+  secondaryButton: {
+    flex: 1,
+    padding: "8px 16px",
+    border: "1px solid #444",
+    borderRadius: 4,
+    backgroundColor: "transparent",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 12,
+  } as React.CSSProperties,
 };
 
 type TabId = "properties" | "parameters";
+
+// ============================================================================
+// Face/Sketch Selector Component
+// ============================================================================
+
+interface FaceSelectorProps {
+  label: string;
+  value: string | null;
+  targetType: "extrude-profile" | "extrude-face" | "sketch-plane";
+  onClear?: () => void;
+}
+
+function FaceSelector({ label, value, targetType, onClear }: FaceSelectorProps) {
+  const faceSelectionTarget = useCadStore((s) => s.faceSelectionTarget);
+  const enterFaceSelectionMode = useCadStore((s) => s.enterFaceSelectionMode);
+  const exitFaceSelectionMode = useCadStore((s) => s.exitFaceSelectionMode);
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+
+  const isListening = faceSelectionTarget?.type === targetType;
+
+  // Get display name for selected sketch
+  const displayName = React.useMemo(() => {
+    if (!value || !studio) return null;
+    const sketch = studio.sketches.get(value as SketchId);
+    if (sketch) {
+      // Find the op that references this sketch
+      for (const [, node] of studio.opGraph) {
+        if (node.op.type === "sketch" && (node.op as any).sketchId === value) {
+          return node.op.name;
+        }
+      }
+      return `Sketch ${value.slice(0, 8)}`;
+    }
+    return null;
+  }, [value, studio]);
+
+  const handleClick = () => {
+    if (isListening) {
+      exitFaceSelectionMode();
+    } else {
+      enterFaceSelectionMode({ type: targetType });
+    }
+  };
+
+  const handleClear = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onClear) onClear();
+  };
+
+  return (
+    <div style={styles.field}>
+      <label style={styles.fieldLabel}>{label}</label>
+      <div style={styles.faceSelector}>
+        <button
+          style={{
+            ...styles.faceSelectorButton,
+            ...(isListening ? styles.faceSelectorButtonListening : {}),
+            ...(value && !isListening ? styles.faceSelectorButtonSelected : {}),
+          }}
+          onClick={handleClick}
+        >
+          <span style={styles.faceSelectorIcon}>
+            {isListening ? "◉" : value ? "✓" : "◎"}
+          </span>
+          <span style={{ flex: 1 }}>
+            {isListening
+              ? "Click a sketch in viewport..."
+              : value && displayName
+              ? displayName
+              : "Select sketch profile"}
+          </span>
+          {value && !isListening && onClear && (
+            <span
+              onClick={handleClear}
+              style={{ opacity: 0.6, cursor: "pointer" }}
+            >
+              ×
+            </span>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Pending Extrude Panel
+// ============================================================================
+
+function PendingExtrudePanel() {
+  const pendingExtrude = useCadStore((s) => s.pendingExtrude);
+  const setPendingExtrudeSketch = useCadStore((s) => s.setPendingExtrudeSketch);
+  const setPendingExtrudeBodyFace = useCadStore((s) => s.setPendingExtrudeBodyFace);
+  const setPendingExtrudeDepth = useCadStore((s) => s.setPendingExtrudeDepth);
+  const setPendingExtrudeDirection = useCadStore((s) => s.setPendingExtrudeDirection);
+  const confirmExtrude = useCadStore((s) => s.confirmExtrude);
+  const cancelExtrude = useCadStore((s) => s.cancelExtrude);
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+
+  const [depthValue, setDepthValue] = React.useState(
+    pendingExtrude?.depth?.toString() ?? "10"
+  );
+
+  // Sync depth value when pending extrude changes
+  React.useEffect(() => {
+    if (pendingExtrude?.depth !== undefined) {
+      setDepthValue(pendingExtrude.depth.toString());
+    }
+  }, [pendingExtrude?.depth]);
+
+  // Get display name for body face
+  const bodyFaceDisplayName = React.useMemo(() => {
+    if (!pendingExtrude?.bodyFace || !studio) return null;
+    const op = studio.opGraph.get(pendingExtrude.bodyFace.opId as any);
+    if (op) {
+      return `${op.op.name} - Face ${pendingExtrude.bodyFace.faceIndex + 1}`;
+    }
+    return `Face ${pendingExtrude.bodyFace.faceIndex + 1}`;
+  }, [pendingExtrude?.bodyFace, studio]);
+
+  if (!pendingExtrude) return null;
+
+  const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setDepthValue(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0) {
+      setPendingExtrudeDepth(num);
+    }
+  };
+
+  const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPendingExtrudeDirection(e.target.value as "normal" | "reverse" | "symmetric");
+  };
+
+  const handleConfirm = () => {
+    const num = parseFloat(depthValue);
+    if (!isNaN(num) && num > 0) {
+      setPendingExtrudeDepth(num);
+    }
+    confirmExtrude();
+  };
+
+  const handleClearSketch = () => {
+    setPendingExtrudeSketch(null);
+  };
+
+  const handleClearBodyFace = () => {
+    setPendingExtrudeBodyFace(null);
+  };
+
+  // Can confirm if we have either a sketch or a body face selected
+  const hasSource = pendingExtrude.sketchId || pendingExtrude.bodyFace;
+  const canConfirm = hasSource && parseFloat(depthValue) > 0;
+
+  return (
+    <div style={styles.pendingPanel}>
+      <div style={styles.pendingPanelTitle}>
+        <span>⏶</span>
+        <span>New Extrude</span>
+      </div>
+
+      {/* Show sketch selector if no body face selected */}
+      {!pendingExtrude.bodyFace && (
+        <FaceSelector
+          label="Profile (Sketch or Face)"
+          value={pendingExtrude.sketchId}
+          targetType="extrude-profile"
+          onClear={handleClearSketch}
+        />
+      )}
+
+      {/* Show body face info if selected */}
+      {pendingExtrude.bodyFace && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Selected Face</label>
+          <div style={{
+            ...styles.faceSelectorButton,
+            ...styles.faceSelectorButtonSelected,
+          }}>
+            <span style={styles.faceSelectorIcon}>✓</span>
+            <span style={{ flex: 1 }}>{bodyFaceDisplayName}</span>
+            <span
+              onClick={handleClearBodyFace}
+              style={{ opacity: 0.6, cursor: "pointer" }}
+            >
+              ×
+            </span>
+          </div>
+        </div>
+      )}
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Direction</label>
+        <select
+          style={styles.select}
+          value={pendingExtrude.direction}
+          onChange={handleDirectionChange}
+        >
+          <option value="normal">Normal (Up)</option>
+          <option value="reverse">Reverse (Down)</option>
+          <option value="symmetric">Symmetric (Both)</option>
+        </select>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Depth (mm)</label>
+        <input
+          type="number"
+          value={depthValue}
+          onChange={handleDepthChange}
+          style={styles.input}
+          placeholder="e.g., 10"
+          min={0}
+          step={1}
+        />
+      </div>
+
+      <div style={styles.buttonRow}>
+        <button style={styles.secondaryButton} onClick={cancelExtrude}>
+          Cancel
+        </button>
+        <button
+          style={{
+            ...styles.primaryButton,
+            ...(canConfirm ? {} : styles.primaryButtonDisabled),
+          }}
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+        >
+          Create Extrude
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ============================================================================
 // Operation Properties Tab
@@ -410,6 +746,7 @@ function ParameterRow({ param, onUpdate, onDelete }: ParameterRowProps) {
 export function PropertiesPanel() {
   const [activeTab, setActiveTab] = React.useState<TabId>("properties");
   const selection = useCadStore((s) => s.selection);
+  const pendingExtrude = useCadStore((s) => s.pendingExtrude);
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
@@ -445,10 +782,13 @@ export function PropertiesPanel() {
       </div>
 
       <div style={styles.content}>
+        {/* Show pending extrude panel at top when active */}
+        {pendingExtrude && <PendingExtrudePanel />}
+
         {activeTab === "properties" ? (
           selectedOp ? (
             <OpProperties op={selectedOp} />
-          ) : (
+          ) : pendingExtrude ? null : (
             <div style={styles.emptyState}>
               Select an operation to view its properties.
             </div>

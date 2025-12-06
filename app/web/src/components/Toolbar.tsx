@@ -189,6 +189,11 @@ export function Toolbar() {
   const isRebuilding = useCadStore(selectIsRebuilding);
   const gridSnappingEnabled = useCadStore((s) => s.gridSnappingEnabled);
   const toggleGridSnapping = useCadStore((s) => s.toggleGridSnapping);
+  const startExtrude = useCadStore((s) => s.startExtrude);
+  const cancelExtrude = useCadStore((s) => s.cancelExtrude);
+  const pendingExtrude = useCadStore((s) => s.pendingExtrude);
+  const faceSelectionTarget = useCadStore((s) => s.faceSelectionTarget);
+  const exitFaceSelectionMode = useCadStore((s) => s.exitFaceSelectionMode);
 
   // Handle tool click - some tools trigger immediate actions
   const handleToolClick = React.useCallback((toolId: string) => {
@@ -199,20 +204,14 @@ export function Toolbar() {
         enterPlaneSelectionMode();
         break;
       case "extrude":
-        // Extrude the active sketch if one is selected
-        if (activeSketchId) {
-          createExtrude(activeSketchId, 100);
-          setActiveTool("select");
-        } else {
-          console.log("Select a sketch to extrude");
-          setActiveTool(toolId);
-        }
+        // Start the extrude workflow
+        startExtrude();
         break;
       default:
         setActiveTool(toolId);
         break;
     }
-  }, [activeSketchId, enterPlaneSelectionMode, createExtrude, setActiveTool]);
+  }, [enterPlaneSelectionMode, startExtrude, setActiveTool]);
 
   // Filter tools based on current mode
   const visibleTools = React.useMemo(() => {
@@ -279,6 +278,18 @@ export function Toolbar() {
           fontWeight: 600,
         }}>
           SELECT PLANE
+        </div>
+      )}
+      {editorMode === "select-face" && (
+        <div style={{
+          backgroundColor: "#da77f2",
+          color: "#000",
+          padding: "4px 12px",
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 600,
+        }}>
+          {faceSelectionTarget?.type === "extrude-profile" ? "SELECT SKETCH" : "SELECT FACE"}
         </div>
       )}
       {editorMode === "sketch" && (
@@ -392,6 +403,35 @@ export function Toolbar() {
               width: "auto",
             }}
             onClick={cancelPlaneSelection}
+            title="Cancel (ESC)"
+          >
+            Cancel
+          </button>
+        </>
+      )}
+
+      {/* Face Selection Mode controls */}
+      {editorMode === "select-face" && (
+        <>
+          <div style={styles.divider} />
+          <button
+            style={{
+              ...styles.iconButton,
+              backgroundColor: "#ff6b6b",
+              color: "#fff",
+              padding: "4px 12px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+              width: "auto",
+            }}
+            onClick={() => {
+              if (pendingExtrude) {
+                cancelExtrude();
+              } else {
+                exitFaceSelectionMode();
+              }
+            }}
             title="Cancel (ESC)"
           >
             Cancel

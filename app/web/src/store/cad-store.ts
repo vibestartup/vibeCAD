@@ -39,7 +39,19 @@ import type { Kernel } from "@vibecad/kernel";
 // Store State
 // ============================================================================
 
-export type EditorMode = "object" | "select-plane" | "sketch";
+export type EditorMode = "object" | "select-plane" | "sketch" | "select-face";
+
+// Face selection target - what operation is requesting the face
+export type FaceSelectionTarget =
+  | { type: "sketch-plane" }  // Selecting a plane for a new sketch
+  | { type: "extrude-profile"; opId?: string }  // Selecting a sketch profile for extrude
+  | { type: "extrude-face"; opId?: string };  // Selecting a face for face extrude
+
+// Selected face reference
+export type SelectedFace =
+  | { type: "datum-plane"; planeId: string }
+  | { type: "sketch-profile"; sketchId: string }
+  | { type: "body-face"; bodyId: string; faceIndex: number };
 
 interface CadState {
   // Document state
@@ -80,6 +92,28 @@ interface CadState {
 
   // Grid snapping for sketch mode
   gridSnappingEnabled: boolean;
+
+  // Face selection state
+  faceSelectionTarget: FaceSelectionTarget | null;
+  selectedFace: SelectedFace | null;
+
+  // Pending extrude (when user clicks extrude before selecting a profile)
+  pendingExtrude: {
+    sketchId: string | null;
+    bodyFace: { opId: string; faceIndex: number } | null;
+    depth: number;
+    direction: "normal" | "reverse" | "symmetric";
+  } | null;
+
+  // Hovered face for face selection mode
+  hoveredFace: {
+    type: "sketch";
+    sketchId: string;
+  } | {
+    type: "body-face";
+    opId: string;
+    faceIndex: number;
+  } | null;
 }
 
 interface CadActions {
@@ -129,7 +163,8 @@ interface CadActions {
 
   // Sketch/Operation creation
   createNewSketch: (planeId?: SketchPlaneId) => SketchId | null;
-  createExtrude: (sketchId: SketchId, depth?: number) => OpId | null;
+  createExtrude: (sketchId: SketchId, depth?: number, direction?: "normal" | "reverse" | "symmetric") => OpId | null;
+  createExtrudeFromFace: (opId: string, faceIndex: number, depth?: number, direction?: "normal" | "reverse" | "symmetric") => OpId | null;
 
   // Sketch primitive editing
   addPoint: (x: number, y: number) => PrimitiveId | null;
@@ -148,6 +183,23 @@ interface CadActions {
 
   // Grid snapping toggle
   toggleGridSnapping: () => void;
+
+  // Face selection actions
+  enterFaceSelectionMode: (target: FaceSelectionTarget) => void;
+  exitFaceSelectionMode: () => void;
+  selectFace: (face: SelectedFace) => void;
+
+  // Extrude workflow
+  startExtrude: () => void;
+  setPendingExtrudeSketch: (sketchId: string | null) => void;
+  setPendingExtrudeBodyFace: (bodyFace: { opId: string; faceIndex: number } | null) => void;
+  setPendingExtrudeDepth: (depth: number) => void;
+  setPendingExtrudeDirection: (direction: "normal" | "reverse" | "symmetric") => void;
+  confirmExtrude: () => void;
+  cancelExtrude: () => void;
+
+  // Hover state for face selection
+  setHoveredFace: (face: CadState["hoveredFace"]) => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -176,6 +228,10 @@ function createInitialState(): CadState {
     sketchMousePos: null,
     sketchDrawingState: { type: "idle" },
     gridSnappingEnabled: true,
+    faceSelectionTarget: null,
+    selectedFace: null,
+    pendingExtrude: null,
+    hoveredFace: null,
   };
 }
 
@@ -522,7 +578,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
     return sketch.id;
   },
 
-  createExtrude: (sketchId, depth = 100) => {
+  createExtrude: (sketchId, depth = 100, direction = "normal") => {
     const { document, activeStudioId, historyState } = get();
     if (!activeStudioId) return null;
 
@@ -550,7 +606,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
       suppressed: false,
       sketchId: sketchId,
       profiles: [], // Empty means all closed loops
-      direction: "normal",
+      direction: direction,
       depth: dimLiteral(depth),
     };
 
@@ -581,6 +637,62 @@ export const useCadStore = create<CadStore>((set, get) => ({
     });
 
     return extrudeOpId;
+  },
+
+  createExtrudeFromFace: (opId, faceIndex, depth = 100, direction = "normal") => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    // Verify the source operation exists
+    const sourceOp = studio.opGraph.get(opId as OpId);
+    if (!sourceOp) return null;
+
+    // Create the face extrude operation
+    const faceExtrudeOpId = newId("Op") as OpId;
+    const faceExtrudeOp = {
+      id: faceExtrudeOpId,
+      type: "faceExtrude" as const,
+      name: `Face Extrude from ${sourceOp.op.name}`,
+      suppressed: false,
+      faceRef: {
+        opId: opId as OpId,
+        subType: "face" as const,
+        index: faceIndex,
+      },
+      direction: direction,
+      depth: dimLiteral(depth),
+    };
+
+    // Update studio
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(faceExtrudeOpId, {
+      op: faceExtrudeOp,
+      deps: [opId as OpId],
+    });
+
+    const newOpOrder = [...studio.opOrder, faceExtrudeOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return faceExtrudeOpId;
   },
 
   // Sketch primitive editing
@@ -1015,6 +1127,149 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   toggleGridSnapping: () => {
     set((state) => ({ gridSnappingEnabled: !state.gridSnappingEnabled }));
+  },
+
+  // Face selection actions
+  enterFaceSelectionMode: (target) => {
+    set({
+      editorMode: "select-face",
+      faceSelectionTarget: target,
+      selectedFace: null,
+    });
+  },
+
+  exitFaceSelectionMode: () => {
+    set({
+      editorMode: "object",
+      faceSelectionTarget: null,
+      selectedFace: null,
+    });
+  },
+
+  selectFace: (face) => {
+    const { faceSelectionTarget, pendingExtrude } = get();
+
+    // If selecting for sketch plane
+    if (faceSelectionTarget?.type === "sketch-plane") {
+      if (face.type === "datum-plane") {
+        // Create sketch on this plane
+        const createNewSketch = get().createNewSketch;
+        createNewSketch(face.planeId as any);
+      }
+      set({
+        editorMode: "object",
+        faceSelectionTarget: null,
+        selectedFace: null,
+      });
+      return;
+    }
+
+    // If selecting for extrude profile
+    if (faceSelectionTarget?.type === "extrude-profile") {
+      if (face.type === "sketch-profile") {
+        set({
+          selectedFace: face,
+          pendingExtrude: pendingExtrude
+            ? { ...pendingExtrude, sketchId: face.sketchId, bodyFace: null }
+            : { sketchId: face.sketchId, bodyFace: null, depth: 10, direction: "normal" },
+          editorMode: "object",
+          faceSelectionTarget: null,
+        });
+      }
+      return;
+    }
+
+    // Default: just store the selected face
+    set({ selectedFace: face });
+  },
+
+  // Extrude workflow
+  startExtrude: () => {
+    const { activeSketchId } = get();
+    // If a sketch is already selected, use it
+    if (activeSketchId) {
+      set({
+        pendingExtrude: { sketchId: activeSketchId, bodyFace: null, depth: 10, direction: "normal" },
+        activeTool: "extrude",
+      });
+    } else {
+      // Enter face selection mode to pick a sketch profile or body face
+      set({
+        pendingExtrude: { sketchId: null, bodyFace: null, depth: 10, direction: "normal" },
+        activeTool: "extrude",
+        editorMode: "select-face",
+        faceSelectionTarget: { type: "extrude-profile" },
+      });
+    }
+  },
+
+  setPendingExtrudeSketch: (sketchId) => {
+    const { pendingExtrude } = get();
+    if (pendingExtrude) {
+      // Clear body face when setting sketch
+      set({ pendingExtrude: { ...pendingExtrude, sketchId, bodyFace: null } });
+    }
+  },
+
+  setPendingExtrudeBodyFace: (bodyFace) => {
+    const { pendingExtrude } = get();
+    if (pendingExtrude) {
+      // Clear sketch when setting body face
+      set({
+        pendingExtrude: { ...pendingExtrude, bodyFace, sketchId: null },
+        editorMode: "object",
+        faceSelectionTarget: null,
+      });
+    }
+  },
+
+  setPendingExtrudeDepth: (depth) => {
+    const { pendingExtrude } = get();
+    if (pendingExtrude) {
+      set({ pendingExtrude: { ...pendingExtrude, depth } });
+    }
+  },
+
+  setPendingExtrudeDirection: (direction) => {
+    const { pendingExtrude } = get();
+    if (pendingExtrude) {
+      set({ pendingExtrude: { ...pendingExtrude, direction } });
+    }
+  },
+
+  confirmExtrude: () => {
+    const { pendingExtrude, createExtrude, createExtrudeFromFace } = get();
+    if (pendingExtrude?.sketchId) {
+      createExtrude(pendingExtrude.sketchId as any, pendingExtrude.depth, pendingExtrude.direction);
+    } else if (pendingExtrude?.bodyFace) {
+      createExtrudeFromFace(
+        pendingExtrude.bodyFace.opId,
+        pendingExtrude.bodyFace.faceIndex,
+        pendingExtrude.depth,
+        pendingExtrude.direction
+      );
+    }
+    set({
+      pendingExtrude: null,
+      activeTool: "select",
+      selectedFace: null,
+      hoveredFace: null,
+    });
+  },
+
+  cancelExtrude: () => {
+    set({
+      pendingExtrude: null,
+      activeTool: "select",
+      editorMode: "object",
+      faceSelectionTarget: null,
+      selectedFace: null,
+      hoveredFace: null,
+    });
+  },
+
+  setHoveredFace: (face) => {
+    set({ hoveredFace: face });
   },
 }));
 

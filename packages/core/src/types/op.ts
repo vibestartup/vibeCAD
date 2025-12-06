@@ -98,7 +98,16 @@ export interface LoftOp extends OpBase {
   guideSketchIds?: SketchId[];
 }
 
-export type PrimaryOp = ExtrudeOp | RevolveOp | SweepOp | LoftOp;
+/** Extrude from an existing face of a body */
+export interface FaceExtrudeOp extends OpBase {
+  type: "faceExtrude";
+  /** Reference to the source face */
+  faceRef: TopoRef;
+  direction: ExtrudeDirection;
+  depth: DimValue;
+}
+
+export type PrimaryOp = ExtrudeOp | RevolveOp | SweepOp | LoftOp | FaceExtrudeOp;
 
 // ============================================================================
 // Secondary Operations (Solid -> Solid)
@@ -181,7 +190,11 @@ export function isSketchOp(op: Op): op is SketchOp {
 }
 
 export function isPrimaryOp(op: Op): op is PrimaryOp {
-  return ["extrude", "revolve", "sweep", "loft"].includes(op.type);
+  return ["extrude", "revolve", "sweep", "loft", "faceExtrude"].includes(op.type);
+}
+
+export function isFaceExtrudeOp(op: Op): op is FaceExtrudeOp {
+  return op.type === "faceExtrude";
 }
 
 export function isSecondaryOp(op: Op): op is SecondaryOp {
@@ -254,6 +267,10 @@ export function getOpDependencies(op: Op): OpId[] {
       if (typeof op.axis === "object" && "opId" in op.axis) {
         deps.push(op.axis.opId);
       }
+      break;
+
+    case "faceExtrude":
+      deps.push(op.faceRef.opId);
       break;
   }
 
