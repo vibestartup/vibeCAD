@@ -15,6 +15,12 @@ import type {
   Parameter,
   SketchOp,
   ExtrudeOp,
+  PrimitiveId,
+  PointPrimitive,
+  LinePrimitive,
+  CirclePrimitive,
+  ArcPrimitive,
+  Sketch,
 } from "@vibecad/core";
 import {
   createDocumentWithCube,
@@ -33,6 +39,8 @@ import type { Kernel } from "@vibecad/kernel";
 // Store State
 // ============================================================================
 
+export type EditorMode = "object" | "sketch";
+
 interface CadState {
   // Document state
   document: Document;
@@ -42,6 +50,9 @@ interface CadState {
   activeStudioId: PartStudioId | null;
   activeSketchId: SketchId | null;
   selection: Set<string>;
+
+  // Editor mode
+  editorMode: EditorMode;
 
   // Timeline state - which operation index to evaluate up to (null = all)
   timelinePosition: number | null;
@@ -75,6 +86,11 @@ interface CadActions {
   // Tool actions
   setActiveTool: (tool: string) => void;
 
+  // Mode actions
+  setEditorMode: (mode: EditorMode) => void;
+  enterSketchMode: (sketchId: SketchId) => void;
+  exitSketchMode: () => void;
+
   // History actions
   pushHistory: () => void;
   undo: () => void;
@@ -97,6 +113,14 @@ interface CadActions {
   // Sketch/Operation creation
   createNewSketch: (planeId?: SketchPlaneId) => SketchId | null;
   createExtrude: (sketchId: SketchId, depth?: number) => OpId | null;
+
+  // Sketch primitive editing
+  addPoint: (x: number, y: number) => PrimitiveId | null;
+  addLine: (startX: number, startY: number, endX: number, endY: number) => PrimitiveId | null;
+  addCircle: (centerX: number, centerY: number, radius: number) => PrimitiveId | null;
+  addRectangle: (x1: number, y1: number, x2: number, y2: number) => PrimitiveId | null;
+  addArc: (centerX: number, centerY: number, startX: number, startY: number, endX: number, endY: number, clockwise?: boolean) => PrimitiveId | null;
+  finishSketch: () => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -116,6 +140,7 @@ function createInitialState(): CadState {
     activeStudioId: defaultStudio?.id ?? null,
     activeSketchId: null,
     selection: new Set(),
+    editorMode: "object" as EditorMode,
     timelinePosition: null, // null = show all operations
     activeTool: "select",
     isRebuilding: false,
@@ -181,7 +206,32 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   // Tool actions
   setActiveTool: (tool) => {
+    console.log("[CAD] setActiveTool:", tool);
     set({ activeTool: tool });
+  },
+
+  // Mode actions
+  setEditorMode: (mode) => {
+    console.log("[CAD] setEditorMode:", mode);
+    set({ editorMode: mode });
+  },
+
+  enterSketchMode: (sketchId) => {
+    console.log("[CAD] enterSketchMode:", sketchId);
+    set({
+      editorMode: "sketch",
+      activeSketchId: sketchId,
+      activeTool: "line",
+    });
+  },
+
+  exitSketchMode: () => {
+    console.log("[CAD] exitSketchMode");
+    set({
+      editorMode: "object",
+      activeSketchId: null,
+      activeTool: "select",
+    });
   },
 
   // History actions
@@ -365,10 +415,14 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newDoc = { ...document, partStudios: newPartStudios };
 
+    console.log("[CAD] createNewSketch:", sketch.id, sketch.name);
+
     set({
       document: newDoc,
       historyState: pushState(historyState, newDoc),
       activeSketchId: sketch.id,
+      editorMode: "sketch",
+      activeTool: "line",
       timelinePosition: null, // Show all ops
     });
 
@@ -434,6 +488,353 @@ export const useCadStore = create<CadStore>((set, get) => ({
     });
 
     return extrudeOpId;
+  },
+
+  // Sketch primitive editing
+  addPoint: (x, y) => {
+    const { document, activeStudioId, activeSketchId, historyState } = get();
+    if (!activeStudioId || !activeSketchId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return null;
+
+    const pointId = newId("Primitive") as PrimitiveId;
+    const point: PointPrimitive = {
+      id: pointId,
+      type: "point",
+      x,
+      y,
+      construction: false,
+    };
+
+    const newPrimitives = new Map(sketch.primitives);
+    newPrimitives.set(pointId, point);
+
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    newSolvedPositions.set(pointId, [x, y]);
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = { ...studio, sketches: newSketches };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+
+    return pointId;
+  },
+
+  addLine: (startX, startY, endX, endY) => {
+    console.log("[CAD] addLine:", { startX, startY, endX, endY });
+    const { document, activeStudioId, activeSketchId, historyState } = get();
+    if (!activeStudioId || !activeSketchId) {
+      console.log("[CAD] addLine failed: no active studio or sketch", { activeStudioId, activeSketchId });
+      return null;
+    }
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) {
+      console.log("[CAD] addLine failed: studio not found");
+      return null;
+    }
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) {
+      console.log("[CAD] addLine failed: sketch not found");
+      return null;
+    }
+
+    // Create start and end points
+    const startPointId = newId("Primitive") as PrimitiveId;
+    const endPointId = newId("Primitive") as PrimitiveId;
+    const lineId = newId("Primitive") as PrimitiveId;
+
+    const startPoint: PointPrimitive = {
+      id: startPointId,
+      type: "point",
+      x: startX,
+      y: startY,
+      construction: false,
+    };
+
+    const endPoint: PointPrimitive = {
+      id: endPointId,
+      type: "point",
+      x: endX,
+      y: endY,
+      construction: false,
+    };
+
+    const line: LinePrimitive = {
+      id: lineId,
+      type: "line",
+      start: startPointId,
+      end: endPointId,
+      construction: false,
+    };
+
+    const newPrimitives = new Map(sketch.primitives);
+    newPrimitives.set(startPointId, startPoint);
+    newPrimitives.set(endPointId, endPoint);
+    newPrimitives.set(lineId, line);
+
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    newSolvedPositions.set(startPointId, [startX, startY]);
+    newSolvedPositions.set(endPointId, [endX, endY]);
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = { ...studio, sketches: newSketches };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+
+    console.log("[CAD] addLine SUCCESS:", lineId, "sketch now has", newPrimitives.size, "primitives");
+    return lineId;
+  },
+
+  addCircle: (centerX, centerY, radius) => {
+    console.log("[CAD] addCircle:", { centerX, centerY, radius });
+    const { document, activeStudioId, activeSketchId, historyState } = get();
+    if (!activeStudioId || !activeSketchId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return null;
+
+    const centerPointId = newId("Primitive") as PrimitiveId;
+    const circleId = newId("Primitive") as PrimitiveId;
+
+    const centerPoint: PointPrimitive = {
+      id: centerPointId,
+      type: "point",
+      x: centerX,
+      y: centerY,
+      construction: false,
+    };
+
+    const circle: CirclePrimitive = {
+      id: circleId,
+      type: "circle",
+      center: centerPointId,
+      radius,
+      construction: false,
+    };
+
+    const newPrimitives = new Map(sketch.primitives);
+    newPrimitives.set(centerPointId, centerPoint);
+    newPrimitives.set(circleId, circle);
+
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    newSolvedPositions.set(centerPointId, [centerX, centerY]);
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = { ...studio, sketches: newSketches };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+
+    return circleId;
+  },
+
+  addRectangle: (x1, y1, x2, y2) => {
+    const { document, activeStudioId, activeSketchId, historyState } = get();
+    if (!activeStudioId || !activeSketchId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return null;
+
+    // Create 4 corner points
+    const p1Id = newId("Primitive") as PrimitiveId;
+    const p2Id = newId("Primitive") as PrimitiveId;
+    const p3Id = newId("Primitive") as PrimitiveId;
+    const p4Id = newId("Primitive") as PrimitiveId;
+
+    const p1: PointPrimitive = { id: p1Id, type: "point", x: x1, y: y1, construction: false };
+    const p2: PointPrimitive = { id: p2Id, type: "point", x: x2, y: y1, construction: false };
+    const p3: PointPrimitive = { id: p3Id, type: "point", x: x2, y: y2, construction: false };
+    const p4: PointPrimitive = { id: p4Id, type: "point", x: x1, y: y2, construction: false };
+
+    // Create 4 lines connecting the points
+    const l1Id = newId("Primitive") as PrimitiveId;
+    const l2Id = newId("Primitive") as PrimitiveId;
+    const l3Id = newId("Primitive") as PrimitiveId;
+    const l4Id = newId("Primitive") as PrimitiveId;
+
+    const l1: LinePrimitive = { id: l1Id, type: "line", start: p1Id, end: p2Id, construction: false };
+    const l2: LinePrimitive = { id: l2Id, type: "line", start: p2Id, end: p3Id, construction: false };
+    const l3: LinePrimitive = { id: l3Id, type: "line", start: p3Id, end: p4Id, construction: false };
+    const l4: LinePrimitive = { id: l4Id, type: "line", start: p4Id, end: p1Id, construction: false };
+
+    const newPrimitives = new Map(sketch.primitives);
+    newPrimitives.set(p1Id, p1);
+    newPrimitives.set(p2Id, p2);
+    newPrimitives.set(p3Id, p3);
+    newPrimitives.set(p4Id, p4);
+    newPrimitives.set(l1Id, l1);
+    newPrimitives.set(l2Id, l2);
+    newPrimitives.set(l3Id, l3);
+    newPrimitives.set(l4Id, l4);
+
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    newSolvedPositions.set(p1Id, [x1, y1]);
+    newSolvedPositions.set(p2Id, [x2, y1]);
+    newSolvedPositions.set(p3Id, [x2, y2]);
+    newSolvedPositions.set(p4Id, [x1, y2]);
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = { ...studio, sketches: newSketches };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+
+    return l1Id; // Return first line as reference
+  },
+
+  addArc: (centerX, centerY, startX, startY, endX, endY, clockwise = false) => {
+    const { document, activeStudioId, activeSketchId, historyState } = get();
+    if (!activeStudioId || !activeSketchId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return null;
+
+    const centerPointId = newId("Primitive") as PrimitiveId;
+    const startPointId = newId("Primitive") as PrimitiveId;
+    const endPointId = newId("Primitive") as PrimitiveId;
+    const arcId = newId("Primitive") as PrimitiveId;
+
+    const centerPoint: PointPrimitive = {
+      id: centerPointId,
+      type: "point",
+      x: centerX,
+      y: centerY,
+      construction: false,
+    };
+
+    const startPoint: PointPrimitive = {
+      id: startPointId,
+      type: "point",
+      x: startX,
+      y: startY,
+      construction: false,
+    };
+
+    const endPoint: PointPrimitive = {
+      id: endPointId,
+      type: "point",
+      x: endX,
+      y: endY,
+      construction: false,
+    };
+
+    const arc: ArcPrimitive = {
+      id: arcId,
+      type: "arc",
+      center: centerPointId,
+      start: startPointId,
+      end: endPointId,
+      clockwise,
+      construction: false,
+    };
+
+    const newPrimitives = new Map(sketch.primitives);
+    newPrimitives.set(centerPointId, centerPoint);
+    newPrimitives.set(startPointId, startPoint);
+    newPrimitives.set(endPointId, endPoint);
+    newPrimitives.set(arcId, arc);
+
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    newSolvedPositions.set(centerPointId, [centerX, centerY]);
+    newSolvedPositions.set(startPointId, [startX, startY]);
+    newSolvedPositions.set(endPointId, [endX, endY]);
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = { ...studio, sketches: newSketches };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+    });
+
+    return arcId;
+  },
+
+  finishSketch: () => {
+    const { activeSketchId } = get();
+    if (activeSketchId) {
+      set({ activeSketchId: null, activeTool: "select" });
+    }
   },
 }));
 

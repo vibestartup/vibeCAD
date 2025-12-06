@@ -4,7 +4,7 @@
 
 import React, { useEffect } from "react";
 import { EditorLayout } from "../layouts/EditorLayout";
-import { Toolbar, Viewport, OpTimeline, PropertiesPanel } from "../components";
+import { Toolbar, Viewport, OpTimeline, PropertiesPanel, SketchCanvas } from "../components";
 import { useCadStore } from "../store";
 
 // ============================================================================
@@ -108,7 +108,12 @@ export function Editor() {
       toolbar={<Toolbar />}
       leftPanel={<OpTimeline />}
       rightPanel={<PropertiesPanel />}
-      viewport={<Viewport />}
+      viewport={
+        <>
+          <Viewport />
+          <SketchCanvas />
+        </>
+      }
       statusBar={<StatusBar />}
     />
   );

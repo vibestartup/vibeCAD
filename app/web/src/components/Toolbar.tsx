@@ -6,7 +6,10 @@ import React from "react";
 import { useCadStore, selectIsRebuilding } from "../store";
 
 // Tool categories
-type ToolCategory = "select" | "sketch" | "primitive" | "operation" | "modify";
+type ToolCategory = "select" | "sketch" | "sketch-draw" | "primitive" | "operation" | "modify";
+
+// Which mode the tool is available in
+type ToolMode = "object" | "sketch" | "both";
 
 interface Tool {
   id: string;
@@ -14,37 +17,40 @@ interface Tool {
   icon: string;
   category: ToolCategory;
   shortcut?: string;
+  mode: ToolMode;
 }
 
 const TOOLS: Tool[] = [
-  // Selection
-  { id: "select", label: "Select", icon: "⎋", category: "select", shortcut: "V" },
+  // Selection (available in both modes)
+  { id: "select", label: "Select", icon: "⎋", category: "select", shortcut: "V", mode: "both" },
 
-  // Sketch tools
-  { id: "sketch", label: "New Sketch", icon: "✎", category: "sketch", shortcut: "S" },
-  { id: "line", label: "Line", icon: "⁄", category: "sketch", shortcut: "L" },
-  { id: "rect", label: "Rectangle", icon: "▭", category: "sketch", shortcut: "R" },
-  { id: "circle", label: "Circle", icon: "◯", category: "sketch", shortcut: "C" },
-  { id: "arc", label: "Arc", icon: "⌒", category: "sketch" },
+  // Object mode: create new sketch
+  { id: "sketch", label: "New Sketch", icon: "✎", category: "sketch", shortcut: "S", mode: "object" },
 
-  // 3D Primitives
-  { id: "box", label: "Box", icon: "⬡", category: "primitive" },
-  { id: "cylinder", label: "Cylinder", icon: "⏣", category: "primitive" },
-  { id: "sphere", label: "Sphere", icon: "◉", category: "primitive" },
+  // Sketch mode: drawing tools
+  { id: "line", label: "Line", icon: "⁄", category: "sketch-draw", shortcut: "L", mode: "sketch" },
+  { id: "rect", label: "Rectangle", icon: "▭", category: "sketch-draw", shortcut: "R", mode: "sketch" },
+  { id: "circle", label: "Circle", icon: "◯", category: "sketch-draw", shortcut: "C", mode: "sketch" },
+  { id: "arc", label: "Arc", icon: "⌒", category: "sketch-draw", mode: "sketch" },
 
-  // Operations
-  { id: "extrude", label: "Extrude", icon: "⏶", category: "operation", shortcut: "E" },
-  { id: "revolve", label: "Revolve", icon: "⟳", category: "operation" },
-  { id: "sweep", label: "Sweep", icon: "↝", category: "operation" },
-  { id: "loft", label: "Loft", icon: "⋈", category: "operation" },
+  // 3D Primitives (object mode)
+  { id: "box", label: "Box", icon: "⬡", category: "primitive", mode: "object" },
+  { id: "cylinder", label: "Cylinder", icon: "⏣", category: "primitive", mode: "object" },
+  { id: "sphere", label: "Sphere", icon: "◉", category: "primitive", mode: "object" },
 
-  // Modify
-  { id: "fillet", label: "Fillet", icon: "⌓", category: "modify", shortcut: "F" },
-  { id: "chamfer", label: "Chamfer", icon: "⌔", category: "modify" },
-  { id: "shell", label: "Shell", icon: "▢", category: "modify" },
-  { id: "union", label: "Union", icon: "⊕", category: "modify" },
-  { id: "subtract", label: "Subtract", icon: "⊖", category: "modify" },
-  { id: "intersect", label: "Intersect", icon: "⊗", category: "modify" },
+  // Operations (object mode)
+  { id: "extrude", label: "Extrude", icon: "⏶", category: "operation", shortcut: "E", mode: "object" },
+  { id: "revolve", label: "Revolve", icon: "⟳", category: "operation", mode: "object" },
+  { id: "sweep", label: "Sweep", icon: "↝", category: "operation", mode: "object" },
+  { id: "loft", label: "Loft", icon: "⋈", category: "operation", mode: "object" },
+
+  // Modify (object mode)
+  { id: "fillet", label: "Fillet", icon: "⌓", category: "modify", shortcut: "F", mode: "object" },
+  { id: "chamfer", label: "Chamfer", icon: "⌔", category: "modify", mode: "object" },
+  { id: "shell", label: "Shell", icon: "▢", category: "modify", mode: "object" },
+  { id: "union", label: "Union", icon: "⊕", category: "modify", mode: "object" },
+  { id: "subtract", label: "Subtract", icon: "⊖", category: "modify", mode: "object" },
+  { id: "intersect", label: "Intersect", icon: "⊗", category: "modify", mode: "object" },
 ];
 
 const styles = {
@@ -170,8 +176,10 @@ export function Toolbar() {
   const activeTool = useCadStore((s) => s.activeTool);
   const setActiveTool = useCadStore((s) => s.setActiveTool);
   const activeSketchId = useCadStore((s) => s.activeSketchId);
+  const editorMode = useCadStore((s) => s.editorMode);
   const createNewSketch = useCadStore((s) => s.createNewSketch);
   const createExtrude = useCadStore((s) => s.createExtrude);
+  const exitSketchMode = useCadStore((s) => s.exitSketchMode);
 
   const canUndo = useCadStore((s) => s.canUndo());
   const canRedo = useCadStore((s) => s.canRedo());
@@ -181,11 +189,11 @@ export function Toolbar() {
 
   // Handle tool click - some tools trigger immediate actions
   const handleToolClick = React.useCallback((toolId: string) => {
+    console.log("[Toolbar] handleToolClick:", toolId);
     switch (toolId) {
       case "sketch":
         // Create a new sketch on the XY plane
         createNewSketch();
-        setActiveTool("line"); // Switch to line tool after creating sketch
         break;
       case "extrude":
         // Extrude the active sketch if one is selected
@@ -203,19 +211,28 @@ export function Toolbar() {
     }
   }, [activeSketchId, createNewSketch, createExtrude, setActiveTool]);
 
+  // Filter tools based on current mode
+  const visibleTools = React.useMemo(() => {
+    return TOOLS.filter(tool => {
+      if (tool.mode === "both") return true;
+      return tool.mode === editorMode;
+    });
+  }, [editorMode]);
+
   const toolsByCategory = React.useMemo(() => {
     const groups: Record<ToolCategory, Tool[]> = {
       select: [],
       sketch: [],
+      "sketch-draw": [],
       primitive: [],
       operation: [],
       modify: [],
     };
-    for (const tool of TOOLS) {
+    for (const tool of visibleTools) {
       groups[tool.category].push(tool);
     }
     return groups;
-  }, []);
+  }, [visibleTools]);
 
   return (
     <div style={styles.toolbar}>
@@ -248,59 +265,124 @@ export function Toolbar() {
 
       <div style={styles.divider} />
 
+      {/* Mode indicator */}
+      {editorMode === "sketch" && (
+        <div style={{
+          backgroundColor: "#4dabf7",
+          color: "#000",
+          padding: "4px 12px",
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 600,
+        }}>
+          SKETCH MODE
+        </div>
+      )}
+
       {/* Selection Tools */}
-      <div style={styles.toolGroup}>
-        {toolsByCategory.select.map((tool) => (
-          <ToolButton
-            key={tool.id}
-            tool={tool}
-            isActive={activeTool === tool.id}
-            onClick={() => handleToolClick(tool.id)}
-          />
-        ))}
-      </div>
+      {toolsByCategory.select.length > 0 && (
+        <div style={styles.toolGroup}>
+          {toolsByCategory.select.map((tool) => (
+            <ToolButton
+              key={tool.id}
+              tool={tool}
+              isActive={activeTool === tool.id}
+              onClick={() => handleToolClick(tool.id)}
+            />
+          ))}
+        </div>
+      )}
 
-      <div style={styles.divider} />
+      {/* Object Mode: Sketch creation */}
+      {toolsByCategory.sketch.length > 0 && (
+        <>
+          <div style={styles.divider} />
+          <div style={styles.toolGroup}>
+            {toolsByCategory.sketch.map((tool) => (
+              <ToolButton
+                key={tool.id}
+                tool={tool}
+                isActive={activeTool === tool.id}
+                onClick={() => handleToolClick(tool.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-      {/* Sketch Tools */}
-      <div style={styles.toolGroup}>
-        {toolsByCategory.sketch.map((tool) => (
-          <ToolButton
-            key={tool.id}
-            tool={tool}
-            isActive={activeTool === tool.id}
-            onClick={() => handleToolClick(tool.id)}
-          />
-        ))}
-      </div>
+      {/* Sketch Mode: Drawing tools */}
+      {toolsByCategory["sketch-draw"].length > 0 && (
+        <>
+          <div style={styles.divider} />
+          <div style={styles.toolGroup}>
+            {toolsByCategory["sketch-draw"].map((tool) => (
+              <ToolButton
+                key={tool.id}
+                tool={tool}
+                isActive={activeTool === tool.id}
+                onClick={() => handleToolClick(tool.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-      <div style={styles.divider} />
+      {/* Object Mode: Operation Tools */}
+      {toolsByCategory.operation.length > 0 && (
+        <>
+          <div style={styles.divider} />
+          <div style={styles.toolGroup}>
+            {toolsByCategory.operation.map((tool) => (
+              <ToolButton
+                key={tool.id}
+                tool={tool}
+                isActive={activeTool === tool.id}
+                onClick={() => handleToolClick(tool.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-      {/* Operation Tools */}
-      <div style={styles.toolGroup}>
-        {toolsByCategory.operation.map((tool) => (
-          <ToolButton
-            key={tool.id}
-            tool={tool}
-            isActive={activeTool === tool.id}
-            onClick={() => handleToolClick(tool.id)}
-          />
-        ))}
-      </div>
+      {/* Object Mode: Modify Tools */}
+      {toolsByCategory.modify.length > 0 && (
+        <>
+          <div style={styles.divider} />
+          <div style={styles.toolGroup}>
+            {toolsByCategory.modify.map((tool) => (
+              <ToolButton
+                key={tool.id}
+                tool={tool}
+                isActive={activeTool === tool.id}
+                onClick={() => handleToolClick(tool.id)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
-      <div style={styles.divider} />
-
-      {/* Modify Tools */}
-      <div style={styles.toolGroup}>
-        {toolsByCategory.modify.map((tool) => (
-          <ToolButton
-            key={tool.id}
-            tool={tool}
-            isActive={activeTool === tool.id}
-            onClick={() => handleToolClick(tool.id)}
-          />
-        ))}
-      </div>
+      {/* Exit Sketch Mode button */}
+      {editorMode === "sketch" && (
+        <>
+          <div style={styles.divider} />
+          <button
+            style={{
+              ...styles.iconButton,
+              backgroundColor: "#ff6b6b",
+              color: "#fff",
+              padding: "4px 12px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 600,
+              width: "auto",
+            }}
+            onClick={exitSketchMode}
+            title="Exit Sketch Mode (ESC)"
+          >
+            Exit Sketch
+          </button>
+        </>
+      )}
 
       {/* Spacer */}
       <div style={styles.spacer} />

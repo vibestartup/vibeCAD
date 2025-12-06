@@ -82,8 +82,10 @@ const styles = {
     alignItems: "center",
     padding: "8px 16px",
     cursor: "pointer",
-    transition: "background-color 0.15s",
-    borderLeft: "3px solid transparent",
+    transition: "background-color 0.15s, border-left-color 0.15s",
+    borderLeftWidth: 3,
+    borderLeftStyle: "solid",
+    borderLeftColor: "transparent",
   } as React.CSSProperties,
 
   opItemSelected: {
