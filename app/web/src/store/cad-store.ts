@@ -184,8 +184,8 @@ export const useCadStore = create<CadStore>((set, get) => ({
     set({ isRebuilding: true, rebuildError: null });
 
     try {
-      const { rebuild } = await import("@vibecad/core");
-      // const rebuiltStudio = await rebuild(studio, document.params, kernel.occ, kernel.slvs);
+      // const { partStudio } = await import("@vibecad/core");
+      // const rebuiltStudio = await partStudio.rebuild(studio, document.params, kernel.occ, kernel.slvs);
 
       // For now, just mark as done since rebuild needs actual WASM
       // TODO: Hook up real rebuild when WASM is integrated

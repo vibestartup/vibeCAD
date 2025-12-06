@@ -2,14 +2,13 @@
  * Document context - provides access to the CAD document state.
  */
 
-import React, { createContext, useContext, useCallback, useMemo } from "react";
+import React, { createContext, useContext } from "react";
 import type {
   Document,
   PartStudio,
   PartStudioId,
   Sketch,
   SketchId,
-  OpId,
   ParamEnv,
 } from "@vibecad/core";
 import type { HistoryState } from "@vibecad/core";

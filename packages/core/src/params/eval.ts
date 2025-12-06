@@ -2,7 +2,7 @@
  * Expression evaluation - evaluate parsed expressions.
  */
 
-import { Expr } from "./parser";
+import { Expr, parseExpression } from "./parser";
 
 // ============================================================================
 // Built-in Functions
@@ -128,7 +128,6 @@ export function evaluate(
   exprStr: string,
   vars: Record<string, number> = {}
 ): number {
-  const { parseExpression } = require("./parser");
   const expr = parseExpression(exprStr);
   return evalExpression(expr, { vars });
 }

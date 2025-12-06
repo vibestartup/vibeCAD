@@ -21,8 +21,10 @@ import {
 } from "./deps";
 
 // Re-export submodules
-export { parseExpression, isValidExpression, Expr } from "./parser";
-export { evalExpression, evaluate, safeEvaluate, EvalContext } from "./eval";
+export { parseExpression, isValidExpression } from "./parser";
+export type { Expr } from "./parser";
+export { evalExpression, evaluate, safeEvaluate } from "./eval";
+export type { EvalContext } from "./eval";
 export {
   getExpressionDeps,
   buildDependencyGraph,
@@ -72,12 +74,13 @@ export function evaluateParams(env: ParamEnv): ParamEnv {
 
     const result = safeEvaluate(param.expression, lookup);
 
-    if (result.error) {
+    if (result.error !== undefined) {
       newErrors.set(param.id, result.error);
       lookup[name] = 0; // Use 0 as fallback for dependent params
     } else {
-      lookup[name] = result.value;
-      newParams.set(param.id, { ...param, value: result.value });
+      const value = result.value!; // Safe: discriminated union - if no error, value exists
+      lookup[name] = value;
+      newParams.set(param.id, { ...param, value });
     }
   }
 

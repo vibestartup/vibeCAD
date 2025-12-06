@@ -25,3 +25,5 @@ export * as params from "./params";
 
 // Undo/redo history
 export * as history from "./history";
+export type { HistoryState } from "./history";
+export { createHistory, pushState, undo, redo, canUndo, canRedo } from "./history";

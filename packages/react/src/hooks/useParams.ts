@@ -3,7 +3,7 @@
  */
 
 import { useCallback } from "react";
-import { ParamId, Parameter, createParam, createParamExpr } from "@vibecad/core";
+import { ParamId, Parameter, createParam, createParamExpr, getParamByName, getParamValue } from "@vibecad/core";
 import { params } from "@vibecad/core";
 import { useDocumentContext, useParams } from "../context";
 
@@ -60,16 +60,14 @@ export function useParamOperations() {
 
   const getByName = useCallback(
     (name: string): Parameter | undefined => {
-      return params.getParamByName
-        ? params.getParamByName(paramEnv, name)
-        : undefined;
+      return getParamByName(paramEnv, name);
     },
     [paramEnv]
   );
 
   const getValue = useCallback(
     (name: string): number | undefined => {
-      return params.getParamValue ? params.getParamValue(paramEnv, name) : undefined;
+      return getParamValue(paramEnv, name);
     },
     [paramEnv]
   );

@@ -14,6 +14,10 @@ import {
   ParamEnv,
   Sketch,
   SketchPlane,
+  ExtrudeOp,
+  BooleanOp,
+  FilletOp,
+  ChamferOp,
 } from "../types";
 import type { OccApi, SlvsApi } from "./index";
 
@@ -227,10 +231,10 @@ opRegistry.register(
 );
 
 // Extrude operation
-opRegistry.register(
+opRegistry.register<ExtrudeOp>(
   "extrude",
-  async (op, ctx) => {
-    const sketch = ctx.getSketch(op.sketchId);
+  async (op: ExtrudeOp, ctx) => {
+    const sketch = ctx.getSketch(op.sketchId as string);
     if (!sketch) throw new Error(`Sketch not found: ${op.sketchId}`);
 
     const plane = ctx.getPlane(sketch.planeId);
@@ -282,9 +286,9 @@ opRegistry.register(
 );
 
 // Boolean operation
-opRegistry.register(
+opRegistry.register<BooleanOp>(
   "boolean",
-  async (op, ctx) => {
+  async (op: BooleanOp, ctx) => {
     const targetResult = ctx.getResult(op.targetOp);
     const toolResult = ctx.getResult(op.toolOp);
 
@@ -315,9 +319,9 @@ opRegistry.register(
 );
 
 // Fillet operation
-opRegistry.register(
+opRegistry.register<FilletOp>(
   "fillet",
-  async (op, ctx) => {
+  async (op: FilletOp, ctx) => {
     const targetResult = ctx.getResult(op.targetOp);
     if (!targetResult) throw new Error(`Target operation not found: ${op.targetOp}`);
 
@@ -347,9 +351,9 @@ opRegistry.register(
 );
 
 // Chamfer operation
-opRegistry.register(
+opRegistry.register<ChamferOp>(
   "chamfer",
-  async (op, ctx) => {
+  async (op: ChamferOp, ctx) => {
     const targetResult = ctx.getResult(op.targetOp);
     if (!targetResult) throw new Error(`Target operation not found: ${op.targetOp}`);
 
