@@ -1,497 +1,789 @@
-you are the implementation agent for **vibeCAD**, a browser-native, sketch-plane + constraint-based + feature-driven CAD system.
+# vibeCAD Implementation Guide
 
-you are starting from this monorepo root:
+You are the implementation agent for **vibeCAD**, a browser-native parametric CAD system with sketch-plane constraints, feature-based modeling, and assembly support.
 
-```text
+## Monorepo Structure
+
+```
 .
-├── app
-│   ├── admin
-│   ├── desktop
-│   ├── mobile
-│   ├── public
-│   └── web
-├── packages
-│   ├── core
-│   ├── kernel
-│   └── db
-├── package.json
-├── pnpm-lock.yaml
-├── pnpm-workspace.yaml
-├── tsconfig.json
-└── turbo.json
+├── packages/
+│   ├── core/           # Pure CAD logic (framework-agnostic)
+│   │   └── src/
+│   │       ├── types/          # All type definitions
+│   │       ├── sketch/         # Sketch primitives, constraints, solver
+│   │       ├── ops/            # Operations (sketch->solid, solid->solid)
+│   │       ├── part-studio/    # Operation graph, evaluation
+│   │       ├── assembly/       # Assembly constraints, positioning
+│   │       ├── params/         # Parameter & expression system
+│   │       ├── history/        # Undo/redo
+│   │       └── index.ts
+│   │
+│   ├── kernel/         # WASM bindings (OCC + SolveSpace)
+│   │   └── src/
+│   │       ├── occ.ts          # OpenCascade bindings
+│   │       ├── slvs.ts         # SolveSpace bindings
+│   │       └── loader.ts       # WASM initialization
+│   │
+│   └── db/             # Persistence (stub for now)
+│
+└── app/
+    └── web/            # React + Three.js frontend
+        └── src/
+            ├── components/
+            │   ├── Viewport3D.tsx
+            │   ├── SketchCanvas.tsx
+            │   ├── FeatureTree.tsx
+            │   └── ParamPanel.tsx
+            ├── hooks/
+            └── store/
 ```
-
-assume: pnpm workspace, typescript everywhere, react in `app/*`. focus on **CAD logic and UI**. ignore “saas” concerns: auth, billing, multi-tenant, db, etc. `packages/db` can stay stubby.
-
-your job: transform this into a **real parametric CAD** stack:
-
-* sketch-plane editing (2d in arbitrary planes)
-* constraint solving via **SolveSpace** core in wasm
-* 3d solids via **OpenCascade (OCC)** in wasm
-* feature DAG (feature tree) driving evaluation
-* global parameter / expression system
-* undo/redo
-* interactive 3d viewport (three.js) + 2d sketch overlay
-
-the output should be high-quality, modular, and production-upgradeable later.
 
 ---
 
-## 0. general rules
+## 1. Core Type System
 
-* write clean, typed **typescript**. no `any` except at wasm boundaries.
-* keep **core CAD logic framework-agnostic** in `packages/core`. frontends import it.
-* frontends (`app/web` etc) are react-based shells that do rendering + input + wiring.
-* prefer pure functions + small state containers over random mutation.
-* when integrating wasm, isolate in thin adapters so rest of code sees clean TS APIs.
-* keep initial implementation **mvp but structurally correct**; favor clear abstractions even if some ops are stubbed.
+All types live in `packages/core/src/types/`. This is the foundation - get it right.
 
----
-
-## 1. code organization (monorepo mapping)
-
-you must reorganize / extend the repo roughly like this:
-
-```text
-packages/
-  core/
-    src/
-      cad/
-        params/           # parameter + expression system
-        sketch/           # sketch model + slvs integration
-        kernel/           # occ integration, topology index
-        feature/          # feature DAG + evaluation
-        history/          # undo/redo
-        types/            # shared CAD types
-      runtime/            # orchestration, rebuild loop
-      index.ts            # public api surface
-
-  # optional (if helpful to keep wasm clean)
-  kernel-wasm/
-    src/
-      occ.ts              # raw bindings
-      slvs.ts             # raw bindings
-      loader.ts           # wasm loading helpers
-
-app/
-  web/
-    src/
-      main.tsx / index.tsx
-      cad-view/           # react components (viewport, panels, etc)
-        Viewport3D.tsx
-        SketchCanvas.tsx
-        FeatureTree.tsx
-        ParamPanel.tsx
-```
-
-* ensure `packages/core/package.json` exposes `main` + `types` pointing to built files.
-* make `app/web` depend on `@vibecad/core` (or whatever name is set in `packages/core/package.json`).
-
----
-
-## 2. core data model (define in `packages/core/src/types/`)
-
-you must define the fundamental types for the CAD engine. do not half-ass this; these types drive everything.
-
-### 2.1 basic ids + vectors
+### 1.1 Primitives
 
 ```ts
-export type Id = string;
+// types/primitives.ts
 
-export type Vec2 = [number, number];
-export type Vec3 = [number, number, number];
-```
+/** Branded ID types for type safety */
+export type Id<T extends string> = string & { readonly __brand: T };
 
-### 2.2 parameters + expressions
+export type SketchPlaneId = Id<"SketchPlane">;
+export type SketchId = Id<"Sketch">;
+export type PrimitiveId = Id<"Primitive">;
+export type ConstraintId = Id<"Constraint">;
+export type OpId = Id<"Op">;
+export type PartId = Id<"Part">;
+export type AssemblyId = Id<"Assembly">;
+export type ParamId = Id<"Param">;
 
-in `params/types.ts`:
+/** Generate a new ID */
+export function newId<T extends string>(prefix: T): Id<T>;
 
-```ts
-export type ParamId = string;
+/** Math primitives */
+export type Vec2 = readonly [number, number];
+export type Vec3 = readonly [number, number, number];
+export type Mat3 = readonly [Vec3, Vec3, Vec3];  // row-major
+export type Mat4 = readonly [number, number, number, number,
+                             number, number, number, number,
+                             number, number, number, number,
+                             number, number, number, number];
 
-export interface Parameter {
-  id: ParamId;
-  name: string;
-  value: number;          // evaluated numeric value
-  expression?: string;    // optional expression, e.g. "BaseWidth * 0.5"
-}
-
-export interface ParamEnv {
-  byId: Record<ParamId, Parameter>;
-}
-```
-
-you must also define an `ExpressionError` type for validation feedback.
-
-### 2.3 sketch planes
-
-in `sketch/types.ts`:
-
-```ts
-export type PlaneId = string;
-
+/** A plane in 3D space defined by origin and two orthonormal axes */
 export interface SketchPlane {
-  id: PlaneId;
+  id: SketchPlaneId;
   origin: Vec3;
-  xAxis: Vec3;
-  yAxis: Vec3;
-  reference:
-    | { type: "datum" }
-    | { type: "faceRef"; faceRefId: string }; // see topology refs later
+  axisX: Vec3;   // u direction
+  axisY: Vec3;   // v direction
+  // normal is cross(axisX, axisY)
 }
+
+/** Standard datum planes */
+export const DATUM_XY: SketchPlane;
+export const DATUM_XZ: SketchPlane;
+export const DATUM_YZ: SketchPlane;
 ```
 
-### 2.4 sketch entities + constraints
+### 1.2 Sketch Primitives
 
 ```ts
-export type SketchId = string;
+// types/sketch.ts
 
-export type SketchEntityType =
-  | "point"
-  | "line"
-  | "arc"
-  | "circle"
-  | "spline";
-
-export interface SketchEntityBase {
-  id: Id;
-  type: SketchEntityType;
-  construction?: boolean; // construction / reference geometry
+/** Base for all sketch primitives */
+interface PrimitiveBase {
+  id: PrimitiveId;
+  construction: boolean;  // construction geometry doesn't form profiles
 }
 
-export interface SketchPoint extends SketchEntityBase {
+export interface PointPrimitive extends PrimitiveBase {
   type: "point";
   x: number;
   y: number;
 }
 
-export interface SketchLine extends SketchEntityBase {
+export interface LinePrimitive extends PrimitiveBase {
   type: "line";
-  startPointId: Id;
-  endPointId: Id;
+  start: PrimitiveId;  // ref to PointPrimitive
+  end: PrimitiveId;
 }
 
-// TODO: define SketchArc, SketchCircle, SketchSpline similarly.
-
-export type ConstraintKind =
-  | "coincident"
-  | "horizontal"
-  | "vertical"
-  | "parallel"
-  | "perpendicular"
-  | "tangent"
-  | "distance"
-  | "angle"
-  | "equalLength"
-  | "radius"
-  | "fix";
-
-export interface DimensionExpr {
-  paramId?: ParamId;        // if linked to a parameter
-  rawExpression?: string;   // if directly typed
-  value: number;            // evaluated numeric
+export interface ArcPrimitive extends PrimitiveBase {
+  type: "arc";
+  center: PrimitiveId;
+  start: PrimitiveId;
+  end: PrimitiveId;
+  clockwise: boolean;
 }
 
-export interface SketchConstraint {
-  id: Id;
-  kind: ConstraintKind;
-  entityIds: Id[];
-  dimension?: DimensionExpr; // for distance/angle/radius constraints
+export interface CirclePrimitive extends PrimitiveBase {
+  type: "circle";
+  center: PrimitiveId;
+  radius: number;
 }
 
-export type SketchSolveStatus = "ok" | "overconstrained" | "underconstrained" | "unsolved";
+export interface SplinePrimitive extends PrimitiveBase {
+  type: "spline";
+  controlPoints: PrimitiveId[];
+  degree: number;
+  knots?: number[];  // for NURBS
+  weights?: number[]; // for rational
+}
+
+export type SketchPrimitive =
+  | PointPrimitive
+  | LinePrimitive
+  | ArcPrimitive
+  | CirclePrimitive
+  | SplinePrimitive;
+
+export type PrimitiveType = SketchPrimitive["type"];
+```
+
+### 1.3 Sketch Constraints
+
+```ts
+// types/constraints.ts
+
+/** Dimension value - either literal or parameter reference */
+export interface DimValue {
+  paramId?: ParamId;      // if bound to a parameter
+  expression?: string;    // if using an expression
+  value: number;          // evaluated numeric value
+}
+
+interface ConstraintBase {
+  id: ConstraintId;
+  entities: PrimitiveId[];  // primitives this constraint affects
+}
+
+// Geometric constraints (no dimension)
+export interface CoincidentConstraint extends ConstraintBase {
+  type: "coincident";
+  // entities: [point1, point2] or [point, line] etc.
+}
+
+export interface HorizontalConstraint extends ConstraintBase {
+  type: "horizontal";
+  // entities: [line] or [point1, point2]
+}
+
+export interface VerticalConstraint extends ConstraintBase {
+  type: "vertical";
+}
+
+export interface ParallelConstraint extends ConstraintBase {
+  type: "parallel";
+  // entities: [line1, line2]
+}
+
+export interface PerpendicularConstraint extends ConstraintBase {
+  type: "perpendicular";
+}
+
+export interface TangentConstraint extends ConstraintBase {
+  type: "tangent";
+}
+
+export interface EqualConstraint extends ConstraintBase {
+  type: "equal";
+  // equal length for lines, equal radius for arcs/circles
+}
+
+export interface FixedConstraint extends ConstraintBase {
+  type: "fixed";
+  // locks position
+}
+
+export interface SymmetricConstraint extends ConstraintBase {
+  type: "symmetric";
+  // entities: [entity1, entity2, symmetryLine]
+}
+
+// Dimensional constraints (have a value)
+export interface DistanceConstraint extends ConstraintBase {
+  type: "distance";
+  dim: DimValue;
+}
+
+export interface AngleConstraint extends ConstraintBase {
+  type: "angle";
+  dim: DimValue;
+}
+
+export interface RadiusConstraint extends ConstraintBase {
+  type: "radius";
+  dim: DimValue;
+}
+
+export interface DiameterConstraint extends ConstraintBase {
+  type: "diameter";
+  dim: DimValue;
+}
+
+export type GeometricConstraint =
+  | CoincidentConstraint
+  | HorizontalConstraint
+  | VerticalConstraint
+  | ParallelConstraint
+  | PerpendicularConstraint
+  | TangentConstraint
+  | EqualConstraint
+  | FixedConstraint
+  | SymmetricConstraint;
+
+export type DimensionalConstraint =
+  | DistanceConstraint
+  | AngleConstraint
+  | RadiusConstraint
+  | DiameterConstraint;
+
+export type SketchConstraint = GeometricConstraint | DimensionalConstraint;
+export type ConstraintType = SketchConstraint["type"];
+```
+
+### 1.4 Sketch
+
+```ts
+// types/sketch.ts (continued)
+
+export type SolveStatus =
+  | "ok"
+  | "under-constrained"
+  | "over-constrained"
+  | "inconsistent"
+  | "error";
 
 export interface Sketch {
   id: SketchId;
-  planeId: PlaneId;
-  entities: SketchEntityBase[];
-  constraints: SketchConstraint[];
-  solvedPoints?: Record<Id, Vec2>;
-  solveStatus?: SketchSolveStatus;
+  planeId: SketchPlaneId;
+  primitives: Map<PrimitiveId, SketchPrimitive>;
+  constraints: Map<ConstraintId, SketchConstraint>;
+
+  // Solver output
+  solvedPositions?: Map<PrimitiveId, Vec2>;  // solved positions for points
+  solveStatus?: SolveStatus;
+  dof?: number;  // degrees of freedom remaining
 }
 ```
 
-### 2.5 feature dag + references
-
-in `feature/types.ts`:
+### 1.5 Operations
 
 ```ts
-export type FeatureId = string;
+// types/ops.ts
 
-export type FeatureType =
-  | "sketch"
-  | "extrude"
-  | "revolve"
-  | "fillet"
-  | "chamfer"
-  | "shell"
-  | "boolean";
-
-export type BooleanOp = "union" | "subtract" | "intersect";
-
-// logical reference to a specific subshape, stable across rebuilds as best effort
-export type ShapeRefId = string;
-
-export interface BodyRef {
-  featureId: FeatureId; // which feature produced this body
-  localName: string;    // stable logical name inside that feature (e.g. "mainBody")
+/** Reference to a topological element (face, edge, vertex) */
+export interface TopoRef {
+  opId: OpId;           // which op produced this
+  subType: "face" | "edge" | "vertex";
+  index: number;        // stable index within that op's output
+  // For re-matching after rebuild:
+  signature?: {
+    center?: Vec3;
+    normal?: Vec3;
+    area?: number;
+    length?: number;
+  };
 }
 
-export interface FaceRef extends BodyRef {
-  subType: "face";
-}
-
-export interface EdgeRef extends BodyRef {
-  subType: "edge";
-}
-
-export interface VertexRef extends BodyRef {
-  subType: "vertex";
-}
-
-export interface FeatureBase {
-  id: FeatureId;
-  type: FeatureType;
+interface OpBase {
+  id: OpId;
   name: string;
-  dependsOn: FeatureId[];
-  suppressed?: boolean;
+  suppressed: boolean;
 }
-```
 
-concrete feature types:
+// === Primary Operations (Sketch -> Solid) ===
 
-```ts
-export interface SketchFeature extends FeatureBase {
+export interface ExtrudeOp extends OpBase {
+  type: "extrude";
+  sketchId: SketchId;
+  profiles: PrimitiveId[];  // which closed loops to extrude (empty = all)
+  direction: "normal" | "reverse" | "symmetric";
+  depth: DimValue;
+  draft?: { angle: DimValue; inward: boolean };
+}
+
+export interface RevolveOp extends OpBase {
+  type: "revolve";
+  sketchId: SketchId;
+  profiles: PrimitiveId[];
+  axis: TopoRef | { origin: Vec3; direction: Vec3 };
+  angle: DimValue;  // radians, or full revolution if 2*PI
+}
+
+export interface SweepOp extends OpBase {
+  type: "sweep";
+  profileSketchId: SketchId;
+  pathSketchId: SketchId;
+}
+
+export interface LoftOp extends OpBase {
+  type: "loft";
+  profileSketchIds: SketchId[];
+  guideSketchIds?: SketchId[];
+}
+
+export type PrimaryOp = ExtrudeOp | RevolveOp | SweepOp | LoftOp;
+
+// === Secondary Operations (Solid -> Solid) ===
+
+export interface BooleanOp extends OpBase {
+  type: "boolean";
+  operation: "union" | "subtract" | "intersect";
+  targetOp: OpId;
+  toolOp: OpId;
+}
+
+export interface FilletOp extends OpBase {
+  type: "fillet";
+  targetOp: OpId;
+  edges: TopoRef[];
+  radius: DimValue;
+}
+
+export interface ChamferOp extends OpBase {
+  type: "chamfer";
+  targetOp: OpId;
+  edges: TopoRef[];
+  distance: DimValue;
+  angle?: DimValue;  // if asymmetric
+}
+
+export interface ShellOp extends OpBase {
+  type: "shell";
+  targetOp: OpId;
+  facesToRemove: TopoRef[];
+  thickness: DimValue;
+}
+
+export interface PatternOp extends OpBase {
+  type: "pattern";
+  targetOp: OpId;
+  patternType: "linear" | "circular";
+  direction?: Vec3;
+  axis?: { origin: Vec3; direction: Vec3 };
+  count: number;
+  spacing: DimValue;
+}
+
+export interface MirrorOp extends OpBase {
+  type: "mirror";
+  targetOp: OpId;
+  plane: SketchPlaneId | TopoRef;
+}
+
+export type SecondaryOp =
+  | BooleanOp
+  | FilletOp
+  | ChamferOp
+  | ShellOp
+  | PatternOp
+  | MirrorOp;
+
+// === Sketch Operation (creates a sketch on a plane/face) ===
+
+export interface SketchOp extends OpBase {
   type: "sketch";
   sketchId: SketchId;
+  planeRef: SketchPlaneId | TopoRef;  // datum plane or face reference
 }
 
-export type TargetSide = "symmetric" | "oneSide" | "twoSide";
-
-export interface ExtrudeFeature extends FeatureBase {
-  type: "extrude";
-  sketchFeatureId: FeatureId;
-  targetSide: TargetSide;
-  distanceParamId?: ParamId;
-  startOffsetParamId?: ParamId;
-  endOffsetParamId?: ParamId;
-  operation: "newBody" | "add" | "cut" | "intersect";
-  targetBody?: BodyRef;
-}
-
-export interface FilletFeature extends FeatureBase {
-  type: "fillet";
-  radiusParamId: ParamId;
-  edgeRefs: EdgeRef[];
-}
-
-export interface BooleanFeature extends FeatureBase {
-  type: "boolean";
-  operation: BooleanOp;
-  targetBody: BodyRef;
-  toolBody: BodyRef;
-}
-
-export type Feature =
-  | SketchFeature
-  | ExtrudeFeature
-  | FilletFeature
-  | BooleanFeature
-  // add revolve, chamfer, shell later
-  ;
+export type Op = SketchOp | PrimaryOp | SecondaryOp;
+export type OpType = Op["type"];
 ```
 
-### 2.6 part document + runtime
-
-in `cad/types.ts`:
+### 1.6 Part Studio & Part
 
 ```ts
-export interface TopologyIndex {
-  // logical body name -> actual occ handle + its subshape metadata
-  bodies: Record<string, TopoNode>;
+// types/part.ts
+
+/** Mesh data for rendering */
+export interface Mesh {
+  positions: Float32Array;  // xyz xyz xyz...
+  normals: Float32Array;    // xyz xyz xyz...
+  indices: Uint32Array;     // triangle indices
 }
 
-export interface TopoNode {
-  bodyHandle: number; // OCC shape handle (opaque)
-  faceHandles: number[];
-  edgeHandles: number[];
-  vertexHandles: number[];
-
-  faceMeta: Record<number, {
-    center: Vec3;
-    normal: Vec3;
-    area: number;
-  }>;
-
-  edgeMeta: Record<number, {
-    midpoint: Vec3;
-    length: number;
-  }>;
+/** Material properties */
+export interface Material {
+  color: Vec3;        // RGB 0-1
+  metalness: number;  // 0-1
+  roughness: number;  // 0-1
+  opacity: number;    // 0-1
 }
 
-export interface RuntimeState {
-  shapesByFeature: Record<FeatureId, number>; // OCC shape handles
-  topologyIndex: TopologyIndex;
-  featureOrder: FeatureId[];                 // topo-sorted order
-}
-
-export interface PartDocument {
-  id: string;
-  params: ParamEnv;
-  planes: Record<PlaneId, SketchPlane>;
-  sketches: Record<SketchId, Sketch>;
-  features: Feature[];
-  runtime?: RuntimeState;   // populated after rebuild
-}
-```
-
----
-
-## 3. params & expression engine (`packages/core/src/cad/params/`)
-
-you must implement:
-
-* parsing + evaluation of parameter expressions
-* dependency graph + topo sorting
-* error reporting for cycles / unknown symbols
-
-constraints:
-
-* use a small, safe expression parser (you can implement your own recursive descent or integrate a tiny library, but wrap it so rest of code doesn’t care).
-* support:
-
-  * numeric literals
-  * `+ - * / ^`
-  * parentheses
-  * references to parameter names (case-sensitive or normalized; pick one and stick to it).
-
-core functions:
-
-```ts
-export function evaluateParameters(env: ParamEnv): {
-  env: ParamEnv;
-  errors: ExpressionError[];
+export const DEFAULT_MATERIAL: Material = {
+  color: [0.7, 0.7, 0.8],
+  metalness: 0.1,
+  roughness: 0.5,
+  opacity: 1.0,
 };
 
-export function evalDimensionExpr(
-  dim: DimensionExpr,
-  env: ParamEnv
-): { value: number; error?: ExpressionError };
+/** A node in the operation graph */
+export interface OpNode {
+  op: Op;
+  deps: OpId[];  // operations this depends on
+}
+
+/** Evaluated state for an operation */
+export interface OpResult {
+  shapeHandle: number;  // OCC shape handle
+  mesh?: Mesh;
+  topoMap: {
+    faces: TopoRef[];
+    edges: TopoRef[];
+    vertices: TopoRef[];
+  };
+}
+
+/** A Part Studio contains sketches and operations */
+export interface PartStudio {
+  id: Id<"PartStudio">;
+  name: string;
+
+  planes: Map<SketchPlaneId, SketchPlane>;
+  sketches: Map<SketchId, Sketch>;
+  opGraph: Map<OpId, OpNode>;
+  opOrder: OpId[];  // topologically sorted
+
+  // Runtime state (populated after rebuild)
+  results?: Map<OpId, OpResult>;
+}
+
+/** A Part is a materialized solid from a PartStudio */
+export interface Part {
+  id: PartId;
+  name: string;
+  studioId: Id<"PartStudio">;
+  finalOpId: OpId;  // which op produces this part
+  material: Material;
+
+  // Cached for rendering
+  mesh?: Mesh;
+}
 ```
 
-* you must store evaluated numeric values back into `Parameter.value`.
-* dimension constraints use `paramId` if present; otherwise evaluate their `rawExpression` in the same env.
+### 1.7 Assembly
+
+```ts
+// types/assembly.ts
+
+/** Transform for positioning a part */
+export interface Transform {
+  rotation: Mat3;
+  translation: Vec3;
+}
+
+export const IDENTITY_TRANSFORM: Transform = {
+  rotation: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+  translation: [0, 0, 0],
+};
+
+/** An instance of a part in an assembly */
+export interface PartInstance {
+  id: Id<"PartInstance">;
+  partId: PartId;
+  transform: Transform;
+  fixed: boolean;  // if true, cannot be moved by constraints
+}
+
+/** Assembly constraints */
+interface AssemblyConstraintBase {
+  id: Id<"AssemblyConstraint">;
+  instanceA: Id<"PartInstance">;
+  instanceB: Id<"PartInstance">;
+}
+
+export interface MateConstraint extends AssemblyConstraintBase {
+  type: "mate";
+  refA: TopoRef;  // face/edge/point on A
+  refB: TopoRef;  // face/edge/point on B
+  mateType: "coincident" | "parallel" | "perpendicular";
+  offset?: DimValue;
+}
+
+export interface AxisConstraint extends AssemblyConstraintBase {
+  type: "axis";
+  refA: TopoRef;
+  refB: TopoRef;
+  axisType: "concentric" | "coaxial";
+}
+
+export interface DistanceConstraint extends AssemblyConstraintBase {
+  type: "distance";
+  refA: TopoRef;
+  refB: TopoRef;
+  distance: DimValue;
+}
+
+export type AssemblyConstraint =
+  | MateConstraint
+  | AxisConstraint
+  | DistanceConstraint;
+
+export interface Assembly {
+  id: AssemblyId;
+  name: string;
+  instances: Map<Id<"PartInstance">, PartInstance>;
+  constraints: Map<Id<"AssemblyConstraint">, AssemblyConstraint>;
+
+  // Solved transforms
+  solvedTransforms?: Map<Id<"PartInstance">, Transform>;
+}
+```
+
+### 1.8 Parameters
+
+```ts
+// types/params.ts
+
+export interface Parameter {
+  id: ParamId;
+  name: string;
+  expression: string;  // e.g. "10", "Width * 0.5", "Height + 2"
+  value: number;       // evaluated result
+  unit?: string;       // "mm", "in", "deg", etc. (display only for v1)
+}
+
+export interface ParamEnv {
+  params: Map<ParamId, Parameter>;
+  errors: Map<ParamId, string>;  // evaluation errors
+}
+```
+
+### 1.9 Document
+
+```ts
+// types/document.ts
+
+/** Top-level document containing everything */
+export interface Document {
+  id: Id<"Document">;
+  name: string;
+
+  params: ParamEnv;
+  partStudios: Map<Id<"PartStudio">, PartStudio>;
+  parts: Map<PartId, Part>;
+  assemblies: Map<AssemblyId, Assembly>;
+}
+```
 
 ---
 
-## 4. sketch system + SolveSpace (`packages/core/src/cad/sketch/`)
+## 2. Module Specifications
 
-goal: maintain our sketch model in TS, and delegate solving to SolveSpace (slvs) compiled to wasm.
-
-### 4.1 wasm boundary
-
-create `packages/kernel-wasm/src/slvs.ts` (or similar) that exposes a clean api:
+### 2.1 Sketch Module (`packages/core/src/sketch/`)
 
 ```ts
-export interface SlvsPoint { id: number; x: number; y: number; }
-export type SlvsConstraintKind = /* mirror of solvspace constraint enums */;
+// sketch/index.ts - public API
 
-export interface SlvsConstraintArgs { /* depends on kind */ }
+/** Add a primitive to a sketch */
+export function addPrimitive(sketch: Sketch, primitive: SketchPrimitive): Sketch;
 
-export interface SlvsSolveResult {
-  ok: boolean;
-  overconstrained: boolean;
-  underconstrained: boolean;
-  points: Record<number, SlvsPoint>;
-}
+/** Remove a primitive (also removes constraints referencing it) */
+export function removePrimitive(sketch: Sketch, id: PrimitiveId): Sketch;
 
-export interface SlvsApi {
-  createGroup(): number;
-  addPoint(groupId: number, x: number, y: number): number;
-  addLine(groupId: number, p1Id: number, p2Id: number): number;
-  addConstraint(
-    groupId: number,
-    kind: SlvsConstraintKind,
-    args: SlvsConstraintArgs
-  ): number;
-  solveGroup(groupId: number): SlvsSolveResult;
-}
+/** Add a constraint */
+export function addConstraint(sketch: Sketch, constraint: SketchConstraint): Sketch;
+
+/** Remove a constraint */
+export function removeConstraint(sketch: Sketch, id: ConstraintId): Sketch;
+
+/** Update a dimensional constraint's value */
+export function setDimValue(
+  sketch: Sketch,
+  constraintId: ConstraintId,
+  dim: DimValue
+): Sketch;
+
+/** Find closed loops in the sketch for profiling */
+export function findClosedLoops(sketch: Sketch): PrimitiveId[][];
+
+/** Transform sketch coordinates to world coordinates */
+export function sketchToWorld(
+  point: Vec2,
+  plane: SketchPlane
+): Vec3;
+
+export function worldToSketch(
+  point: Vec3,
+  plane: SketchPlane
+): Vec2;
 ```
 
-you must also implement a **loader** that initializes the wasm module once and returns a singleton `SlvsApi`.
-
-### 4.2 mapping sketch ↔ slvs
-
-in `sketch/solver.ts`:
-
-* maintain per-sketch mapping:
-
 ```ts
-interface SketchRuntimeMapping {
-  groupId: number;
-  pointMap: Record<Id, number>;    // sketch point id -> slvs point id
-  // optionally lineMap, etc, if needed
+// sketch/solver.ts
+
+export interface SolveResult {
+  positions: Map<PrimitiveId, Vec2>;
+  status: SolveStatus;
+  dof: number;
 }
 
-export interface SketchRuntimeState {
-  bySketchId: Record<SketchId, SketchRuntimeMapping>;
-}
-```
-
-* implement:
-
-```ts
+/** Solve sketch constraints using SolveSpace */
 export function solveSketch(
   sketch: Sketch,
   params: ParamEnv,
-  slvs: SlvsApi,
-  runtime: SketchRuntimeState
-): { sketch: Sketch; runtime: SketchRuntimeState };
+  slvs: SlvsApi
+): SolveResult;
 ```
 
-algorithm:
-
-1. ensure sketch has a `groupId` and point mapping; if not, create:
-
-   * for each `SketchPoint`, call `addPoint` in slvs.
-2. for non-point entities, call slvs functions to create lines/arcs/etc, using mapped point ids.
-3. for each constraint:
-
-   * if dimensional:
-
-     * compute numeric value via `evalDimensionExpr`.
-   * call `addConstraint` with the right arguments.
-4. call `solveGroup`.
-5. map solved `SlvsPoint` back into `sketch.solvedPoints` using `pointMap`.
-6. set `solveStatus` appropriately.
-
-implement simple error handling:
-
-* if solve fails, keep last good `solvedPoints` but mark status as over/underconstrained.
-
-### 4.3 3d placement helpers
-
-add utilities:
+### 2.2 Operations Module (`packages/core/src/ops/`)
 
 ```ts
-export function sketchPointToWorld(
-  sketch: Sketch,
-  planes: Record<PlaneId, SketchPlane>,
-  pointId: Id
-): Vec3 | undefined;
+// ops/index.ts
+
+export interface EvalContext {
+  occ: OccApi;
+  slvs: SlvsApi;
+  params: ParamEnv;
+  studio: PartStudio;
+}
+
+/** Evaluate a single operation */
+export function evalOp(op: Op, ctx: EvalContext): OpResult;
+
+/** Resolve a TopoRef to an OCC handle */
+export function resolveTopoRef(
+  ref: TopoRef,
+  results: Map<OpId, OpResult>
+): number | undefined;
 ```
 
-* use `SketchPlane.origin + x * xAxis + y * yAxis`.
+### 2.3 Part Studio Module (`packages/core/src/part-studio/`)
 
-add helper to compute **closed loops** from sketch geometry for later extrusion.
+```ts
+// part-studio/index.ts
+
+/** Build dependency graph and return topologically sorted op order */
+export function buildOpOrder(opGraph: Map<OpId, OpNode>): OpId[];
+
+/** Detect cycles in the op graph */
+export function detectCycles(opGraph: Map<OpId, OpNode>): OpId[][] | null;
+
+/** Full rebuild of a part studio */
+export function rebuild(
+  studio: PartStudio,
+  params: ParamEnv,
+  occ: OccApi,
+  slvs: SlvsApi
+): PartStudio;
+
+/** Incremental rebuild starting from a changed op */
+export function rebuildFrom(
+  studio: PartStudio,
+  changedOpId: OpId,
+  params: ParamEnv,
+  occ: OccApi,
+  slvs: SlvsApi
+): PartStudio;
+```
+
+### 2.4 Parameters Module (`packages/core/src/params/`)
+
+```ts
+// params/index.ts
+
+/** Parse and evaluate all parameters, detecting cycles and errors */
+export function evaluateParams(env: ParamEnv): ParamEnv;
+
+/** Evaluate a DimValue given the current param environment */
+export function evalDimValue(dim: DimValue, env: ParamEnv): number;
+
+/** Get all parameters that a given expression depends on */
+export function getExpressionDeps(expression: string): string[];
+```
+
+```ts
+// params/parser.ts
+
+export type Expr =
+  | { type: "number"; value: number }
+  | { type: "ident"; name: string }
+  | { type: "binary"; op: "+" | "-" | "*" | "/" | "^"; left: Expr; right: Expr }
+  | { type: "unary"; op: "-"; arg: Expr }
+  | { type: "call"; fn: string; args: Expr[] };
+
+export function parseExpression(input: string): Expr;
+export function evalExpression(expr: Expr, vars: Record<string, number>): number;
+```
+
+### 2.5 History Module (`packages/core/src/history/`)
+
+```ts
+// history/index.ts
+
+export interface HistoryState<T> {
+  past: T[];
+  present: T;
+  future: T[];
+}
+
+export function pushState<T>(history: HistoryState<T>, state: T): HistoryState<T>;
+export function undo<T>(history: HistoryState<T>): HistoryState<T>;
+export function redo<T>(history: HistoryState<T>): HistoryState<T>;
+export function canUndo<T>(history: HistoryState<T>): boolean;
+export function canRedo<T>(history: HistoryState<T>): boolean;
+```
 
 ---
 
-## 5. OCC kernel integration (`packages/kernel-wasm/src/occ.ts` + `packages/core/src/cad/kernel/`)
+## 3. Kernel Bindings (`packages/kernel/`)
 
-### 5.1 wasm boundary
+### 3.1 SolveSpace (`kernel/src/slvs.ts`)
 
-in `kernel-wasm/occ.ts` provide an api like:
+```ts
+export interface SlvsApi {
+  // Group management
+  createGroup(): number;
+  freeGroup(groupId: number): void;
+
+  // Points (in 2D workplane)
+  addPoint2d(groupId: number, x: number, y: number): number;
+  getPoint2d(pointId: number): { x: number; y: number };
+
+  // Lines
+  addLine2d(groupId: number, p1: number, p2: number): number;
+
+  // Arcs
+  addArc2d(
+    groupId: number,
+    center: number,
+    start: number,
+    end: number
+  ): number;
+
+  // Circles
+  addCircle2d(groupId: number, center: number, radius: number): number;
+
+  // Constraints
+  addCoincident(groupId: number, p1: number, p2: number): number;
+  addHorizontal(groupId: number, line: number): number;
+  addVertical(groupId: number, line: number): number;
+  addDistance(groupId: number, p1: number, p2: number, dist: number): number;
+  addAngle(groupId: number, l1: number, l2: number, angle: number): number;
+  addParallel(groupId: number, l1: number, l2: number): number;
+  addPerpendicular(groupId: number, l1: number, l2: number): number;
+  addEqual(groupId: number, e1: number, e2: number): number;
+  addTangent(groupId: number, e1: number, e2: number): number;
+  addPointOnLine(groupId: number, pt: number, line: number): number;
+  addRadius(groupId: number, circle: number, radius: number): number;
+
+  // Solving
+  solve(groupId: number): {
+    ok: boolean;
+    dof: number;
+    status: "ok" | "over" | "under" | "inconsistent";
+  };
+}
+
+export function loadSlvs(): Promise<SlvsApi>;
+```
+
+### 3.2 OpenCascade (`kernel/src/occ.ts`)
 
 ```ts
 export type ShapeHandle = number;
@@ -500,352 +792,169 @@ export type EdgeHandle = number;
 export type VertexHandle = number;
 
 export interface MeshData {
-  vertices: Float32Array; // xyzxyz...
-  indices: Uint32Array;   // triangles
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
 }
 
 export interface OccApi {
-  makeWireFromPoints(points: Vec3[]): ShapeHandle;
-  makeFaceFromWire(wire: ShapeHandle): ShapeHandle;
-  extrude(face: ShapeHandle, dir: Vec3, length: number): ShapeHandle;
+  // Wire/face creation
+  makePolygon(points: Vec3[]): ShapeHandle;
+  makeWire(edges: ShapeHandle[]): ShapeHandle;
+  makeFace(wire: ShapeHandle): ShapeHandle;
+
+  // Primary operations
+  extrude(face: ShapeHandle, direction: Vec3, depth: number): ShapeHandle;
   revolve(
     face: ShapeHandle,
     axisOrigin: Vec3,
     axisDir: Vec3,
     angleRad: number
   ): ShapeHandle;
+  sweep(profile: ShapeHandle, path: ShapeHandle): ShapeHandle;
+  loft(profiles: ShapeHandle[]): ShapeHandle;
 
-  boolean(op: "union" | "cut" | "intersect", a: ShapeHandle, b: ShapeHandle): ShapeHandle;
+  // Boolean operations
+  fuse(a: ShapeHandle, b: ShapeHandle): ShapeHandle;
+  cut(a: ShapeHandle, b: ShapeHandle): ShapeHandle;
+  intersect(a: ShapeHandle, b: ShapeHandle): ShapeHandle;
 
-  fillet(body: ShapeHandle, edges: EdgeHandle[], radius: number): ShapeHandle;
-  shell(body: ShapeHandle, faces: FaceHandle[], thickness: number): ShapeHandle;
+  // Modification operations
+  fillet(shape: ShapeHandle, edges: EdgeHandle[], radius: number): ShapeHandle;
+  chamfer(shape: ShapeHandle, edges: EdgeHandle[], distance: number): ShapeHandle;
+  shell(shape: ShapeHandle, facesToRemove: FaceHandle[], thickness: number): ShapeHandle;
 
-  getFaces(body: ShapeHandle): FaceHandle[];
-  getEdges(body: ShapeHandle): EdgeHandle[];
-  getVertices(body: ShapeHandle): VertexHandle[];
+  // Topology queries
+  getFaces(shape: ShapeHandle): FaceHandle[];
+  getEdges(shape: ShapeHandle): EdgeHandle[];
+  getVertices(shape: ShapeHandle): VertexHandle[];
 
+  // Geometry queries
   faceCenter(face: FaceHandle): Vec3;
   faceNormal(face: FaceHandle): Vec3;
   faceArea(face: FaceHandle): number;
-
   edgeMidpoint(edge: EdgeHandle): Vec3;
   edgeLength(edge: EdgeHandle): number;
 
-  mesh(body: ShapeHandle, tolerance: number): MeshData;
-}
-```
+  // Meshing
+  mesh(shape: ShapeHandle, deflection: number): MeshData;
 
-again: add a loader that initializes the OCC wasm once and returns an `OccApi` instance.
-
-### 5.2 topology indexing
-
-in `kernel/topology.ts`:
-
-* build and maintain `TopologyIndex`:
-
-```ts
-export function buildTopologyIndexForBody(
-  logicalName: string,
-  body: ShapeHandle,
-  occ: OccApi
-): TopoNode { /* fill out faceHandles, edgeHandles, vertexHandles, faceMeta, edgeMeta */ }
-
-export function matchFaceRef(
-  ref: FaceRef,
-  index: TopologyIndex
-): FaceHandle | undefined;
-
-export function matchEdgeRef(
-  ref: EdgeRef,
-  index: TopologyIndex
-): EdgeHandle | undefined;
-```
-
-for now, use **geometric signatures**:
-
-* for a `FaceRef`, store approximate center + normal + area at the time of creation.
-* on rebuild, to resolve it:
-
-  * find face with closest center within epsilon, similar normal, similar area.
-
-store this signature inside the logical reference meta (you can extend `FaceRef` with extra fields if needed; or maintain a side-map).
-
-### 5.3 feature evaluation
-
-in `feature/eval.ts`:
-
-```ts
-export interface EvalContext {
-  occ: OccApi;
-  slvs: SlvsApi;
-  doc: PartDocument;
-  sketchRuntime: SketchRuntimeState;
-  shapesByFeature: Record<FeatureId, ShapeHandle>;
-  topoIndex: TopologyIndex;
+  // Memory management
+  freeShape(shape: ShapeHandle): void;
 }
 
-export function evalFeature(
-  feat: Feature,
-  ctx: EvalContext
-): void { /* dispatch by type */ }
+export function loadOcc(): Promise<OccApi>;
 ```
-
-implement at least:
-
-#### sketch feature:
-
-* just ensures the sketch is solved (call `solveSketch`).
-* doesn’t create a solid; you can store something in runtime if needed but `shapesByFeature` can skip it.
-
-#### extrude feature:
-
-1. find the linked `SketchFeature` + `Sketch`.
-2. ensure sketch solved.
-3. build loops → 3d wires:
-
-   * use `sketch.solvedPoints` + `sketchPointToWorld`.
-   * you can assume one outer closed polygon for v1.
-4. convert to OCC:
-
-   * `wire = occ.makeWireFromPoints(points)`
-   * `face = occ.makeFaceFromWire(wire)`
-5. get numeric distance from `params[distanceParamId].value`.
-6. call `occ.extrude(face, dir, length)`.
-
-   * for now, take `dir` = plane normal; later support picking.
-7. depending on `operation`:
-
-   * `newBody` → this becomes a standalone body
-   * `add` / `cut` / `intersect` → resolve `targetBody` from `shapesByFeature`, call `occ.boolean`.
-8. assign logical body name (e.g. `feat.id + ":body"`), build topology node, add to `TopologyIndex`.
-9. store `shapesByFeature[feat.id] = resultBody`.
-
-#### fillet feature:
-
-1. resolve target body from `dependsOn[0]`.
-2. resolve each `EdgeRef` using `matchEdgeRef` and topology index.
-3. get radius from param env.
-4. call `occ.fillet`.
-5. store result + update topology index.
-
-#### boolean feature:
-
-same pattern as extrude’s boolean case.
 
 ---
 
-## 6. feature dag + rebuild loop (`packages/core/src/cad/feature/graph.ts` + `runtime/rebuild.ts`)
+## 4. Frontend (`app/web/`)
 
-### 6.1 graph
+### 4.1 State Management
 
-implement a small feature graph:
-
-```ts
-export interface FeatureGraph {
-  nodes: Record<FeatureId, Feature>;
-  order: FeatureId[]; // topo-sorted
-}
-
-export function buildFeatureGraph(features: Feature[]): FeatureGraph;
-```
-
-* use `dependsOn` to topo-sort.
-* if no explicit `dependsOn` is set, treat each feature as depending on the previous non-suppressed feature.
-* detect cycles and surface an error.
-
-### 6.2 rebuild
-
-in `runtime/rebuild.ts`:
+Use a simple store (zustand or similar):
 
 ```ts
-export interface RebuildResult {
-  doc: PartDocument;
-  sketchRuntime: SketchRuntimeState;
-}
+// store/cad-store.ts
 
-export async function rebuild(
-  doc: PartDocument,
-  occ: OccApi,
-  slvs: SlvsApi
-): Promise<RebuildResult>;
-```
+interface CadStore {
+  document: Document;
+  history: HistoryState<Document>;
+  activeStudioId: Id<"PartStudio"> | null;
+  activeSketchId: SketchId | null;
+  selection: Set<string>;  // selected entity IDs
 
-process:
-
-1. evaluate parameters: `evaluateParameters`.
-2. build feature graph.
-3. solve all sketches referenced by sketch features, updating `doc.sketches` + `sketchRuntime`.
-4. iterate in topo order:
-
-   * skip suppressed features.
-   * call `evalFeature`.
-5. populate `doc.runtime = { shapesByFeature, topologyIndex, featureOrder }`.
-6. return updated doc + sketchRuntime.
-
-keep v1 as **full rebuild**. don’t do incremental optimizations yet.
-
----
-
-## 7. undo/redo (`packages/core/src/cad/history/`)
-
-implement immutable-ish command-based history.
-
-types:
-
-```ts
-export type CommandType =
-  | "createSketch"
-  | "addSketchEntity"
-  | "addSketchConstraint"
-  | "editSketchConstraintDim"
-  | "createFeature"
-  | "editFeatureParam"
-  | "reorderFeatures"
-  | "editParam"
-  | "deleteFeature"
-  | "deleteSketch";
-
-export interface Command<TPayload = any> {
-  type: CommandType;
-  payload: TPayload;
-}
-
-export interface HistoryState {
-  past: PartDocument[];
-  present: PartDocument;
-  future: PartDocument[];
+  // Actions
+  dispatch(action: CadAction): void;
+  undo(): void;
+  redo(): void;
+  rebuild(): Promise<void>;
 }
 ```
 
-functions:
+### 4.2 Components
 
-```ts
-export function applyCommand(doc: PartDocument, cmd: Command): PartDocument;
-export function dispatch(history: HistoryState, cmd: Command): HistoryState;
-export function undo(history: HistoryState): HistoryState;
-export function redo(history: HistoryState): HistoryState;
-```
+**Viewport3D.tsx**: Three.js scene rendering parts
+- Orbit controls
+- Selection via raycasting
+- Highlight faces/edges on hover
 
-* `applyCommand` must be pure; clone only the necessary parts (use structured cloning patterns, or careful spread).
-* after each `dispatch`, the frontend is responsible for calling `rebuild`.
+**SketchCanvas.tsx**: 2D sketch editing overlay
+- Renders solved sketch geometry
+- Tools: point, line, arc, circle
+- Constraint visualization (dimension labels, coincident markers)
+- Direct dimension editing
 
----
+**FeatureTree.tsx**: Operation list
+- Show opOrder with icons
+- Drag to reorder
+- Toggle suppressed
+- Rename operations
 
-## 8. web app integration (`app/web/src`)
-
-you must build a **minimal but functional** CAD ui:
-
-### 8.1 state
-
-* store `PartDocument`, `HistoryState`, and `sketchRuntime` in react state (or a small store).
-* when user edits anything:
-
-  * create a `Command`
-  * call `dispatch`
-  * then call `rebuild` (async), then update state with the rebuilt doc.
-
-### 8.2 viewport (three.js)
-
-in `cad-view/Viewport3D.tsx`:
-
-* initialize a three.js scene + camera + controls.
-* watch `doc.runtime.shapesByFeature`.
-* for each body:
-
-  * call `occ.mesh(shapeHandle, tolerance)` (via a hook that has access to OCC).
-  * convert `MeshData` into a `THREE.BufferGeometry`.
-  * render with a standard material.
-* implement simple selection:
-
-  * raycast meshes, map back to feature/body; later extend to face-level by encoding handles in attributes.
-
-### 8.3 sketch canvas
-
-in `cad-view/SketchCanvas.tsx`:
-
-* when user is in “sketch mode” on a given sketch:
-
-  * render 2d entities from `sketch.entities` + `sketch.solvedPoints` into an overlay canvas/SVG.
-  * handle tools:
-
-    * add point
-    * add line
-    * add coincident constraint
-    * add distance dimension (popup to link to param or enter expression)
-* simple hit-testing: compute nearest entity to cursor within some px radius.
-
-you don’t need full-blown nice UX yet; just prove the loop:
-
-1. create sketch on xy plane.
-2. draw rectangle via lines.
-3. add distance dimensions with expressions.
-4. extrude feature referencing that sketch.
-5. edit param; see 3d update.
-
-### 8.4 feature tree / param panel
-
-* `FeatureTree.tsx`:
-
-  * list features in `doc.runtime.featureOrder`.
-  * show type icon + name.
-  * allow toggling suppressed.
-* `ParamPanel.tsx`:
-
-  * list all `Parameter`s with editable `name`, `expression`.
-  * editing expression triggers history + rebuild.
+**ParamPanel.tsx**: Global parameters
+- Add/edit/delete parameters
+- Show expression errors
+- Link dimensions to parameters
 
 ---
 
-## 9. implementation priorities / phases
+## 5. Implementation Order
 
-you must execute roughly in this order:
+### Phase 1: Types & Structure
+1. Define all types in `packages/core/src/types/`
+2. Set up package exports and build
+3. Create stub APIs for OCC and SLVS
 
-1. **types + core structures**:
+### Phase 2: Sketch Core
+1. Implement sketch primitive operations (add/remove)
+2. Implement constraint operations
+3. Implement `findClosedLoops`
+4. Create dummy solver (returns initial positions)
 
-   * define all CAD types, param types, feature types, part document.
-   * stub out OCC + slvs TS interfaces (without actual WASM glue yet).
-2. **param engine**:
+### Phase 3: Part Studio Core
+1. Implement op graph building and topological sort
+2. Implement rebuild loop (with stubs for ops)
+3. Implement extrude op (simplest primary op)
 
-   * implement expression parsing + evaluation for params + dimensions.
-3. **sketch subsystem**:
+### Phase 4: Basic UI
+1. Three.js viewport rendering hardcoded mesh
+2. Feature tree showing ops
+3. Basic sketch canvas (view only)
 
-   * implement in-memory sketch editing utilities (add entities, constraints).
-   * implement dummy solver first (no-op, just uses initial coordinates).
-   * later swap in real `slvs` integration.
-4. **feature dag + rebuild**:
+### Phase 5: WASM Integration
+1. Integrate OpenCascade WASM
+2. Real extrude → mesh pipeline
+3. Integrate SolveSpace WASM
+4. Real constraint solving
 
-   * implement graph + rebuild that just creates placeholder meshes.
-5. **web app**:
+### Phase 6: Full Loop
+1. Sketch editing tools
+2. Constraint tools with dimensions
+3. Parameter panel with expressions
+4. Undo/redo
 
-   * basic React app that can:
-
-     * create a sketch
-     * add lines
-     * create a single extrude feature
-     * show a fake cube in three.js.
-6. **integrate OCC wasm**:
-
-   * hook up actual `extrude` + meshing into viewport.
-7. **integrate SolveSpace wasm**:
-
-   * hook up real constraint solving for sketches.
-   * support distance dimensions driven by params.
-8. **undo/redo**:
-
-   * wire command-based history with rebuilds.
-
-at each phase: keep the repo **buildable** and **type-correct**. prefer small, incremental commits.
-
----
-
-## 10. coding standards
-
-* strict typescript (`strict: true`).
-* no magical globals; dependency injection for `OccApi` and `SlvsApi`.
-* document non-trivial functions with short comments focusing on **why** and invariants.
-* avoid premature performance hacks; focus on clarity and correctness.
-* separate **pure state transformations** (in core) from **io/render** (in app).
+### Phase 7: Polish
+1. More operations (revolve, fillet, boolean)
+2. Face/edge selection for references
+3. Assembly basics
 
 ---
 
-your goal: given this prompt and the existing skeleton, iteratively implement the described architecture so that `app/web` becomes a working prototype of a **sketch-plane, constraint-driven, feature-based CAD** running entirely in the browser, backed by SolveSpace + OpenCascade wasm, with a clean TS core in `packages/core`.
+## 6. Coding Standards
+
+- **TypeScript strict mode** everywhere
+- **Immutable updates**: functions return new objects, don't mutate
+- **No `any`** except at WASM boundaries (and then wrap immediately)
+- **Small, focused functions** with clear inputs/outputs
+- **Tests** for core logic (params parser, graph algorithms)
+- **Dependency injection** for OCC/SLVS APIs
+
+---
+
+## 7. Key Invariants
+
+1. **OpGraph is always acyclic** - validate on every edit
+2. **Sketches reference valid planes** - plane deletion cascades or blocks
+3. **TopoRefs are best-effort** - rebuilds may invalidate; handle gracefully
+4. **Parameters form a DAG** - detect cycles during evaluation
+5. **All IDs are globally unique** - use UUID or prefixed counters
