@@ -1,5 +1,8 @@
 /**
  * OpenCascade.js WASM loader.
+ *
+ * Note: This loader is currently disabled due to Vite WASM loading issues.
+ * The stub implementation is used instead.
  */
 
 // The OpenCascade.js module type
@@ -8,54 +11,16 @@ export interface OpenCascadeInstance {
   [key: string]: any;
 }
 
-let occInstance: OpenCascadeInstance | null = null;
-let loadingPromise: Promise<OpenCascadeInstance> | null = null;
-
 /**
- * Load the OpenCascade.js WASM module.
- * Returns cached instance if already loaded.
+ * Attempt to load the real OpenCascade.js WASM module.
+ * This is separated out so it can be dynamically imported only when needed.
+ *
+ * @internal
  */
-export async function loadOcc(): Promise<OpenCascadeInstance> {
-  if (occInstance) {
-    return occInstance;
-  }
-
-  if (loadingPromise) {
-    return loadingPromise;
-  }
-
-  loadingPromise = (async () => {
-    try {
-      // Dynamic import of opencascade.js
-      const initOpenCascade = await import("opencascade.js");
-
-      // Initialize the WASM module
-      const oc = await (initOpenCascade.default || initOpenCascade)();
-
-      occInstance = oc;
-      return oc;
-    } catch (error) {
-      loadingPromise = null;
-      throw new Error(`Failed to load OpenCascade.js: ${error}`);
-    }
-  })();
-
-  return loadingPromise;
-}
-
-/**
- * Check if OCC is loaded.
- */
-export function isOccLoaded(): boolean {
-  return occInstance !== null;
-}
-
-/**
- * Get the OCC instance (throws if not loaded).
- */
-export function getOcc(): OpenCascadeInstance {
-  if (!occInstance) {
-    throw new Error("OpenCascade.js not loaded. Call loadOcc() first.");
-  }
-  return occInstance;
+export async function loadRealOcc(): Promise<OpenCascadeInstance> {
+  // Use a variable to prevent Vite from statically analyzing the import
+  const moduleName = ["opencascade", "js"].join(".");
+  const initOpenCascade = await import(/* @vite-ignore */ moduleName);
+  const oc = await (initOpenCascade.default || initOpenCascade)();
+  return oc;
 }
