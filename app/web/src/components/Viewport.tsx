@@ -125,20 +125,29 @@ function calculateGridSpacing(cameraDistance: number): { major: number; minor: n
   return { major: majorSpacing, minor: minorSpacing, label };
 }
 
-// Format a numeric value as a label with appropriate units
+// Format a numeric value as a label with appropriate units (value is in mm)
 function formatTickLabel(value: number): string {
   const absVal = Math.abs(value);
   if (absVal === 0) return "0";
-  if (absVal < 1) return `${value.toFixed(1)}`;
-  if (absVal < 10) return `${value.toFixed(0)}`;
-  if (absVal < 100) return `${value.toFixed(0)}`;
-  return `${value.toFixed(0)}`;
+
+  // Format with units
+  if (absVal < 1) {
+    return `${(value * 1000).toFixed(0)}μm`;
+  } else if (absVal < 10) {
+    return `${value.toFixed(0)}mm`;
+  } else if (absVal < 100) {
+    return `${(value / 10).toFixed(0)}cm`;
+  } else if (absVal < 1000) {
+    return `${(value / 10).toFixed(0)}cm`;
+  } else {
+    return `${(value / 1000).toFixed(1)}m`;
+  }
 }
 
 // Create a text sprite for axis labels
 function createTextSprite(text: string, color: number = 0x888888): THREE.Sprite {
   const canvas = document.createElement("canvas");
-  const size = 128;
+  const size = 64;
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
@@ -146,11 +155,13 @@ function createTextSprite(text: string, color: number = 0x888888): THREE.Sprite 
   // Clear canvas
   ctx.clearRect(0, 0, size, size);
 
-  // Draw text
-  ctx.font = "bold 48px monospace";
+  // Draw text - very light weight, small font
+  ctx.font = "200 18px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  // Make color more transparent/lighter
+  const hexColor = color.toString(16).padStart(6, "0");
+  ctx.fillStyle = `#${hexColor}99`; // Add alpha for lighter appearance
   ctx.fillText(text, size / 2, size / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -240,8 +251,8 @@ function createDynamicGrid(
   const tickPoints: THREE.Vector3[] = [];
 
   // Label sprite size scales with grid spacing
-  const labelSize = spacing.major * 0.8;
-  const labelOffset = spacing.major * 0.4;
+  const labelSize = spacing.major * 0.22;
+  const labelOffset = spacing.major * 0.18;
 
   for (let i = -halfSize; i <= halfSize; i += spacing.major) {
     if (Math.abs(i) < 0.001) continue; // Skip origin
@@ -502,13 +513,11 @@ export function Viewport() {
   const planeGroupRef = useRef<THREE.Group | null>(null);
   const gridGroupRef = useRef<THREE.Group | null>(null);
   const lastGridSpacingRef = useRef<number>(0);
-  const lastGridLabelRef = useRef<string>("");
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
   const [occApi, setOccApi] = useState<OccApi | null>(null);
   const [hoveredPlane, setHoveredPlane] = useState<string | null>(null);
-  const [gridScale, setGridScale] = useState<string>("1cm");
 
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
@@ -577,8 +586,6 @@ export function Viewport() {
     scene.add(grid);
     gridGroupRef.current = grid;
     lastGridSpacingRef.current = initialSpacing.major;
-    lastGridLabelRef.current = initialSpacing.label;
-    setGridScale(initialSpacing.label);
 
     // Axes helper
     scene.add(createAxes());
@@ -611,11 +618,6 @@ export function Viewport() {
       // Only regenerate grid if spacing changed significantly
       if (Math.abs(spacing.major - lastGridSpacingRef.current) > 0.001) {
         lastGridSpacingRef.current = spacing.major;
-        // Only update React state if label changed to avoid unnecessary re-renders
-        if (spacing.label !== lastGridLabelRef.current) {
-          lastGridLabelRef.current = spacing.label;
-          setGridScale(spacing.label);
-        }
 
         // Remove old grid
         if (gridGroupRef.current) {
@@ -624,6 +626,10 @@ export function Viewport() {
             if (child instanceof THREE.Line || child instanceof THREE.LineSegments) {
               child.geometry.dispose();
               (child.material as THREE.Material).dispose();
+            }
+            if (child instanceof THREE.Sprite) {
+              child.material.map?.dispose();
+              child.material.dispose();
             }
           });
         }
@@ -1076,27 +1082,6 @@ export function Viewport() {
         )}
       </div>
 
-      {/* Grid scale indicator */}
-      {!isOccLoading && !occError && (
-        <div style={{
-          position: "absolute",
-          bottom: 16,
-          left: "50%",
-          transform: "translateX(-50%)",
-          backgroundColor: "rgba(30, 30, 60, 0.8)",
-          color: "#888",
-          padding: "4px 12px",
-          borderRadius: 4,
-          fontSize: 11,
-          fontFamily: "monospace",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
-          <span style={{ color: "#666" }}>Grid:</span>
-          <span style={{ color: "#aaa" }}>{gridScale}</span>
-        </div>
-      )}
 
       {/* Plane selection hint */}
       {editorMode === "select-plane" && (
