@@ -1,60 +1,100 @@
 # vibeCAD
 
-A Turborepo monorepo project with TypeScript and React (TSX).
+A browser-native, parametric CAD system built with TypeScript and React. Features sketch-plane editing, constraint-based design, and 3D solid modeling powered by OpenCascade.js.
 
-## Structure
+## Prerequisites
 
-- `app/` - Applications (TSX/React)
-  - `public/` - Public-facing application
-  - `admin/` - Admin application
-  - `web/` - Web application
-  - `mobile/` - Mobile application
-  - `desktop/` - Desktop application
-- `packages/` - Shared packages (TypeScript)
-  - `core/` - Core utilities and shared logic
-  - `kernel/` - Kernel for isolated iteration
-  - `db/` - Database utilities and schemas
+- **Node.js** >= 18
+- **pnpm** >= 9.0.0
 
-## Getting Started
-
-Install dependencies:
-
+If you don't have pnpm installed:
 ```bash
-pnpm install
+npm install -g pnpm
 ```
 
-Run all apps in development mode:
+## Quick Start
 
-```bash
-pnpm run dev
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd vibeCAD
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
+
+3. **Run the web app**
+   ```bash
+   pnpm dev:web
+   ```
+
+4. **Open in browser**
+
+   Navigate to [http://localhost:3000](http://localhost:3000) (or the port shown in terminal if 3000 is in use)
+
+## Project Structure
+
+```
+vibeCAD/
+├── app/
+│   └── web/              # Main web application (React + Vite)
+├── packages/
+│   ├── core/             # CAD data structures, types, and pure logic
+│   ├── kernel/           # OpenCascade.js WASM bindings
+│   └── react/            # Shared React components
+├── package.json
+├── pnpm-workspace.yaml
+└── turbo.json
 ```
 
-Build all apps:
+## Available Scripts
 
-```bash
-pnpm run build
-```
+From the root directory:
 
-Run linting:
+| Command | Description |
+|---------|-------------|
+| `pnpm install` | Install all dependencies |
+| `pnpm dev:web` | Start the web app in development mode |
+| `pnpm dev` | Start all apps in development mode |
+| `pnpm build` | Build all packages and apps |
+| `pnpm typecheck` | Run TypeScript type checking |
+| `pnpm lint` | Run linting |
+| `pnpm format` | Format code with Prettier |
+| `pnpm clean` | Clean build artifacts |
 
-```bash
-pnpm run lint
-```
+## Features
 
-Format code:
-
-```bash
-pnpm run format
-```
-
-## Workspaces
-
-This monorepo uses pnpm workspaces and Turborepo for task orchestration. Each app and package can be developed independently while sharing common dependencies and build configurations.
+- **3D Viewport**: Interactive Three.js viewport with orbit controls
+- **Sketch System**: Create 2D sketches on planes
+- **Operations Timeline**: Visual operation history with rollback capability
+- **Parametric Modeling**: Extrude sketches to create 3D geometry
+- **Undo/Redo**: Full history support
 
 ## Tech Stack
 
-- **Monorepo**: Turborepo
-- **Package Manager**: pnpm workspaces
-- **Language**: TypeScript
-- **UI Framework**: React (TSX) for apps
-- **Build Tool**: TypeScript Compiler (tsc)
+- **Monorepo**: Turborepo + pnpm workspaces
+- **Language**: TypeScript (strict mode)
+- **UI Framework**: React 18
+- **State Management**: Zustand
+- **3D Rendering**: Three.js
+- **CAD Kernel**: OpenCascade.js (WASM)
+- **Build Tool**: Vite
+
+## Development
+
+The web app runs on Vite with hot module replacement (HMR). Changes to source files will automatically reload in the browser.
+
+### Package Dependencies
+
+The web app depends on internal packages that are built automatically:
+- `@vibecad/core` - Core CAD logic and types
+- `@vibecad/kernel` - OpenCascade.js bindings
+- `@vibecad/react` - Shared React components
+
+Turborepo handles the build order automatically.
+
+## License
+
+MIT
