@@ -540,7 +540,7 @@ export function Viewport() {
     sceneRef.current = scene;
 
     // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 50000);
     camera.position.set(50, 50, 50);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
