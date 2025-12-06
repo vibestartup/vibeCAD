@@ -513,6 +513,8 @@ export function Viewport() {
   const planeGroupRef = useRef<THREE.Group | null>(null);
   const gridGroupRef = useRef<THREE.Group | null>(null);
   const lastGridSpacingRef = useRef<number>(0);
+  const previewGroupRef = useRef<THREE.Group | null>(null);
+  const cursorPointRef = useRef<THREE.Mesh | null>(null);
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
@@ -528,6 +530,8 @@ export function Viewport() {
   const activeSketchId = useCadStore((s) => s.activeSketchId);
   const setSketchMousePos = useCadStore((s) => s.setSketchMousePos);
   const handleSketchClick = useCadStore((s) => s.handleSketchClick);
+  const sketchMousePos = useCadStore((s) => s.sketchMousePos);
+  const sketchDrawingState = useCadStore((s) => s.sketchDrawingState);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -618,6 +622,19 @@ export function Viewport() {
     const planeGroup = new THREE.Group();
     scene.add(planeGroup);
     planeGroupRef.current = planeGroup;
+
+    // Preview group for in-progress sketch drawing
+    const previewGroup = new THREE.Group();
+    scene.add(previewGroup);
+    previewGroupRef.current = previewGroup;
+
+    // Cursor point (constant screen size)
+    const cursorGeometry = new THREE.SphereGeometry(1, 16, 16);
+    const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0x69db7c });
+    const cursorPoint = new THREE.Mesh(cursorGeometry, cursorMaterial);
+    cursorPoint.visible = false;
+    scene.add(cursorPoint);
+    cursorPointRef.current = cursorPoint;
 
     // Animation loop
     let frameId: number;
@@ -860,6 +877,170 @@ export function Viewport() {
       sketchGroup.add(sketchLines);
     }
   }, [studio, timelinePosition]);
+
+  // Update sketch preview and cursor point
+  useEffect(() => {
+    const previewGroup = previewGroupRef.current;
+    const cursorPoint = cursorPointRef.current;
+    const camera = cameraRef.current;
+    if (!previewGroup || !cursorPoint || !camera) return;
+
+    // Clear previous preview geometry
+    while (previewGroup.children.length > 0) {
+      const child = previewGroup.children[0];
+      previewGroup.remove(child);
+      if (child instanceof THREE.Line) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    }
+
+    // Hide cursor if not in sketch mode or no mouse position
+    if (editorMode !== "sketch" || !sketchMousePos || !activeSketchPlane) {
+      cursorPoint.visible = false;
+      return;
+    }
+
+    // Convert sketch 2D to 3D world position (swap Y/Z for Three.js)
+    const sketchTo3D = (x: number, y: number): THREE.Vector3 => {
+      const plane = activeSketchPlane;
+      // Calculate world position: origin + x*axisX + y*axisY
+      const worldX = plane.origin[0] + x * plane.axisX[0] + y * plane.axisY[0];
+      const worldY = plane.origin[1] + x * plane.axisX[1] + y * plane.axisY[1];
+      const worldZ = plane.origin[2] + x * plane.axisX[2] + y * plane.axisY[2];
+      // Swap Y/Z for Three.js coordinate system
+      return new THREE.Vector3(worldX, worldZ, worldY);
+    };
+
+    // Update cursor position
+    const cursorPos = sketchTo3D(sketchMousePos.x, sketchMousePos.y);
+    cursorPoint.position.copy(cursorPos);
+    cursorPoint.visible = true;
+
+    // Scale cursor for constant screen size (target ~6 pixels)
+    const distToCamera = cursorPoint.position.distanceTo(camera.position);
+    const scale = distToCamera * 0.006;
+    cursorPoint.scale.setScalar(scale);
+
+    // Draw preview based on drawing state
+    const previewMaterial = new THREE.LineBasicMaterial({
+      color: 0x69db7c,
+      linewidth: 2,
+    });
+
+    if (sketchDrawingState.type === "line" && sketchDrawingState.start) {
+      const startPos = sketchTo3D(sketchDrawingState.start.x, sketchDrawingState.start.y);
+      const endPos = cursorPos;
+      const geometry = new THREE.BufferGeometry().setFromPoints([startPos, endPos]);
+      const line = new THREE.Line(geometry, previewMaterial);
+      previewGroup.add(line);
+    } else if (sketchDrawingState.type === "rect" && sketchDrawingState.start) {
+      const s = sketchDrawingState.start;
+      const e = sketchMousePos;
+      // Draw rectangle as 4 lines
+      const p1 = sketchTo3D(s.x, s.y);
+      const p2 = sketchTo3D(e.x, s.y);
+      const p3 = sketchTo3D(e.x, e.y);
+      const p4 = sketchTo3D(s.x, e.y);
+      const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2, p3, p4, p1]);
+      const line = new THREE.Line(geometry, previewMaterial);
+      previewGroup.add(line);
+    } else if (sketchDrawingState.type === "circle" && sketchDrawingState.center) {
+      const center = sketchDrawingState.center;
+      const dx = sketchMousePos.x - center.x;
+      const dy = sketchMousePos.y - center.y;
+      const radius = Math.sqrt(dx * dx + dy * dy);
+      if (radius > 0) {
+        // Draw circle as line segments
+        const segments = 48;
+        const points: THREE.Vector3[] = [];
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const x = center.x + Math.cos(angle) * radius;
+          const y = center.y + Math.sin(angle) * radius;
+          points.push(sketchTo3D(x, y));
+        }
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, previewMaterial);
+        previewGroup.add(line);
+      }
+    } else if (sketchDrawingState.type === "arc") {
+      if (sketchDrawingState.center && sketchDrawingState.start) {
+        // Draw arc preview
+        const center = sketchDrawingState.center;
+        const start = sketchDrawingState.start;
+        const dx1 = start.x - center.x;
+        const dy1 = start.y - center.y;
+        const radius = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const startAngle = Math.atan2(dy1, dx1);
+        const dx2 = sketchMousePos.x - center.x;
+        const dy2 = sketchMousePos.y - center.y;
+        const endAngle = Math.atan2(dy2, dx2);
+
+        if (radius > 0) {
+          let sweep = endAngle - startAngle;
+          if (sweep < 0) sweep += Math.PI * 2;
+
+          const segments = 32;
+          const points: THREE.Vector3[] = [];
+          for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const angle = startAngle + sweep * t;
+            const x = center.x + Math.cos(angle) * radius;
+            const y = center.y + Math.sin(angle) * radius;
+            points.push(sketchTo3D(x, y));
+          }
+          const geometry = new THREE.BufferGeometry().setFromPoints(points);
+          const line = new THREE.Line(geometry, previewMaterial);
+          previewGroup.add(line);
+        }
+      } else if (sketchDrawingState.center) {
+        // Draw radius line from center to cursor
+        const centerPos = sketchTo3D(sketchDrawingState.center.x, sketchDrawingState.center.y);
+        const geometry = new THREE.BufferGeometry().setFromPoints([centerPos, cursorPos]);
+        const line = new THREE.Line(geometry, previewMaterial);
+        previewGroup.add(line);
+      }
+    }
+
+    // Also draw start point markers for multi-click tools
+    if (sketchDrawingState.type !== "idle") {
+      const startMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0x69db7c });
+      const startMarkerGeometry = new THREE.SphereGeometry(1, 12, 12);
+
+      if (sketchDrawingState.type === "line" || sketchDrawingState.type === "rect") {
+        const startPos = sketchTo3D(sketchDrawingState.start.x, sketchDrawingState.start.y);
+        const startMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
+        startMarker.position.copy(startPos);
+        const markerScale = startPos.distanceTo(camera.position) * 0.005;
+        startMarker.scale.setScalar(markerScale);
+        previewGroup.add(startMarker);
+      } else if (sketchDrawingState.type === "circle") {
+        const centerPos = sketchTo3D(sketchDrawingState.center.x, sketchDrawingState.center.y);
+        const centerMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
+        centerMarker.position.copy(centerPos);
+        const markerScale = centerPos.distanceTo(camera.position) * 0.005;
+        centerMarker.scale.setScalar(markerScale);
+        previewGroup.add(centerMarker);
+      } else if (sketchDrawingState.type === "arc" && sketchDrawingState.center) {
+        const centerPos = sketchTo3D(sketchDrawingState.center.x, sketchDrawingState.center.y);
+        const centerMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
+        centerMarker.position.copy(centerPos);
+        const markerScale = centerPos.distanceTo(camera.position) * 0.005;
+        centerMarker.scale.setScalar(markerScale);
+        previewGroup.add(centerMarker);
+
+        if (sketchDrawingState.type === "arc" && sketchDrawingState.start) {
+          const startPos = sketchTo3D(sketchDrawingState.start.x, sketchDrawingState.start.y);
+          const startMarker = new THREE.Mesh(startMarkerGeometry.clone(), startMarkerMaterial);
+          startMarker.position.copy(startPos);
+          const sMarkerScale = startPos.distanceTo(camera.position) * 0.005;
+          startMarker.scale.setScalar(sMarkerScale);
+          previewGroup.add(startMarker);
+        }
+      }
+    }
+  }, [editorMode, sketchMousePos, sketchDrawingState, activeSketchPlane]);
 
   // Show/hide datum planes based on editor mode
   useEffect(() => {
