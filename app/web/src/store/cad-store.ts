@@ -120,6 +120,7 @@ interface CadActions {
 
   // Operations
   updateOp: (opId: OpId, updates: Partial<Op>) => void;
+  deleteOp: (opId: OpId) => void;
 
   // Parameters
   addParam: (name: string, value: number, unit?: string) => void;
@@ -365,6 +366,53 @@ export const useCadStore = create<CadStore>((set, get) => ({
     set({
       document: newDoc,
       historyState: pushState(historyState, newDoc),
+    });
+  },
+
+  deleteOp: (opId) => {
+    const { document, activeStudioId, historyState, selection } = get();
+    if (!activeStudioId) return;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return;
+
+    const opNode = studio.opGraph.get(opId);
+    if (!opNode) return;
+
+    // Remove from opGraph
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.delete(opId);
+
+    // Remove from opOrder
+    const newOpOrder = studio.opOrder.filter((id) => id !== opId);
+
+    // If it's a sketch operation, also remove the sketch
+    let newSketches = studio.sketches;
+    if (opNode.op.type === "sketch") {
+      const sketchOp = opNode.op as SketchOp;
+      newSketches = new Map(studio.sketches);
+      newSketches.delete(sketchOp.sketchId);
+    }
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+      sketches: newSketches,
+    };
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    // Remove from selection if selected
+    const newSelection = new Set(selection);
+    newSelection.delete(opId);
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      selection: newSelection,
     });
   },
 

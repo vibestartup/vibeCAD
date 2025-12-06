@@ -313,6 +313,7 @@ export function OpTimeline() {
   const setTimelinePosition = useCadStore((s) => s.setTimelinePosition);
   const enterSketchMode = useCadStore((s) => s.enterSketchMode);
   const updateOp = useCadStore((s) => s.updateOp);
+  const deleteOp = useCadStore((s) => s.deleteOp);
   const rebuild = useCadStore((s) => s.rebuild);
 
   // Context menu state
@@ -377,6 +378,31 @@ export function OpTimeline() {
       // Trigger rebuild to update the 3D view
       rebuild();
     }
+    closeContextMenu();
+  };
+
+  const handleDelete = () => {
+    if (contextMenu.op) {
+      deleteOp(contextMenu.op.id);
+      // Trigger rebuild to update the 3D view
+      rebuild();
+    }
+    closeContextMenu();
+  };
+
+  const handleRename = () => {
+    if (contextMenu.op) {
+      const newName = prompt("Enter new name:", contextMenu.op.name);
+      if (newName && newName.trim() !== "") {
+        updateOp(contextMenu.op.id, { name: newName.trim() });
+      }
+    }
+    closeContextMenu();
+  };
+
+  const handleDuplicate = () => {
+    // TODO: Implement duplicate operation
+    // This would need to deep clone the operation and associated data
     closeContextMenu();
   };
 
@@ -476,17 +502,20 @@ export function OpTimeline() {
             />
           )}
           <ContextMenuItem
+            label="Rename"
+            icon="✏"
+            onClick={handleRename}
+          />
+          <ContextMenuItem
             label={contextMenu.op.suppressed ? "Unsuppress" : "Suppress"}
             icon={contextMenu.op.suppressed ? "✓" : "○"}
             onClick={handleToggleSuppress}
           />
+          <div style={{ height: 1, backgroundColor: "#444", margin: "4px 0" }} />
           <ContextMenuItem
             label="Delete"
             icon="×"
-            onClick={() => {
-              // TODO: Delete operation
-              closeContextMenu();
-            }}
+            onClick={handleDelete}
           />
         </div>
       )}
