@@ -525,6 +525,20 @@ export function Viewport() {
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const editorMode = useCadStore((s) => s.editorMode);
   const createNewSketch = useCadStore((s) => s.createNewSketch);
+  const activeSketchId = useCadStore((s) => s.activeSketchId);
+  const setSketchMousePos = useCadStore((s) => s.setSketchMousePos);
+  const handleSketchClick = useCadStore((s) => s.handleSketchClick);
+
+  // Get the active sketch and its plane for raycasting
+  const activeSketch = React.useMemo(() => {
+    if (!studio || !activeSketchId) return null;
+    return studio.sketches.get(activeSketchId) ?? null;
+  }, [studio, activeSketchId]);
+
+  const activeSketchPlane = React.useMemo(() => {
+    if (!activeSketch) return null;
+    return getPlaneById(activeSketch.planeId, studio?.planes);
+  }, [activeSketch, studio?.planes]);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -911,65 +925,125 @@ export function Viewport() {
     planeGroup.add(yzMesh);
   }, [editorMode, hoveredPlane]);
 
-  // Handle mouse events for plane selection
+  // Handle mouse events for plane selection and sketch mode raycasting
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (editorMode !== "select-plane") {
-      if (hoveredPlane !== null) setHoveredPlane(null);
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    if (!container || !camera) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+
+    // Handle sketch mode - raycast onto sketch plane
+    if (editorMode === "sketch" && activeSketchPlane) {
+      // Create a Three.js plane from the sketch plane
+      // Note: In our coordinate system, Y and Z are swapped for Three.js
+      const planeOrigin = new THREE.Vector3(
+        activeSketchPlane.origin[0],
+        activeSketchPlane.origin[2], // Swap Y/Z
+        activeSketchPlane.origin[1]
+      );
+
+      // Calculate plane normal from cross product of axes
+      const axisX = new THREE.Vector3(
+        activeSketchPlane.axisX[0],
+        activeSketchPlane.axisX[2],
+        activeSketchPlane.axisX[1]
+      );
+      const axisY = new THREE.Vector3(
+        activeSketchPlane.axisY[0],
+        activeSketchPlane.axisY[2],
+        activeSketchPlane.axisY[1]
+      );
+      const normal = new THREE.Vector3().crossVectors(axisX, axisY).normalize();
+
+      // Create Three.js Plane
+      const plane = new THREE.Plane();
+      plane.setFromNormalAndCoplanarPoint(normal, planeOrigin);
+
+      // Find intersection point
+      const intersectPoint = new THREE.Vector3();
+      const intersected = raycaster.ray.intersectPlane(plane, intersectPoint);
+
+      if (intersected) {
+        // Convert 3D intersection to 2D sketch coordinates
+        // sketchX = dot(worldPoint - origin, axisX)
+        // sketchY = dot(worldPoint - origin, axisY)
+        const relativePoint = intersectPoint.clone().sub(planeOrigin);
+        const sketchX = relativePoint.dot(axisX);
+        const sketchY = relativePoint.dot(axisY);
+
+        // Snap to grid (10mm)
+        const gridSize = 10;
+        const snappedX = Math.round(sketchX / gridSize) * gridSize;
+        const snappedY = Math.round(sketchY / gridSize) * gridSize;
+
+        setSketchMousePos({ x: snappedX, y: snappedY });
+      }
       return;
     }
 
-    const container = containerRef.current;
-    const camera = cameraRef.current;
-    const planeGroup = planeGroupRef.current;
-    if (!container || !camera || !planeGroup) return;
+    // Handle plane selection mode
+    if (editorMode === "select-plane") {
+      const planeGroup = planeGroupRef.current;
+      if (!planeGroup) return;
 
-    const rect = container.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
-
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, camera);
-
-    const intersects = raycaster.intersectObjects(planeGroup.children);
-    if (intersects.length > 0) {
-      const planeId = intersects[0].object.userData.planeId;
-      if (planeId && planeId !== hoveredPlane) {
-        setHoveredPlane(planeId);
+      const intersects = raycaster.intersectObjects(planeGroup.children);
+      if (intersects.length > 0) {
+        const planeId = intersects[0].object.userData.planeId;
+        if (planeId && planeId !== hoveredPlane) {
+          setHoveredPlane(planeId);
+        }
+      } else {
+        if (hoveredPlane !== null) setHoveredPlane(null);
       }
-    } else {
-      if (hoveredPlane !== null) setHoveredPlane(null);
+      return;
     }
-  }, [editorMode, hoveredPlane]);
+
+    // Clear sketch mouse pos and hovered plane in other modes
+    if (hoveredPlane !== null) setHoveredPlane(null);
+  }, [editorMode, hoveredPlane, activeSketchPlane, setSketchMousePos]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    if (editorMode !== "select-plane") return;
+    // Handle sketch mode clicks
+    if (editorMode === "sketch") {
+      handleSketchClick();
+      return;
+    }
 
-    const container = containerRef.current;
-    const camera = cameraRef.current;
-    const planeGroup = planeGroupRef.current;
-    if (!container || !camera || !planeGroup) return;
+    // Handle plane selection mode
+    if (editorMode === "select-plane") {
+      const container = containerRef.current;
+      const camera = cameraRef.current;
+      const planeGroup = planeGroupRef.current;
+      if (!container || !camera || !planeGroup) return;
 
-    const rect = container.getBoundingClientRect();
-    const mouse = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
+      const rect = container.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(mouse, camera);
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
 
-    const intersects = raycaster.intersectObjects(planeGroup.children);
-    if (intersects.length > 0) {
-      const planeId = intersects[0].object.userData.planeId;
-      if (planeId) {
-        console.log("[Viewport] Clicked plane:", planeId);
-        // Create sketch on the selected plane
-        createNewSketch(planeId);
+      const intersects = raycaster.intersectObjects(planeGroup.children);
+      if (intersects.length > 0) {
+        const planeId = intersects[0].object.userData.planeId;
+        if (planeId) {
+          console.log("[Viewport] Clicked plane:", planeId);
+          // Create sketch on the selected plane
+          createNewSketch(planeId);
+        }
       }
     }
-  }, [editorMode, createNewSketch]);
+  }, [editorMode, createNewSketch, handleSketchClick]);
 
   // View controls
   const handleResetView = useCallback(() => {

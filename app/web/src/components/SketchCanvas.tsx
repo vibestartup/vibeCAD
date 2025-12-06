@@ -23,14 +23,15 @@ type DrawingState =
 
 const styles = {
   // Active sketch editing mode - transparent overlay on top of 3D viewport
+  // pointerEvents: "none" lets mouse events pass through to Viewport for raycasting
+  // The onClick handler still works because React handles it differently
   overlayActive: {
     position: "absolute",
     top: 0,
     left: 0,
     width: "100%",
     height: "100%",
-    pointerEvents: "auto",
-    cursor: "crosshair",
+    pointerEvents: "none",
     zIndex: 100,
     // Transparent - let 3D viewport show through
   } as React.CSSProperties,
@@ -106,15 +107,16 @@ export function SketchCanvas() {
   const document = useCadStore((s) => s.document);
   const activeTool = useCadStore((s) => s.activeTool);
   const editorMode = useCadStore((s) => s.editorMode);
-  const addLine = useCadStore((s) => s.addLine);
-  const addRectangle = useCadStore((s) => s.addRectangle);
-  const addCircle = useCadStore((s) => s.addCircle);
-  const addArc = useCadStore((s) => s.addArc);
-  const setActiveTool = useCadStore((s) => s.setActiveTool);
+  const sketchMousePos = useCadStore((s) => s.sketchMousePos);
+  const sketchDrawingState = useCadStore((s) => s.sketchDrawingState);
+  const cancelSketchDrawing = useCadStore((s) => s.cancelSketchDrawing);
 
-  const [drawingState, setDrawingState] = useState<DrawingState>({ type: "idle" });
-  const [mousePos, setMousePos] = useState<Point2D>({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+
+  // Use store's sketchMousePos (calculated by Viewport via raycasting)
+  const mousePos: Point2D = sketchMousePos ?? { x: 0, y: 0 };
+  // Use store's drawing state
+  const drawingState = sketchDrawingState as DrawingState;
 
   // Determine if we're in active sketch editing mode
   const isSketchTool = ["line", "rect", "circle", "arc"].includes(activeTool);
@@ -171,13 +173,13 @@ export function SketchCanvas() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setDrawingState({ type: "idle" });
+        cancelSketchDrawing();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [cancelSketchDrawing]);
 
   // Draw the canvas
   useEffect(() => {
@@ -266,102 +268,6 @@ export function SketchCanvas() {
     }
   }, [canvasSize, activeSketch, isActiveSketchMode, drawingState, mousePos, sketchToScreen]);
 
-  // Handle mouse move
-  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
-    const sketchCoords = screenToSketch(screenX, screenY);
-
-    // Snap to grid
-    const snapped = {
-      x: Math.round(sketchCoords.x / GRID_SIZE) * GRID_SIZE,
-      y: Math.round(sketchCoords.y / GRID_SIZE) * GRID_SIZE,
-    };
-
-    setMousePos(snapped);
-  }, [screenToSketch]);
-
-  // Handle click
-  const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
-    console.log("[SketchCanvas] handleClick:", { activeSketchId, activeTool, mousePos, drawingState });
-    if (!activeSketchId) {
-      console.log("[SketchCanvas] No active sketch, ignoring click");
-      return;
-    }
-
-    const tool = activeTool;
-    const pos = mousePos;
-
-    switch (tool) {
-      case "line":
-        if (drawingState.type === "line") {
-          // Complete the line
-          console.log("[SketchCanvas] Completing line from", drawingState.start, "to", pos);
-          addLine(drawingState.start.x, drawingState.start.y, pos.x, pos.y);
-          setDrawingState({ type: "idle" });
-        } else {
-          // Start a new line
-          console.log("[SketchCanvas] Starting line at", pos);
-          setDrawingState({ type: "line", start: pos });
-        }
-        break;
-
-      case "rect":
-        if (drawingState.type === "rect") {
-          // Complete the rectangle
-          addRectangle(drawingState.start.x, drawingState.start.y, pos.x, pos.y);
-          setDrawingState({ type: "idle" });
-        } else {
-          // Start a new rectangle
-          setDrawingState({ type: "rect", start: pos });
-        }
-        break;
-
-      case "circle":
-        if (drawingState.type === "circle") {
-          // Complete the circle
-          const dx = pos.x - drawingState.center.x;
-          const dy = pos.y - drawingState.center.y;
-          const radius = Math.sqrt(dx * dx + dy * dy);
-          if (radius > 0) {
-            addCircle(drawingState.center.x, drawingState.center.y, radius);
-          }
-          setDrawingState({ type: "idle" });
-        } else {
-          // Start a new circle
-          setDrawingState({ type: "circle", center: pos });
-        }
-        break;
-
-      case "arc":
-        if (drawingState.type === "arc") {
-          if (drawingState.step === "start" && drawingState.center) {
-            // Set start point
-            setDrawingState({ ...drawingState, step: "end", start: pos });
-          } else if (drawingState.step === "end" && drawingState.center && drawingState.start) {
-            // Complete the arc
-            addArc(
-              drawingState.center.x,
-              drawingState.center.y,
-              drawingState.start.x,
-              drawingState.start.y,
-              pos.x,
-              pos.y,
-              false
-            );
-            setDrawingState({ type: "idle" });
-          }
-        } else {
-          // Start a new arc - first click is center
-          setDrawingState({ type: "arc", step: "start", center: pos });
-        }
-        break;
-    }
-  }, [activeSketchId, activeTool, drawingState, mousePos, addLine, addRectangle, addCircle, addArc]);
-
   // Only render in active sketch editing mode
   // Object mode sketch rendering is now handled by Viewport in 3D
   if (!isActiveSketchMode) {
@@ -369,12 +275,11 @@ export function SketchCanvas() {
   }
 
   // In active sketch mode, render interactive overlay
+  // pointerEvents: none lets mouse events pass through to Viewport for raycasting and clicks
   return (
     <div
       ref={containerRef}
       style={styles.overlayActive}
-      onMouseMove={handleMouseMove}
-      onClick={handleClick}
     >
       <canvas ref={canvasRef} style={styles.canvas} />
 

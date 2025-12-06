@@ -66,6 +66,17 @@ interface CadState {
 
   // Kernel reference (set after loading)
   kernel: Kernel | null;
+
+  // Sketch interaction state (set by Viewport via raycasting)
+  sketchMousePos: { x: number; y: number } | null;
+
+  // Sketch drawing state
+  sketchDrawingState:
+    | { type: "idle" }
+    | { type: "line"; start: { x: number; y: number } }
+    | { type: "rect"; start: { x: number; y: number } }
+    | { type: "circle"; center: { x: number; y: number } }
+    | { type: "arc"; step: "center" | "start" | "end"; center?: { x: number; y: number }; start?: { x: number; y: number } };
 }
 
 interface CadActions {
@@ -123,6 +134,13 @@ interface CadActions {
   addRectangle: (x1: number, y1: number, x2: number, y2: number) => PrimitiveId | null;
   addArc: (centerX: number, centerY: number, startX: number, startY: number, endX: number, endY: number, clockwise?: boolean) => PrimitiveId | null;
   finishSketch: () => void;
+
+  // Sketch mouse position (set by Viewport via raycasting onto sketch plane)
+  setSketchMousePos: (pos: { x: number; y: number } | null) => void;
+
+  // Sketch drawing actions
+  handleSketchClick: () => void;
+  cancelSketchDrawing: () => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -148,6 +166,8 @@ function createInitialState(): CadState {
     isRebuilding: false,
     rebuildError: null,
     kernel: null,
+    sketchMousePos: null,
+    sketchDrawingState: { type: "idle" },
   };
 }
 
@@ -853,6 +873,89 @@ export const useCadStore = create<CadStore>((set, get) => ({
     if (activeSketchId) {
       set({ activeSketchId: null, activeTool: "select" });
     }
+  },
+
+  setSketchMousePos: (pos) => {
+    set({ sketchMousePos: pos });
+  },
+
+  handleSketchClick: () => {
+    const { activeSketchId, activeTool, sketchMousePos, sketchDrawingState } = get();
+    if (!activeSketchId || !sketchMousePos) return;
+
+    const pos = sketchMousePos;
+    const addLine = get().addLine;
+    const addRectangle = get().addRectangle;
+    const addCircle = get().addCircle;
+    const addArc = get().addArc;
+
+    switch (activeTool) {
+      case "line":
+        if (sketchDrawingState.type === "line") {
+          // Complete the line
+          addLine(sketchDrawingState.start.x, sketchDrawingState.start.y, pos.x, pos.y);
+          set({ sketchDrawingState: { type: "idle" } });
+        } else {
+          // Start a new line
+          set({ sketchDrawingState: { type: "line", start: pos } });
+        }
+        break;
+
+      case "rect":
+        if (sketchDrawingState.type === "rect") {
+          // Complete the rectangle
+          addRectangle(sketchDrawingState.start.x, sketchDrawingState.start.y, pos.x, pos.y);
+          set({ sketchDrawingState: { type: "idle" } });
+        } else {
+          // Start a new rectangle
+          set({ sketchDrawingState: { type: "rect", start: pos } });
+        }
+        break;
+
+      case "circle":
+        if (sketchDrawingState.type === "circle") {
+          // Complete the circle
+          const dx = pos.x - sketchDrawingState.center.x;
+          const dy = pos.y - sketchDrawingState.center.y;
+          const radius = Math.sqrt(dx * dx + dy * dy);
+          if (radius > 0) {
+            addCircle(sketchDrawingState.center.x, sketchDrawingState.center.y, radius);
+          }
+          set({ sketchDrawingState: { type: "idle" } });
+        } else {
+          // Start a new circle
+          set({ sketchDrawingState: { type: "circle", center: pos } });
+        }
+        break;
+
+      case "arc":
+        if (sketchDrawingState.type === "arc") {
+          if (sketchDrawingState.step === "start" && sketchDrawingState.center) {
+            // Set start point
+            set({ sketchDrawingState: { ...sketchDrawingState, step: "end", start: pos } });
+          } else if (sketchDrawingState.step === "end" && sketchDrawingState.center && sketchDrawingState.start) {
+            // Complete the arc
+            addArc(
+              sketchDrawingState.center.x,
+              sketchDrawingState.center.y,
+              sketchDrawingState.start.x,
+              sketchDrawingState.start.y,
+              pos.x,
+              pos.y,
+              false
+            );
+            set({ sketchDrawingState: { type: "idle" } });
+          }
+        } else {
+          // Start a new arc - first click is center
+          set({ sketchDrawingState: { type: "arc", step: "start", center: pos } });
+        }
+        break;
+    }
+  },
+
+  cancelSketchDrawing: () => {
+    set({ sketchDrawingState: { type: "idle" } });
   },
 }));
 
