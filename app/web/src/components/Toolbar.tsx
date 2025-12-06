@@ -187,6 +187,8 @@ export function Toolbar() {
   const undo = useCadStore((s) => s.undo);
   const redo = useCadStore((s) => s.redo);
   const isRebuilding = useCadStore(selectIsRebuilding);
+  const gridSnappingEnabled = useCadStore((s) => s.gridSnappingEnabled);
+  const toggleGridSnapping = useCadStore((s) => s.toggleGridSnapping);
 
   // Handle tool click - some tools trigger immediate actions
   const handleToolClick = React.useCallback((toolId: string) => {
@@ -397,10 +399,27 @@ export function Toolbar() {
         </>
       )}
 
-      {/* Exit Sketch Mode button */}
+      {/* Sketch Mode controls */}
       {editorMode === "sketch" && (
         <>
           <div style={styles.divider} />
+          {/* Grid Snap Toggle */}
+          <button
+            style={{
+              ...styles.iconButton,
+              backgroundColor: gridSnappingEnabled ? "#4dabf7" : "#333",
+              color: gridSnappingEnabled ? "#000" : "#888",
+              padding: "4px 12px",
+              borderRadius: 4,
+              fontSize: 12,
+              fontWeight: 500,
+              width: "auto",
+            }}
+            onClick={toggleGridSnapping}
+            title={`Grid Snapping: ${gridSnappingEnabled ? "ON" : "OFF"}`}
+          >
+            ⊞ Snap
+          </button>
           <button
             style={{
               ...styles.iconButton,

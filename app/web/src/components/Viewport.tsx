@@ -397,6 +397,69 @@ function sketchPointTo3D(point: Vec2, plane: SketchPlane): THREE.Vector3 {
   return new THREE.Vector3(world[0], world[2], world[1]); // Swap Y/Z for Three.js (Y is up)
 }
 
+// Detect closed loops from line segments
+function findClosedLoops(
+  lines: Array<{ start: Vec2; end: Vec2 }>,
+  tolerance: number = 0.1
+): Vec2[][] {
+  const loops: Vec2[][] = [];
+  const used = new Set<number>();
+
+  const dist = (a: Vec2, b: Vec2) => Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
+
+  for (let startIdx = 0; startIdx < lines.length; startIdx++) {
+    if (used.has(startIdx)) continue;
+
+    const loop: Vec2[] = [lines[startIdx].start, lines[startIdx].end];
+    const usedInLoop = new Set<number>([startIdx]);
+    let current = lines[startIdx].end;
+    const loopStart = lines[startIdx].start;
+    let foundNext = true;
+
+    while (foundNext) {
+      foundNext = false;
+      for (let i = 0; i < lines.length; i++) {
+        if (usedInLoop.has(i)) continue;
+        const line = lines[i];
+
+        if (dist(current, line.start) < tolerance) {
+          // Check if we've closed the loop
+          if (dist(line.end, loopStart) < tolerance && usedInLoop.size >= 2) {
+            loop.push(line.end);
+            usedInLoop.forEach(idx => used.add(idx));
+            used.add(i);
+            loops.push(loop);
+            foundNext = false;
+            break;
+          }
+          loop.push(line.end);
+          current = line.end;
+          usedInLoop.add(i);
+          foundNext = true;
+          break;
+        } else if (dist(current, line.end) < tolerance) {
+          // Check if we've closed the loop
+          if (dist(line.start, loopStart) < tolerance && usedInLoop.size >= 2) {
+            loop.push(line.start);
+            usedInLoop.forEach(idx => used.add(idx));
+            used.add(i);
+            loops.push(loop);
+            foundNext = false;
+            break;
+          }
+          loop.push(line.start);
+          current = line.start;
+          usedInLoop.add(i);
+          foundNext = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return loops;
+}
+
 // Create 3D line geometry from sketch primitives
 function createSketchLines(
   sketch: Sketch,
@@ -405,11 +468,19 @@ function createSketchLines(
   opacity: number = 0.5
 ): THREE.Group {
   const group = new THREE.Group();
-  const material = new THREE.LineBasicMaterial({
+  const lineMaterial = new THREE.LineBasicMaterial({
     color,
     transparent: true,
     opacity,
     linewidth: 1,
+  });
+
+  // Fill material for closed shapes (more transparent)
+  const fillMaterial = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: opacity * 0.3,
+    side: THREE.DoubleSide,
   });
 
   // Get point position helper
@@ -421,17 +492,23 @@ function createSketchLines(
     return undefined;
   };
 
+  // Collect lines for loop detection
+  const lineSegments: Array<{ start: Vec2; end: Vec2 }> = [];
+
   // Draw each primitive
   for (const [, prim] of sketch.primitives) {
     if (prim.type === "line") {
       const startPos = getPointPos(prim.start);
       const endPos = getPointPos(prim.end);
       if (startPos && endPos) {
+        // Add to line segments for loop detection
+        lineSegments.push({ start: startPos, end: endPos });
+
         const geometry = new THREE.BufferGeometry().setFromPoints([
           sketchPointTo3D(startPos, plane),
           sketchPointTo3D(endPos, plane),
         ]);
-        const line = new THREE.Line(geometry, material);
+        const line = new THREE.Line(geometry, lineMaterial);
         group.add(line);
       }
     } else if (prim.type === "circle") {
@@ -447,8 +524,30 @@ function createSketchLines(
           points.push(sketchPointTo3D([x, y], plane));
         }
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geometry, material);
+        const line = new THREE.Line(geometry, lineMaterial);
         group.add(line);
+
+        // Add filled circle mesh
+        const circleShape = new THREE.Shape();
+        circleShape.absarc(0, 0, prim.radius, 0, Math.PI * 2, false);
+        const fillGeometry = new THREE.ShapeGeometry(circleShape);
+        const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
+
+        // Position and orient the fill to match the plane
+        const center3D = sketchPointTo3D(centerPos, plane);
+        fillMesh.position.copy(center3D);
+
+        // Orient to plane normal
+        const normal = new THREE.Vector3(
+          plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1],
+          plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2],
+          plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0]
+        ).normalize();
+        // Swap Y/Z for Three.js
+        const threeNormal = new THREE.Vector3(normal.x, normal.z, normal.y);
+        fillMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), threeNormal);
+
+        group.add(fillMesh);
       }
     } else if (prim.type === "arc") {
       const centerPos = getPointPos(prim.center);
@@ -480,7 +579,7 @@ function createSketchLines(
           points.push(sketchPointTo3D([x, y], plane));
         }
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geometry, material);
+        const line = new THREE.Line(geometry, lineMaterial);
         group.add(line);
       }
     } else if (prim.type === "point") {
@@ -496,6 +595,42 @@ function createSketchLines(
       const sphere = new THREE.Mesh(pointGeometry, pointMaterial);
       sphere.position.copy(worldPos);
       group.add(sphere);
+    }
+  }
+
+  // Find and fill closed loops from line segments
+  if (lineSegments.length >= 3) {
+    const loops = findClosedLoops(lineSegments);
+    for (const loop of loops) {
+      // Create a THREE.Shape from the loop points (in 2D sketch coords)
+      const shape = new THREE.Shape();
+      shape.moveTo(loop[0][0], loop[0][1]);
+      for (let i = 1; i < loop.length; i++) {
+        shape.lineTo(loop[i][0], loop[i][1]);
+      }
+      shape.closePath();
+
+      const fillGeometry = new THREE.ShapeGeometry(shape);
+      const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
+
+      // Position at plane origin and orient to plane
+      const origin3D = new THREE.Vector3(
+        plane.origin[0],
+        plane.origin[2], // Swap Y/Z
+        plane.origin[1]
+      );
+      fillMesh.position.copy(origin3D);
+
+      // Orient to plane - the shape is in XY, we need to rotate to match the sketch plane
+      const normal = new THREE.Vector3(
+        plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1],
+        plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2],
+        plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0]
+      ).normalize();
+      const threeNormal = new THREE.Vector3(normal.x, normal.z, normal.y);
+      fillMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), threeNormal);
+
+      group.add(fillMesh);
     }
   }
 
@@ -532,6 +667,7 @@ export function Viewport() {
   const handleSketchClick = useCadStore((s) => s.handleSketchClick);
   const sketchMousePos = useCadStore((s) => s.sketchMousePos);
   const sketchDrawingState = useCadStore((s) => s.sketchDrawingState);
+  const gridSnappingEnabled = useCadStore((s) => s.gridSnappingEnabled);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -669,6 +805,24 @@ export function Viewport() {
         const newGrid = createDynamicGrid(spacing);
         scene.add(newGrid);
         gridGroupRef.current = newGrid;
+      }
+
+      // Update cursor point scale for constant screen size
+      if (cursorPointRef.current && cursorPointRef.current.visible) {
+        const distToCamera = cursorPointRef.current.position.distanceTo(camera.position);
+        const scale = distToCamera * 0.006;
+        cursorPointRef.current.scale.setScalar(scale);
+      }
+
+      // Update preview group marker scales for constant screen size
+      if (previewGroupRef.current) {
+        previewGroupRef.current.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.userData.isMarker) {
+            const distToCamera = child.position.distanceTo(camera.position);
+            const scale = distToCamera * 0.005;
+            child.scale.setScalar(scale);
+          }
+        });
       }
 
       renderer.render(scene, camera);
@@ -1012,6 +1166,7 @@ export function Viewport() {
         const startPos = sketchTo3D(sketchDrawingState.start.x, sketchDrawingState.start.y);
         const startMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
         startMarker.position.copy(startPos);
+        startMarker.userData.isMarker = true;
         const markerScale = startPos.distanceTo(camera.position) * 0.005;
         startMarker.scale.setScalar(markerScale);
         previewGroup.add(startMarker);
@@ -1019,6 +1174,7 @@ export function Viewport() {
         const centerPos = sketchTo3D(sketchDrawingState.center.x, sketchDrawingState.center.y);
         const centerMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
         centerMarker.position.copy(centerPos);
+        centerMarker.userData.isMarker = true;
         const markerScale = centerPos.distanceTo(camera.position) * 0.005;
         centerMarker.scale.setScalar(markerScale);
         previewGroup.add(centerMarker);
@@ -1026,6 +1182,7 @@ export function Viewport() {
         const centerPos = sketchTo3D(sketchDrawingState.center.x, sketchDrawingState.center.y);
         const centerMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
         centerMarker.position.copy(centerPos);
+        centerMarker.userData.isMarker = true;
         const markerScale = centerPos.distanceTo(camera.position) * 0.005;
         centerMarker.scale.setScalar(markerScale);
         previewGroup.add(centerMarker);
@@ -1034,6 +1191,7 @@ export function Viewport() {
           const startPos = sketchTo3D(sketchDrawingState.start.x, sketchDrawingState.start.y);
           const startMarker = new THREE.Mesh(startMarkerGeometry.clone(), startMarkerMaterial);
           startMarker.position.copy(startPos);
+          startMarker.userData.isMarker = true;
           const sMarkerScale = startPos.distanceTo(camera.position) * 0.005;
           startMarker.scale.setScalar(sMarkerScale);
           previewGroup.add(startMarker);
@@ -1160,12 +1318,15 @@ export function Viewport() {
         const sketchX = relativePoint.dot(axisX);
         const sketchY = relativePoint.dot(axisY);
 
-        // Snap to grid (10mm)
-        const gridSize = 10;
-        const snappedX = Math.round(sketchX / gridSize) * gridSize;
-        const snappedY = Math.round(sketchY / gridSize) * gridSize;
-
-        setSketchMousePos({ x: snappedX, y: snappedY });
+        // Conditionally snap to grid (10mm)
+        if (gridSnappingEnabled) {
+          const gridSize = 10;
+          const snappedX = Math.round(sketchX / gridSize) * gridSize;
+          const snappedY = Math.round(sketchY / gridSize) * gridSize;
+          setSketchMousePos({ x: snappedX, y: snappedY });
+        } else {
+          setSketchMousePos({ x: sketchX, y: sketchY });
+        }
       }
       return;
     }

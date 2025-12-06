@@ -77,6 +77,9 @@ interface CadState {
     | { type: "rect"; start: { x: number; y: number } }
     | { type: "circle"; center: { x: number; y: number } }
     | { type: "arc"; step: "center" | "start" | "end"; center?: { x: number; y: number }; start?: { x: number; y: number } };
+
+  // Grid snapping for sketch mode
+  gridSnappingEnabled: boolean;
 }
 
 interface CadActions {
@@ -141,6 +144,9 @@ interface CadActions {
   // Sketch drawing actions
   handleSketchClick: () => void;
   cancelSketchDrawing: () => void;
+
+  // Grid snapping toggle
+  toggleGridSnapping: () => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -168,6 +174,7 @@ function createInitialState(): CadState {
     kernel: null,
     sketchMousePos: null,
     sketchDrawingState: { type: "idle" },
+    gridSnappingEnabled: true,
   };
 }
 
@@ -956,6 +963,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   cancelSketchDrawing: () => {
     set({ sketchDrawingState: { type: "idle" } });
+  },
+
+  toggleGridSnapping: () => {
+    set((state) => ({ gridSnappingEnabled: !state.gridSnappingEnabled }));
   },
 }));
 
