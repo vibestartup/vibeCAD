@@ -18,33 +18,33 @@ interface Tool {
 
 const TOOLS: Tool[] = [
   // Selection
-  { id: "select", label: "Select", icon: "◇", category: "select", shortcut: "V" },
+  { id: "select", label: "Select", icon: "⎋", category: "select", shortcut: "V" },
 
   // Sketch tools
-  { id: "sketch", label: "New Sketch", icon: "□", category: "sketch", shortcut: "S" },
-  { id: "line", label: "Line", icon: "╱", category: "sketch", shortcut: "L" },
-  { id: "rect", label: "Rectangle", icon: "▢", category: "sketch", shortcut: "R" },
-  { id: "circle", label: "Circle", icon: "○", category: "sketch", shortcut: "C" },
-  { id: "arc", label: "Arc", icon: "◠", category: "sketch" },
+  { id: "sketch", label: "New Sketch", icon: "✎", category: "sketch", shortcut: "S" },
+  { id: "line", label: "Line", icon: "⁄", category: "sketch", shortcut: "L" },
+  { id: "rect", label: "Rectangle", icon: "▭", category: "sketch", shortcut: "R" },
+  { id: "circle", label: "Circle", icon: "◯", category: "sketch", shortcut: "C" },
+  { id: "arc", label: "Arc", icon: "⌒", category: "sketch" },
 
   // 3D Primitives
-  { id: "box", label: "Box", icon: "◻", category: "primitive" },
-  { id: "cylinder", label: "Cylinder", icon: "⬭", category: "primitive" },
-  { id: "sphere", label: "Sphere", icon: "●", category: "primitive" },
+  { id: "box", label: "Box", icon: "⬡", category: "primitive" },
+  { id: "cylinder", label: "Cylinder", icon: "⏣", category: "primitive" },
+  { id: "sphere", label: "Sphere", icon: "◉", category: "primitive" },
 
   // Operations
-  { id: "extrude", label: "Extrude", icon: "⬆", category: "operation", shortcut: "E" },
-  { id: "revolve", label: "Revolve", icon: "↻", category: "operation" },
-  { id: "sweep", label: "Sweep", icon: "⤴", category: "operation" },
-  { id: "loft", label: "Loft", icon: "⧫", category: "operation" },
+  { id: "extrude", label: "Extrude", icon: "⏶", category: "operation", shortcut: "E" },
+  { id: "revolve", label: "Revolve", icon: "⟳", category: "operation" },
+  { id: "sweep", label: "Sweep", icon: "↝", category: "operation" },
+  { id: "loft", label: "Loft", icon: "⋈", category: "operation" },
 
   // Modify
-  { id: "fillet", label: "Fillet", icon: "◜", category: "modify", shortcut: "F" },
-  { id: "chamfer", label: "Chamfer", icon: "◿", category: "modify" },
-  { id: "shell", label: "Shell", icon: "◻", category: "modify" },
-  { id: "union", label: "Union", icon: "∪", category: "modify" },
-  { id: "subtract", label: "Subtract", icon: "−", category: "modify" },
-  { id: "intersect", label: "Intersect", icon: "∩", category: "modify" },
+  { id: "fillet", label: "Fillet", icon: "⌓", category: "modify", shortcut: "F" },
+  { id: "chamfer", label: "Chamfer", icon: "⌔", category: "modify" },
+  { id: "shell", label: "Shell", icon: "▢", category: "modify" },
+  { id: "union", label: "Union", icon: "⊕", category: "modify" },
+  { id: "subtract", label: "Subtract", icon: "⊖", category: "modify" },
+  { id: "intersect", label: "Intersect", icon: "⊗", category: "modify" },
 ];
 
 const styles = {
