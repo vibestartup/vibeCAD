@@ -1,0 +1,19 @@
+{
+  "name": "@vibecad/kernel",
+  "version": "0.0.0",
+  "description": "Kernel",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "echo 'lint not implemented'"
+  },
+  "dependencies": {
+    "@vibecad/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}
