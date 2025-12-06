@@ -166,13 +166,42 @@ function ToolButton({ tool, isActive, onClick }: ToolButtonProps) {
 }
 
 export function Toolbar() {
-  const [activeTool, setActiveTool] = React.useState("select");
+  // Use store for active tool instead of local state
+  const activeTool = useCadStore((s) => s.activeTool);
+  const setActiveTool = useCadStore((s) => s.setActiveTool);
+  const activeSketchId = useCadStore((s) => s.activeSketchId);
+  const createNewSketch = useCadStore((s) => s.createNewSketch);
+  const createExtrude = useCadStore((s) => s.createExtrude);
 
   const canUndo = useCadStore((s) => s.canUndo());
   const canRedo = useCadStore((s) => s.canRedo());
   const undo = useCadStore((s) => s.undo);
   const redo = useCadStore((s) => s.redo);
   const isRebuilding = useCadStore(selectIsRebuilding);
+
+  // Handle tool click - some tools trigger immediate actions
+  const handleToolClick = React.useCallback((toolId: string) => {
+    switch (toolId) {
+      case "sketch":
+        // Create a new sketch on the XY plane
+        createNewSketch();
+        setActiveTool("line"); // Switch to line tool after creating sketch
+        break;
+      case "extrude":
+        // Extrude the active sketch if one is selected
+        if (activeSketchId) {
+          createExtrude(activeSketchId, 100);
+          setActiveTool("select");
+        } else {
+          console.log("Select a sketch to extrude");
+          setActiveTool(toolId);
+        }
+        break;
+      default:
+        setActiveTool(toolId);
+        break;
+    }
+  }, [activeSketchId, createNewSketch, createExtrude, setActiveTool]);
 
   const toolsByCategory = React.useMemo(() => {
     const groups: Record<ToolCategory, Tool[]> = {
@@ -226,7 +255,7 @@ export function Toolbar() {
             key={tool.id}
             tool={tool}
             isActive={activeTool === tool.id}
-            onClick={() => setActiveTool(tool.id)}
+            onClick={() => handleToolClick(tool.id)}
           />
         ))}
       </div>
@@ -240,7 +269,7 @@ export function Toolbar() {
             key={tool.id}
             tool={tool}
             isActive={activeTool === tool.id}
-            onClick={() => setActiveTool(tool.id)}
+            onClick={() => handleToolClick(tool.id)}
           />
         ))}
       </div>
@@ -254,7 +283,7 @@ export function Toolbar() {
             key={tool.id}
             tool={tool}
             isActive={activeTool === tool.id}
-            onClick={() => setActiveTool(tool.id)}
+            onClick={() => handleToolClick(tool.id)}
           />
         ))}
       </div>
@@ -268,7 +297,7 @@ export function Toolbar() {
             key={tool.id}
             tool={tool}
             isActive={activeTool === tool.id}
-            onClick={() => setActiveTool(tool.id)}
+            onClick={() => handleToolClick(tool.id)}
           />
         ))}
       </div>
