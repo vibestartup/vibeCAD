@@ -900,6 +900,12 @@ export function Viewport() {
           const sketch = studio.sketches.get(op.sketchId);
           if (!sketch) continue;
 
+          // Check if the source sketch operation is suppressed
+          const sketchOpNode = Array.from(studio.opGraph.values()).find(
+            (node) => node.op.type === "sketch" && (node.op as SketchOp).sketchId === op.sketchId
+          );
+          if (sketchOpNode?.op.suppressed) continue;
+
           // Build profile from sketch lines
           // Get all lines and build a polygon from them
           const lines: Array<{ start: string; end: string }> = [];
@@ -1000,23 +1006,26 @@ export function Viewport() {
     // Get the maximum operation index to show
     const maxIndex = timelinePosition ?? studio.opOrder.length - 1;
 
-    // Build a map of sketchId -> operation index for sketch operations
-    const sketchOpIndices = new Map<string, number>();
+    // Build a map of sketchId -> { index, suppressed } for sketch operations
+    const sketchOpInfo = new Map<string, { index: number; suppressed: boolean }>();
     for (let i = 0; i < studio.opOrder.length; i++) {
       const opId = studio.opOrder[i];
       const opNode = studio.opGraph.get(opId);
       if (opNode?.op.type === "sketch") {
         const sketchOp = opNode.op as SketchOp;
-        sketchOpIndices.set(sketchOp.sketchId, i);
+        sketchOpInfo.set(sketchOp.sketchId, {
+          index: i,
+          suppressed: opNode.op.suppressed ?? false,
+        });
       }
     }
 
-    // Render each sketch that's within the timeline position
+    // Render each sketch that's within the timeline position and not suppressed
     for (const [sketchId, sketch] of studio.sketches) {
       // Check if this sketch's operation is within the timeline position
-      const sketchIndex = sketchOpIndices.get(sketchId);
-      if (sketchIndex === undefined || sketchIndex > maxIndex) {
-        continue; // Skip sketches beyond the timeline position
+      const info = sketchOpInfo.get(sketchId);
+      if (!info || info.index > maxIndex || info.suppressed) {
+        continue; // Skip sketches beyond the timeline position or suppressed
       }
 
       // Skip if sketch has no primitives

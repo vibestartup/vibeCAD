@@ -312,6 +312,8 @@ export function OpTimeline() {
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const setTimelinePosition = useCadStore((s) => s.setTimelinePosition);
   const enterSketchMode = useCadStore((s) => s.enterSketchMode);
+  const updateOp = useCadStore((s) => s.updateOp);
+  const rebuild = useCadStore((s) => s.rebuild);
 
   // Context menu state
   const [contextMenu, setContextMenu] = React.useState<ContextMenuState>({
@@ -365,6 +367,15 @@ export function OpTimeline() {
     if (contextMenu.op?.type === "sketch") {
       const sketchOp = contextMenu.op as SketchOp;
       enterSketchMode(sketchOp.sketchId);
+    }
+    closeContextMenu();
+  };
+
+  const handleToggleSuppress = () => {
+    if (contextMenu.op) {
+      updateOp(contextMenu.op.id, { suppressed: !contextMenu.op.suppressed });
+      // Trigger rebuild to update the 3D view
+      rebuild();
     }
     closeContextMenu();
   };
@@ -465,12 +476,9 @@ export function OpTimeline() {
             />
           )}
           <ContextMenuItem
-            label="Suppress"
+            label={contextMenu.op.suppressed ? "Unsuppress" : "Suppress"}
             icon={contextMenu.op.suppressed ? "✓" : "○"}
-            onClick={() => {
-              // TODO: Toggle suppressed state
-              closeContextMenu();
-            }}
+            onClick={handleToggleSuppress}
           />
           <ContextMenuItem
             label="Delete"
