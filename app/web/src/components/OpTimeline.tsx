@@ -244,9 +244,8 @@ export function OpTimeline() {
   );
   const selection = useCadStore((s) => s.selection);
   const setSelection = useCadStore((s) => s.setSelection);
-
-  // Timeline position (which op we're viewing up to)
-  const [timelinePos, setTimelinePos] = React.useState<number | null>(null);
+  const timelinePosition = useCadStore((s) => s.timelinePosition);
+  const setTimelinePosition = useCadStore((s) => s.setTimelinePosition);
 
   const ops = React.useMemo(() => {
     if (!studio) return [];
@@ -255,11 +254,11 @@ export function OpTimeline() {
       .filter((op): op is Op => op !== undefined);
   }, [studio]);
 
-  const currentIndex = timelinePos ?? ops.length - 1;
+  const currentIndex = timelinePosition ?? ops.length - 1;
 
   const handleOpClick = (opId: OpId, index: number) => {
     setSelection(new Set([opId]));
-    setTimelinePos(index);
+    setTimelinePosition(index);
   };
 
   const handleOpDoubleClick = (opId: OpId) => {
@@ -270,7 +269,7 @@ export function OpTimeline() {
 
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value, 10);
-    setTimelinePos(value);
+    setTimelinePosition(value);
     if (ops[value]) {
       setSelection(new Set([ops[value].id]));
     }

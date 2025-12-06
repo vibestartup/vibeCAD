@@ -36,6 +36,9 @@ interface CadState {
   activeSketchId: SketchId | null;
   selection: Set<string>;
 
+  // Timeline state - which operation index to evaluate up to (null = all)
+  timelinePosition: number | null;
+
   // Rebuild state
   isRebuilding: boolean;
   rebuildError: string | null;
@@ -55,6 +58,9 @@ interface CadActions {
   setSelection: (ids: Set<string>) => void;
   clearSelection: () => void;
   toggleSelected: (id: string) => void;
+
+  // Timeline actions
+  setTimelinePosition: (position: number | null) => void;
 
   // History actions
   pushHistory: () => void;
@@ -93,6 +99,7 @@ function createInitialState(): CadState {
     activeStudioId: defaultStudio?.id ?? null,
     activeSketchId: null,
     selection: new Set(),
+    timelinePosition: null, // null = show all operations
     isRebuilding: false,
     rebuildError: null,
     kernel: null,
@@ -147,6 +154,11 @@ export const useCadStore = create<CadStore>((set, get) => ({
       newSelection.add(id);
     }
     set({ selection: newSelection });
+  },
+
+  // Timeline actions
+  setTimelinePosition: (position) => {
+    set({ timelinePosition: position });
   },
 
   // History actions
@@ -303,3 +315,4 @@ export const selectActiveSketch = (state: CadStore) => {
 export const selectParams = (state: CadStore) => state.document.params;
 export const selectSelection = (state: CadStore) => state.selection;
 export const selectIsRebuilding = (state: CadStore) => state.isRebuilding;
+export const selectTimelinePosition = (state: CadStore) => state.timelinePosition;

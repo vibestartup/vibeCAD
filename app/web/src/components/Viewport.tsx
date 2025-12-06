@@ -158,6 +158,7 @@ export function Viewport() {
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
+  const timelinePosition = useCadStore((s) => s.timelinePosition);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -286,8 +287,12 @@ export function Viewport() {
     }
 
     try {
-      // Process each operation in order
-      for (const opId of studio.opOrder) {
+      // Determine how many operations to process based on timeline position
+      const maxIndex = timelinePosition ?? studio.opOrder.length - 1;
+
+      // Process each operation in order, up to the timeline position
+      for (let i = 0; i <= maxIndex && i < studio.opOrder.length; i++) {
+        const opId = studio.opOrder[i];
         const opNode = studio.opGraph.get(opId);
         if (!opNode || opNode.op.suppressed) continue;
 
@@ -306,7 +311,8 @@ export function Viewport() {
           // Collect points and lines from sketch
           for (const [id, prim] of sketch.primitives) {
             if (prim.type === "point") {
-              const pos = sketch.solvedPositions?.get(id) || [prim.x, prim.y];
+              const solved = sketch.solvedPositions?.get(id);
+              const pos: [number, number] = solved ? [solved[0], solved[1]] : [prim.x, prim.y];
               points.set(id, pos);
             } else if (prim.type === "line") {
               lines.push({ start: prim.start, end: prim.end });
@@ -371,7 +377,7 @@ export function Viewport() {
     } catch (err) {
       console.error("Failed to create geometry:", err);
     }
-  }, [occApi, studio]);
+  }, [occApi, studio, timelinePosition]);
 
   // View controls
   const handleResetView = useCallback(() => {
