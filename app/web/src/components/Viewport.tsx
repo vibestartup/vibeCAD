@@ -645,6 +645,7 @@ export function Viewport() {
   const hoveredFace = useCadStore((s) => s.hoveredFace);
   const setHoveredFace = useCadStore((s) => s.setHoveredFace);
   const setExportMeshes = useCadStore((s) => s.setExportMeshes);
+  const setExportShapeHandles = useCadStore((s) => s.setExportShapeHandles);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -881,8 +882,9 @@ export function Viewport() {
   // Build and render geometry from the part studio operations
   useEffect(() => {
     if (!occApi || !meshGroupRef.current || !studio) {
-      // Clear export meshes if no geometry available
+      // Clear export data if no geometry available
       setExportMeshes([]);
+      setExportShapeHandles([]);
       return;
     }
 
@@ -901,8 +903,9 @@ export function Viewport() {
       }
     }
 
-    // Collect mesh data for export
+    // Collect mesh data and shape handles for export
     const exportableMeshes: ExportableMesh[] = [];
+    const exportableShapeHandles: number[] = [];
 
     try {
       // Determine how many operations to process based on timeline position
@@ -995,6 +998,9 @@ export function Viewport() {
             name: op.name,
           });
 
+          // Store shape handle for STEP export (don't free solid - kept for export)
+          exportableShapeHandles.push(solid);
+
           // Create Three.js mesh
           const mesh = createMeshFromData(meshData);
           // Add userData to identify this mesh's operation
@@ -1009,20 +1015,22 @@ export function Viewport() {
           meshGroup.add(mesh);
           meshGroup.add(edges);
 
-          // Free OCC shapes
+          // Free intermediate OCC shapes (keep solid for STEP export)
           occApi.freeShape(wire);
           occApi.freeShape(face);
-          occApi.freeShape(solid);
+          // Note: solid is NOT freed - kept in exportableShapeHandles for STEP export
         }
       }
 
-      // Update export meshes in store
+      // Update export data in store
       setExportMeshes(exportableMeshes);
+      setExportShapeHandles(exportableShapeHandles);
     } catch (err) {
       console.error("Failed to create geometry:", err);
       setExportMeshes([]);
+      setExportShapeHandles([]);
     }
-  }, [occApi, studio, timelinePosition, setExportMeshes]);
+  }, [occApi, studio, timelinePosition, setExportMeshes, setExportShapeHandles]);
 
   // Render sketches in 3D space
   useEffect(() => {

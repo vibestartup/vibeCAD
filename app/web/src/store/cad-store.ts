@@ -26,6 +26,7 @@ import type {
   Sketch,
 } from "@vibecad/core";
 import type { ExportableMesh } from "../utils/stl-export";
+import type { ShapeHandle } from "@vibecad/kernel";
 import {
   createDocumentWithCube,
   getDefaultStudio,
@@ -142,6 +143,9 @@ interface CadState {
 
   // Export mesh data (populated by Viewport for export)
   exportMeshes: ExportableMesh[];
+
+  // Export shape handles (for STEP export - populated by Viewport)
+  exportShapeHandles: ShapeHandle[];
 }
 
 interface CadActions {
@@ -257,6 +261,7 @@ interface CadActions {
 
   // Export actions
   setExportMeshes: (meshes: ExportableMesh[]) => void;
+  setExportShapeHandles: (handles: ShapeHandle[]) => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -293,6 +298,7 @@ function createInitialState(): CadState {
     pendingBoolean: null,
     hoveredFace: null,
     exportMeshes: [],
+    exportShapeHandles: [],
   };
 }
 
@@ -1686,6 +1692,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
   setExportMeshes: (meshes) => {
     set({ exportMeshes: meshes });
   },
+
+  setExportShapeHandles: (handles) => {
+    set({ exportShapeHandles: handles });
+  },
 }));
 
 // ============================================================================
@@ -1709,3 +1719,4 @@ export const selectSelection = (state: CadStore) => state.selection;
 export const selectIsRebuilding = (state: CadStore) => state.isRebuilding;
 export const selectTimelinePosition = (state: CadStore) => state.timelinePosition;
 export const selectExportMeshes = (state: CadStore) => state.exportMeshes;
+export const selectExportShapeHandles = (state: CadStore) => state.exportShapeHandles;
