@@ -23,12 +23,12 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     height: "100%",
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "transparent",
   } as React.CSSProperties,
 
   header: {
     padding: "12px 16px",
-    borderBottom: "1px solid #333",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
     fontWeight: 600,
     fontSize: 13,
     color: "#fff",
@@ -36,7 +36,7 @@ const styles = {
 
   tabs: {
     display: "flex",
-    borderBottom: "1px solid #333",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
   } as React.CSSProperties,
 
   tab: {
@@ -1058,10 +1058,478 @@ function OpProperties({ op }: OpPropertiesProps) {
       {op.type === "revolve" && <RevolveProperties op={op} />}
       {op.type === "fillet" && <FilletProperties op={op} />}
       {op.type === "boolean" && <BooleanProperties op={op} />}
+      {(op.type === "box" || op.type === "cylinder" || op.type === "sphere" || op.type === "cone") && (
+        <PrimitiveProperties op={op} />
+      )}
+      {op.type === "transform" && <TransformProperties op={op} />}
 
       <div style={styles.section}>
         <button style={styles.deleteButton}>Delete Operation</button>
       </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Primitive Solid Properties
+// ============================================================================
+
+function PrimitiveProperties({ op, isPending = false }: { op?: any; isPending?: boolean }) {
+  const updateOp = useCadStore((s) => s.updateOp);
+  const pendingPrimitive = useCadStore((s) => s.pendingPrimitive);
+  const updatePendingPrimitive = useCadStore((s) => s.updatePendingPrimitive);
+  const confirmPrimitive = useCadStore((s) => s.confirmPrimitive);
+  const cancelPrimitive = useCadStore((s) => s.cancelPrimitive);
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const unitLabel = getLengthUnitLabel(lengthUnit);
+
+  const isCreating = isPending && pendingPrimitive;
+  const primitiveType = isCreating ? pendingPrimitive?.type : op?.type;
+
+  // Position state
+  const [centerX, setCenterX] = React.useState("0");
+  const [centerY, setCenterY] = React.useState("0");
+  const [centerZ, setCenterZ] = React.useState("0");
+
+  // Dimension state (varies by type)
+  const [dimWidth, setDimWidth] = React.useState("50");
+  const [dimDepth, setDimDepth] = React.useState("50");
+  const [dimHeight, setDimHeight] = React.useState("50");
+  const [radius, setRadius] = React.useState("25");
+  const [radius1, setRadius1] = React.useState("25");
+  const [radius2, setRadius2] = React.useState("0");
+
+  // Sync from state
+  React.useEffect(() => {
+    if (isCreating && pendingPrimitive) {
+      setCenterX(pendingPrimitive.center[0].toString());
+      setCenterY(pendingPrimitive.center[1].toString());
+      setCenterZ(pendingPrimitive.center[2].toString());
+
+      if (pendingPrimitive.type === "box") {
+        setDimWidth(pendingPrimitive.dimensions[0].toString());
+        setDimDepth(pendingPrimitive.dimensions[1].toString());
+        setDimHeight(pendingPrimitive.dimensions[2].toString());
+      } else if (pendingPrimitive.type === "cylinder") {
+        setRadius(pendingPrimitive.radius.toString());
+        setDimHeight(pendingPrimitive.height.toString());
+      } else if (pendingPrimitive.type === "sphere") {
+        setRadius(pendingPrimitive.radius.toString());
+      } else if (pendingPrimitive.type === "cone") {
+        setRadius1(pendingPrimitive.radius1.toString());
+        setRadius2(pendingPrimitive.radius2.toString());
+        setDimHeight(pendingPrimitive.height.toString());
+      }
+    } else if (op) {
+      setCenterX(op.center[0].toString());
+      setCenterY(op.center[1].toString());
+      setCenterZ(op.center[2].toString());
+
+      if (op.type === "box") {
+        setDimWidth(op.dimensions[0].toString());
+        setDimDepth(op.dimensions[1].toString());
+        setDimHeight(op.dimensions[2].toString());
+      } else if (op.type === "cylinder") {
+        setRadius(op.radius.value.toString());
+        setDimHeight(op.height.value.toString());
+      } else if (op.type === "sphere") {
+        setRadius(op.radius.value.toString());
+      } else if (op.type === "cone") {
+        setRadius1(op.radius1.value.toString());
+        setRadius2(op.radius2.value.toString());
+        setDimHeight(op.height.value.toString());
+      }
+    }
+  }, [isCreating, pendingPrimitive, op]);
+
+  const updateCenter = () => {
+    const x = parseFloat(centerX) || 0;
+    const y = parseFloat(centerY) || 0;
+    const z = parseFloat(centerZ) || 0;
+    if (isCreating) {
+      updatePendingPrimitive({ center: [x, y, z] });
+    }
+  };
+
+  const updateDimensions = () => {
+    if (!isCreating) return;
+    const width = parseFloat(dimWidth) || 50;
+    const depth = parseFloat(dimDepth) || 50;
+    const height = parseFloat(dimHeight) || 50;
+    const r = parseFloat(radius) || 25;
+    const r1 = parseFloat(radius1) || 25;
+    const r2 = parseFloat(radius2) || 0;
+
+    if (pendingPrimitive?.type === "box") {
+      updatePendingPrimitive({ dimensions: [width, depth, height] });
+    } else if (pendingPrimitive?.type === "cylinder") {
+      updatePendingPrimitive({ radius: r, height: height });
+    } else if (pendingPrimitive?.type === "sphere") {
+      updatePendingPrimitive({ radius: r });
+    } else if (pendingPrimitive?.type === "cone") {
+      updatePendingPrimitive({ radius1: r1, radius2: r2, height: height });
+    }
+  };
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>
+        {primitiveType ? primitiveType.charAt(0).toUpperCase() + primitiveType.slice(1) : "Primitive"} Properties
+      </div>
+
+      {/* Center Position */}
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Center Position ({unitLabel})</label>
+        <div style={{ display: "flex", gap: 4 }}>
+          <input
+            type="number"
+            value={centerX}
+            onChange={(e) => setCenterX(e.target.value)}
+            onBlur={updateCenter}
+            style={{ ...styles.input, flex: 1 }}
+            placeholder="X"
+          />
+          <input
+            type="number"
+            value={centerY}
+            onChange={(e) => setCenterY(e.target.value)}
+            onBlur={updateCenter}
+            style={{ ...styles.input, flex: 1 }}
+            placeholder="Y"
+          />
+          <input
+            type="number"
+            value={centerZ}
+            onChange={(e) => setCenterZ(e.target.value)}
+            onBlur={updateCenter}
+            style={{ ...styles.input, flex: 1 }}
+            placeholder="Z"
+          />
+        </div>
+      </div>
+
+      {/* Type-specific dimensions */}
+      {primitiveType === "box" && (
+        <>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Width ({unitLabel})</label>
+            <input
+              type="number"
+              value={dimWidth}
+              onChange={(e) => setDimWidth(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Depth ({unitLabel})</label>
+            <input
+              type="number"
+              value={dimDepth}
+              onChange={(e) => setDimDepth(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Height ({unitLabel})</label>
+            <input
+              type="number"
+              value={dimHeight}
+              onChange={(e) => setDimHeight(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+        </>
+      )}
+
+      {primitiveType === "cylinder" && (
+        <>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Radius ({unitLabel})</label>
+            <input
+              type="number"
+              value={radius}
+              onChange={(e) => setRadius(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Height ({unitLabel})</label>
+            <input
+              type="number"
+              value={dimHeight}
+              onChange={(e) => setDimHeight(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+        </>
+      )}
+
+      {primitiveType === "sphere" && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Radius ({unitLabel})</label>
+          <input
+            type="number"
+            value={radius}
+            onChange={(e) => setRadius(e.target.value)}
+            onBlur={updateDimensions}
+            style={styles.input}
+          />
+        </div>
+      )}
+
+      {primitiveType === "cone" && (
+        <>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Base Radius ({unitLabel})</label>
+            <input
+              type="number"
+              value={radius1}
+              onChange={(e) => setRadius1(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Top Radius ({unitLabel})</label>
+            <input
+              type="number"
+              value={radius2}
+              onChange={(e) => setRadius2(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+          <div style={styles.field}>
+            <label style={styles.fieldLabel}>Height ({unitLabel})</label>
+            <input
+              type="number"
+              value={dimHeight}
+              onChange={(e) => setDimHeight(e.target.value)}
+              onBlur={updateDimensions}
+              style={styles.input}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Action buttons for pending state */}
+      {isCreating && (
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button style={styles.secondaryButton} onClick={cancelPrimitive}>
+            Cancel
+          </button>
+          <button style={styles.primaryButton} onClick={confirmPrimitive}>
+            Create {primitiveType ? primitiveType.charAt(0).toUpperCase() + primitiveType.slice(1) : ""}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Transform Properties
+// ============================================================================
+
+function TransformProperties({ op, isPending = false }: { op?: any; isPending?: boolean }) {
+  const pendingTransform = useCadStore((s) => s.pendingTransform);
+  const updatePendingTransform = useCadStore((s) => s.updatePendingTransform);
+  const confirmTransform = useCadStore((s) => s.confirmTransform);
+  const cancelTransform = useCadStore((s) => s.cancelTransform);
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const angleUnit = useSettingsStore((s) => s.angleUnit);
+  const unitLabel = getLengthUnitLabel(lengthUnit);
+  const angleLabel = getAngleUnitLabel(angleUnit);
+
+  const isCreating = isPending && pendingTransform;
+  const transformType = isCreating ? pendingTransform?.transformType : op?.transformType;
+
+  // Translation state
+  const [transX, setTransX] = React.useState("0");
+  const [transY, setTransY] = React.useState("0");
+  const [transZ, setTransZ] = React.useState("0");
+
+  // Rotation state
+  const [rotAngle, setRotAngle] = React.useState("0");
+
+  // Scale state
+  const [scaleFactor, setScaleFactor] = React.useState("1");
+
+  // Sync from state
+  React.useEffect(() => {
+    if (isCreating && pendingTransform) {
+      setTransX(pendingTransform.translation[0].toString());
+      setTransY(pendingTransform.translation[1].toString());
+      setTransZ(pendingTransform.translation[2].toString());
+      setRotAngle(pendingTransform.rotationAngle.toString());
+      setScaleFactor(pendingTransform.scaleFactor.toString());
+    } else if (op) {
+      if (op.translation) {
+        setTransX(op.translation[0].toString());
+        setTransY(op.translation[1].toString());
+        setTransZ(op.translation[2].toString());
+      }
+      if (op.rotationAngle) {
+        setRotAngle((op.rotationAngle.value * 180 / Math.PI).toString());
+      }
+      if (op.scaleFactor) {
+        setScaleFactor(op.scaleFactor.value.toString());
+      }
+    }
+  }, [isCreating, pendingTransform, op]);
+
+  const updateTranslation = () => {
+    const x = parseFloat(transX) || 0;
+    const y = parseFloat(transY) || 0;
+    const z = parseFloat(transZ) || 0;
+    if (isCreating) {
+      updatePendingTransform({ translation: [x, y, z] });
+    }
+  };
+
+  const updateRotation = () => {
+    const angle = parseFloat(rotAngle) || 0;
+    if (isCreating) {
+      updatePendingTransform({ rotationAngle: angle });
+    }
+  };
+
+  const updateScale = () => {
+    const factor = parseFloat(scaleFactor) || 1;
+    if (isCreating) {
+      updatePendingTransform({ scaleFactor: factor });
+    }
+  };
+
+  // Get available targets (operations that produce geometry)
+  const targetOptions = React.useMemo(() => {
+    if (!studio) return [];
+    const options: { id: string; name: string }[] = [];
+    for (const [opId, node] of studio.opGraph) {
+      const type = node.op.type;
+      if (["extrude", "revolve", "box", "cylinder", "sphere", "cone", "boolean", "fillet"].includes(type)) {
+        options.push({ id: opId, name: node.op.name });
+      }
+    }
+    return options;
+  }, [studio]);
+
+  const handleTargetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    if (isCreating) {
+      updatePendingTransform({ targetOpId: e.target.value || null });
+    }
+  };
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>
+        {transformType === "translate" ? "Move" : transformType === "rotate" ? "Rotate" : "Scale"} Properties
+      </div>
+
+      {/* Target selection (only for pending) */}
+      {isCreating && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Target Body</label>
+          <select
+            style={styles.select}
+            value={pendingTransform?.targetOpId || ""}
+            onChange={handleTargetChange}
+          >
+            <option value="">Select a body...</option>
+            {targetOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Type-specific inputs */}
+      {transformType === "translate" && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Translation ({unitLabel})</label>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input
+              type="number"
+              value={transX}
+              onChange={(e) => setTransX(e.target.value)}
+              onBlur={updateTranslation}
+              style={{ ...styles.input, flex: 1 }}
+              placeholder="X"
+            />
+            <input
+              type="number"
+              value={transY}
+              onChange={(e) => setTransY(e.target.value)}
+              onBlur={updateTranslation}
+              style={{ ...styles.input, flex: 1 }}
+              placeholder="Y"
+            />
+            <input
+              type="number"
+              value={transZ}
+              onChange={(e) => setTransZ(e.target.value)}
+              onBlur={updateTranslation}
+              style={{ ...styles.input, flex: 1 }}
+              placeholder="Z"
+            />
+          </div>
+        </div>
+      )}
+
+      {transformType === "rotate" && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Rotation Angle ({angleLabel})</label>
+          <input
+            type="number"
+            value={rotAngle}
+            onChange={(e) => setRotAngle(e.target.value)}
+            onBlur={updateRotation}
+            style={styles.input}
+          />
+        </div>
+      )}
+
+      {transformType === "scale" && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Scale Factor</label>
+          <input
+            type="number"
+            value={scaleFactor}
+            onChange={(e) => setScaleFactor(e.target.value)}
+            onBlur={updateScale}
+            style={styles.input}
+            step="0.1"
+            min="0.01"
+          />
+        </div>
+      )}
+
+      {/* Action buttons for pending state */}
+      {isCreating && (
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button style={styles.secondaryButton} onClick={cancelTransform}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...styles.primaryButton,
+              ...(pendingTransform?.targetOpId ? {} : { opacity: 0.5, cursor: "not-allowed" }),
+            }}
+            onClick={confirmTransform}
+            disabled={!pendingTransform?.targetOpId}
+          >
+            Apply {transformType === "translate" ? "Move" : transformType === "rotate" ? "Rotation" : "Scale"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1594,26 +2062,89 @@ function RenderingTab() {
 }
 
 // ============================================================================
-// Main Panel
+// Exported Content Components (for use with TabbedSidebar)
 // ============================================================================
 
-export function PropertiesPanel() {
-  const [activeTab, setActiveTab] = React.useState<TabId>("properties");
-  const selection = useCadStore((s) => s.selection);
+/**
+ * PropertiesContent - the properties tab content.
+ * Shows properties for selected operations or pending operations.
+ */
+export function PropertiesContent() {
+  const opSelection = useCadStore((s) => s.opSelection);
   const pendingExtrude = useCadStore((s) => s.pendingExtrude);
   const pendingRevolve = useCadStore((s) => s.pendingRevolve);
   const pendingFillet = useCadStore((s) => s.pendingFillet);
   const pendingBoolean = useCadStore((s) => s.pendingBoolean);
+  const pendingPrimitive = useCadStore((s) => s.pendingPrimitive);
+  const pendingTransform = useCadStore((s) => s.pendingTransform);
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
 
   // Get selected operation
   const selectedOp = React.useMemo(() => {
-    if (selection.size !== 1 || !studio) return null;
-    const opId = Array.from(selection)[0];
+    if (opSelection.size !== 1 || !studio) return null;
+    const opId = Array.from(opSelection)[0];
     return studio.opGraph.get(opId as any)?.op ?? null;
-  }, [selection, studio]);
+  }, [opSelection, studio]);
+
+  return (
+    <div style={styles.content}>
+      {pendingPrimitive ? (
+        <PrimitiveProperties isPending />
+      ) : pendingTransform ? (
+        <TransformProperties isPending />
+      ) : pendingExtrude ? (
+        <ExtrudeProperties isPending />
+      ) : pendingRevolve ? (
+        <RevolveProperties isPending />
+      ) : pendingFillet ? (
+        <FilletProperties isPending />
+      ) : pendingBoolean ? (
+        <BooleanProperties isPending />
+      ) : selectedOp ? (
+        <OpProperties op={selectedOp} />
+      ) : (
+        <div style={styles.emptyState}>
+          Select an operation to view its properties.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ParametersContent - the parameters tab content.
+ */
+export function ParametersContent() {
+  return (
+    <div style={styles.content}>
+      <ParametersTab />
+    </div>
+  );
+}
+
+/**
+ * RenderContent - the render tab content.
+ */
+export function RenderContent() {
+  return (
+    <div style={styles.content}>
+      <RenderingTab />
+    </div>
+  );
+}
+
+// ============================================================================
+// Main Panel (kept for backwards compatibility)
+// ============================================================================
+
+/**
+ * PropertiesPanel - standalone wrapper with built-in tabs.
+ * @deprecated Use RightSidebar instead for the shared tabbed interface.
+ */
+export function PropertiesPanel() {
+  const [activeTab, setActiveTab] = React.useState<TabId>("properties");
 
   return (
     <div style={styles.container}>
@@ -1647,30 +2178,13 @@ export function PropertiesPanel() {
         </button>
       </div>
 
-      <div style={styles.content}>
-        {activeTab === "properties" ? (
-          // Pending operations take priority and show in the same place as regular properties
-          pendingExtrude ? (
-            <ExtrudeProperties isPending />
-          ) : pendingRevolve ? (
-            <RevolveProperties isPending />
-          ) : pendingFillet ? (
-            <FilletProperties isPending />
-          ) : pendingBoolean ? (
-            <BooleanProperties isPending />
-          ) : selectedOp ? (
-            <OpProperties op={selectedOp} />
-          ) : (
-            <div style={styles.emptyState}>
-              Select an operation to view its properties.
-            </div>
-          )
-        ) : activeTab === "parameters" ? (
-          <ParametersTab />
-        ) : activeTab === "render" ? (
-          <RenderingTab />
-        ) : null}
-      </div>
+      {activeTab === "properties" ? (
+        <PropertiesContent />
+      ) : activeTab === "parameters" ? (
+        <ParametersContent />
+      ) : activeTab === "render" ? (
+        <RenderContent />
+      ) : null}
     </div>
   );
 }
