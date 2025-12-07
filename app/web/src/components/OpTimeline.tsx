@@ -4,6 +4,7 @@
  */
 
 import React from "react";
+import { createPortal } from "react-dom";
 import { useCadStore } from "../store";
 import type { Op, OpId, SketchOp } from "@vibecad/core";
 
@@ -20,6 +21,13 @@ const OP_ICONS: Record<string, string> = {
   shell: "◻",
   pattern: "⊞",
   mirror: "⇋",
+  // Primitive solids
+  box: "⬡",
+  cylinder: "⏣",
+  sphere: "◉",
+  cone: "△",
+  // Transform
+  transform: "↔",
 };
 
 // Operation type colors
@@ -35,19 +43,32 @@ const OP_COLORS: Record<string, string> = {
   shell: "#ffd43b",
   pattern: "#a9e34b",
   mirror: "#74c0fc",
+  // Primitive solids
+  box: "#ff922b",
+  cylinder: "#20c997",
+  sphere: "#f783ac",
+  cone: "#fcc419",
+  // Transform
+  transform: "#845ef7",
 };
+
+// Operations that produce solid bodies
+const BODY_PRODUCING_OPS = new Set([
+  "extrude", "revolve", "sweep", "loft", "boolean", "fillet", "chamfer", "shell",
+  "box", "cylinder", "sphere", "cone", "transform"
+]);
 
 const styles = {
   container: {
     display: "flex",
     flexDirection: "column",
     height: "100%",
-    backgroundColor: "#1a1a2e",
+    backgroundColor: "transparent",
   } as React.CSSProperties,
 
   header: {
     padding: "12px 16px",
-    borderBottom: "1px solid #333",
+    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
     fontWeight: 600,
     fontSize: 13,
     color: "#fff",
@@ -74,16 +95,16 @@ const styles = {
   timeline: {
     flex: 1,
     overflowY: "auto",
-    padding: "8px 0",
+    padding: "2px 0",
   } as React.CSSProperties,
 
   opItem: {
     display: "flex",
     alignItems: "center",
-    padding: "8px 16px",
+    padding: "3px 8px",
     cursor: "pointer",
     transition: "background-color 0.15s, border-left-color 0.15s",
-    borderLeftWidth: 3,
+    borderLeftWidth: 2,
     borderLeftStyle: "solid",
     borderLeftColor: "transparent",
   } as React.CSSProperties,
@@ -91,11 +112,6 @@ const styles = {
   opItemSelected: {
     backgroundColor: "#2d2d4a",
     borderLeftColor: "#646cff",
-  } as React.CSSProperties,
-
-  opItemCurrent: {
-    backgroundColor: "#1e3a5f",
-    borderLeftColor: "#4dabf7",
   } as React.CSSProperties,
 
   opItemSuppressed: {
@@ -107,42 +123,26 @@ const styles = {
   } as React.CSSProperties,
 
   opIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 4,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 14,
-    marginRight: 10,
+    fontSize: 12,
+    marginRight: 6,
     flexShrink: 0,
   } as React.CSSProperties,
 
-  opInfo: {
-    flex: 1,
-    overflow: "hidden",
-  } as React.CSSProperties,
-
   opName: {
-    fontSize: 13,
+    flex: 1,
+    fontSize: 12,
     color: "#fff",
     whiteSpace: "nowrap",
     overflow: "hidden",
     textOverflow: "ellipsis",
   } as React.CSSProperties,
 
-  opType: {
-    fontSize: 11,
-    color: "#888",
-    marginTop: 2,
-  } as React.CSSProperties,
-
   opIndex: {
-    fontSize: 10,
+    fontSize: 9,
     color: "#555",
-    width: 20,
+    width: 16,
     textAlign: "right",
-    marginRight: 8,
+    marginRight: 6,
   } as React.CSSProperties,
 
   timelineConnector: {
@@ -171,20 +171,39 @@ const styles = {
     fontSize: 12,
   } as React.CSSProperties,
 
-  rollbackSlider: {
-    padding: "8px 16px",
-    borderTop: "1px solid #333",
+  rollbackBar: {
+    display: "flex",
+    alignItems: "center",
+    padding: "2px 8px",
+    cursor: "grab",
+    userSelect: "none",
   } as React.CSSProperties,
 
-  slider: {
-    width: "100%",
-    accentColor: "#646cff",
+  rollbackBarDragging: {
+    cursor: "grabbing",
   } as React.CSSProperties,
 
-  sliderLabel: {
-    fontSize: 11,
-    color: "#888",
-    marginBottom: 4,
+  rollbackBarLine: {
+    flex: 1,
+    height: 2,
+    backgroundColor: "#f59f00",
+    borderRadius: 1,
+  } as React.CSSProperties,
+
+  rollbackBarHandle: {
+    width: 8,
+    height: 8,
+    borderRadius: "50%",
+    backgroundColor: "#f59f00",
+    marginLeft: -4,
+    boxShadow: "0 0 4px rgba(245, 159, 0, 0.5)",
+  } as React.CSSProperties,
+
+  rollbackBarLabel: {
+    fontSize: 9,
+    color: "#f59f00",
+    marginLeft: 6,
+    whiteSpace: "nowrap",
   } as React.CSSProperties,
 
   contextMenu: {
@@ -210,6 +229,55 @@ const styles = {
 
   contextMenuItemHover: {
     backgroundColor: "#3a3a5a",
+  } as React.CSSProperties,
+
+  // Bodies section styles
+  bodiesSection: {
+    borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+    padding: "8px 0",
+  } as React.CSSProperties,
+
+  bodiesSectionHeader: {
+    padding: "8px 16px",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#888",
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
+  } as React.CSSProperties,
+
+  bodyItem: {
+    display: "flex",
+    alignItems: "center",
+    padding: "3px 8px",
+    cursor: "pointer",
+    transition: "background-color 0.15s",
+    borderLeftWidth: 2,
+    borderLeftStyle: "solid",
+    borderLeftColor: "transparent",
+  } as React.CSSProperties,
+
+  bodyItemSelected: {
+    backgroundColor: "#2d2d4a",
+    borderLeftColor: "#646cff",
+  } as React.CSSProperties,
+
+  bodyItemHover: {
+    backgroundColor: "#252545",
+  } as React.CSSProperties,
+
+  bodyIcon: {
+    fontSize: 12,
+    marginRight: 6,
+    flexShrink: 0,
+  } as React.CSSProperties,
+
+  bodyName: {
+    fontSize: 12,
+    color: "#ccc",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   } as React.CSSProperties,
 };
 
@@ -241,30 +309,93 @@ function ContextMenuItem({
   );
 }
 
+// Body item component for the bodies list
+interface BodyItemProps {
+  op: Op;
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function BodyItem({ op, isSelected, onClick }: BodyItemProps) {
+  const [isHovered, setIsHovered] = React.useState(false);
+
+  const icon = OP_ICONS[op.type] || "⬢";
+  const color = OP_COLORS[op.type] || "#888";
+
+  return (
+    <div
+      style={{
+        ...styles.bodyItem,
+        ...(isSelected ? styles.bodyItemSelected : {}),
+        ...(isHovered && !isSelected ? styles.bodyItemHover : {}),
+        ...(op.suppressed ? { opacity: 0.4 } : {}),
+      }}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <span style={{ ...styles.bodyIcon, color }}>{icon}</span>
+      <span style={styles.bodyName}>
+        {op.name}
+        {op.suppressed && <span style={{ color: "#666" }}> (hidden)</span>}
+      </span>
+    </div>
+  );
+}
+
+// Rollback bar component
+interface RollbackBarProps {
+  position: number;
+  total: number;
+  onDragStart: (e: React.MouseEvent) => void;
+  isDragging: boolean;
+}
+
+function RollbackBar({ position, total, onDragStart, isDragging }: RollbackBarProps) {
+  // position -1 means "before all ops", display as 0
+  const displayPosition = position + 1;
+
+  return (
+    <div
+      style={{
+        ...styles.rollbackBar,
+        ...(isDragging ? styles.rollbackBarDragging : {}),
+      }}
+      onMouseDown={onDragStart}
+    >
+      <div style={styles.rollbackBarLine} />
+      <div style={styles.rollbackBarHandle} />
+      <span style={styles.rollbackBarLabel}>
+        {displayPosition}/{total}
+      </span>
+    </div>
+  );
+}
+
 interface OpItemProps {
   op: Op;
   index: number;
   isSelected: boolean;
-  isCurrent: boolean;
+  isSuppressedByRollback: boolean;
   onClick: () => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function OpItem({ op, index, isSelected, isCurrent, onClick, onDoubleClick, onContextMenu }: OpItemProps) {
+function OpItem({ op, index, isSelected, isSuppressedByRollback, onClick, onDoubleClick, onContextMenu }: OpItemProps) {
   const [isHovered, setIsHovered] = React.useState(false);
 
   const icon = OP_ICONS[op.type] || "?";
   const color = OP_COLORS[op.type] || "#888";
+  const isDimmed = op.suppressed || isSuppressedByRollback;
 
   return (
     <div
       style={{
         ...styles.opItem,
         ...(isSelected ? styles.opItemSelected : {}),
-        ...(isCurrent ? styles.opItemCurrent : {}),
-        ...(op.suppressed ? styles.opItemSuppressed : {}),
-        ...(isHovered && !isSelected && !isCurrent ? styles.opItemHover : {}),
+        ...(isDimmed ? styles.opItemSuppressed : {}),
+        ...(isHovered && !isSelected ? styles.opItemHover : {}),
         position: "relative",
       }}
       onClick={onClick}
@@ -274,22 +405,11 @@ function OpItem({ op, index, isSelected, isCurrent, onClick, onDoubleClick, onCo
       onMouseLeave={() => setIsHovered(false)}
     >
       <span style={styles.opIndex}>{index + 1}</span>
-      <div
-        style={{
-          ...styles.opIcon,
-          backgroundColor: `${color}22`,
-          color: color,
-        }}
-      >
-        {icon}
-      </div>
-      <div style={styles.opInfo}>
-        <div style={styles.opName}>{op.name}</div>
-        <div style={styles.opType}>
-          {op.type}
-          {op.suppressed && " (suppressed)"}
-        </div>
-      </div>
+      <span style={{ ...styles.opIcon, color }}>{icon}</span>
+      <span style={styles.opName}>
+        {op.name}
+        {op.suppressed && <span style={{ color: "#666" }}> (suppressed)</span>}
+      </span>
     </div>
   );
 }
@@ -302,13 +422,17 @@ interface ContextMenuState {
   op: Op | null;
 }
 
-export function OpTimeline() {
+/**
+ * OpTimelineContent - the content portion of the operations timeline.
+ * Used by both the standalone OpTimeline and the LeftSidebar.
+ */
+export function OpTimelineContent() {
   const activeStudioId = useCadStore((s) => s.activeStudioId);
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
-  const selection = useCadStore((s) => s.selection);
-  const setSelection = useCadStore((s) => s.setSelection);
+  const opSelection = useCadStore((s) => s.opSelection);
+  const setOpSelection = useCadStore((s) => s.setOpSelection);
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const setTimelinePosition = useCadStore((s) => s.setTimelinePosition);
   const enterSketchMode = useCadStore((s) => s.enterSketchMode);
@@ -324,6 +448,11 @@ export function OpTimeline() {
     op: null,
   });
 
+  // Rollback bar drag state
+  const [isDragging, setIsDragging] = React.useState(false);
+  const timelineRef = React.useRef<HTMLDivElement>(null);
+  const opItemRefs = React.useRef<Map<number, HTMLDivElement>>(new Map());
+
   const ops = React.useMemo(() => {
     if (!studio) return [];
     return studio.opOrder
@@ -331,11 +460,21 @@ export function OpTimeline() {
       .filter((op): op is Op => op !== undefined);
   }, [studio]);
 
+  // Filter operations that produce bodies
+  const bodies = React.useMemo(() => {
+    return ops.filter((op) => BODY_PRODUCING_OPS.has(op.type));
+  }, [ops]);
+
   const currentIndex = timelinePosition ?? ops.length - 1;
 
-  const handleOpClick = (opId: OpId, index: number) => {
-    setSelection(new Set([opId]));
-    setTimelinePosition(index);
+  const handleOpClick = (opId: OpId) => {
+    // Only select - don't change timeline/rollback position
+    setOpSelection(new Set([opId]));
+  };
+
+  const handleBodyClick = (opId: OpId) => {
+    // Only select - don't change timeline/rollback position
+    setOpSelection(new Set([opId]));
   };
 
   const handleOpDoubleClick = (op: Op) => {
@@ -418,33 +557,124 @@ export function OpTimeline() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, [contextMenu.visible]);
 
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseInt(e.target.value, 10);
-    setTimelinePosition(value);
-    if (ops[value]) {
-      setSelection(new Set([ops[value].id]));
-    }
+  // Rollback bar drag handlers
+  const handleRollbackDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
   };
+
+  // Handle drag move and end
+  React.useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!timelineRef.current) return;
+
+      const timelineRect = timelineRef.current.getBoundingClientRect();
+      const mouseY = e.clientY - timelineRect.top + timelineRef.current.scrollTop;
+
+      // Find which operation the mouse is closest to (after)
+      // -1 means before all operations (rollback to nothing)
+      let newPosition = ops.length - 1;
+
+      for (let i = 0; i < ops.length; i++) {
+        const opEl = opItemRefs.current.get(i);
+        if (opEl) {
+          const opRect = opEl.getBoundingClientRect();
+          const opTop = opRect.top - timelineRect.top + timelineRef.current.scrollTop;
+          const opMid = opTop + opRect.height / 2;
+
+          if (mouseY < opMid) {
+            newPosition = i - 1; // Can be -1 if before first op
+            break;
+          }
+          newPosition = i;
+        }
+      }
+
+      setTimelinePosition(newPosition);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging, ops.length, setTimelinePosition]);
 
   if (!activeStudioId || !studio) {
     return (
-      <div style={styles.container}>
-        <div style={styles.header}>Operations</div>
+      <div style={{ ...styles.container, padding: 16 }}>
         <div style={styles.emptyState}>No part studio selected</div>
       </div>
     );
   }
 
+  // Build timeline items with rollback bar inserted
+  const renderTimelineItems = () => {
+    const items: React.ReactNode[] = [];
+
+    // If position is -1, show bar at top (before all operations)
+    if (currentIndex === -1) {
+      items.push(
+        <RollbackBar
+          key="rollback-bar"
+          position={currentIndex}
+          total={ops.length}
+          onDragStart={handleRollbackDragStart}
+          isDragging={isDragging}
+        />
+      );
+    }
+
+    ops.forEach((op, index) => {
+      // Add op item
+      items.push(
+        <div
+          key={op.id}
+          ref={(el) => {
+            if (el) opItemRefs.current.set(index, el);
+            else opItemRefs.current.delete(index);
+          }}
+        >
+          <OpItem
+            op={op}
+            index={index}
+            isSelected={opSelection.has(op.id)}
+            isSuppressedByRollback={index > currentIndex}
+            onClick={() => handleOpClick(op.id)}
+            onDoubleClick={() => handleOpDoubleClick(op)}
+            onContextMenu={(e) => handleContextMenu(e, op)}
+          />
+        </div>
+      );
+
+      // Add rollback bar after the current position (if not -1)
+      if (index === currentIndex && currentIndex >= 0) {
+        items.push(
+          <RollbackBar
+            key="rollback-bar"
+            position={currentIndex}
+            total={ops.length}
+            onDragStart={handleRollbackDragStart}
+            isDragging={isDragging}
+          />
+        );
+      }
+    });
+
+    return items;
+  };
+
   return (
     <div style={styles.container}>
-      <div style={styles.header}>
-        <span>Operations</span>
-        <button style={styles.addButton} title="Add Operation">
-          +
-        </button>
-      </div>
-
-      <div style={styles.timeline}>
+      <div style={styles.timeline} ref={timelineRef}>
         {ops.length === 0 ? (
           <div style={styles.emptyState}>
             No operations yet.
@@ -453,39 +683,29 @@ export function OpTimeline() {
             Start by creating a sketch or adding a primitive.
           </div>
         ) : (
-          ops.map((op, index) => (
-            <OpItem
-              key={op.id}
-              op={op}
-              index={index}
-              isSelected={selection.has(op.id)}
-              isCurrent={index === currentIndex}
-              onClick={() => handleOpClick(op.id, index)}
-              onDoubleClick={() => handleOpDoubleClick(op)}
-              onContextMenu={(e) => handleContextMenu(e, op)}
-            />
-          ))
+          renderTimelineItems()
         )}
       </div>
 
-      {ops.length > 0 && (
-        <div style={styles.rollbackSlider}>
-          <div style={styles.sliderLabel}>
-            Timeline: {currentIndex + 1} / {ops.length}
+      {/* Bodies section */}
+      {bodies.length > 0 && (
+        <div style={styles.bodiesSection}>
+          <div style={styles.bodiesSectionHeader}>
+            Bodies ({bodies.length})
           </div>
-          <input
-            type="range"
-            min={0}
-            max={ops.length - 1}
-            value={currentIndex}
-            onChange={handleSliderChange}
-            style={styles.slider}
-          />
+          {bodies.map((body) => (
+            <BodyItem
+              key={body.id}
+              op={body}
+              isSelected={opSelection.has(body.id)}
+              onClick={() => handleBodyClick(body.id)}
+            />
+          ))}
         </div>
       )}
 
-      {/* Context Menu */}
-      {contextMenu.visible && contextMenu.op && (
+      {/* Context Menu - rendered via portal to escape sidebar's stacking context */}
+      {contextMenu.visible && contextMenu.op && createPortal(
         <div
           style={{
             ...styles.contextMenu,
@@ -517,10 +737,19 @@ export function OpTimeline() {
             icon="×"
             onClick={handleDelete}
           />
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
+}
+
+/**
+ * OpTimeline - standalone wrapper (kept for backwards compatibility).
+ * @deprecated Use LeftSidebar instead for the tabbed interface.
+ */
+export function OpTimeline() {
+  return <OpTimelineContent />;
 }
 
 export default OpTimeline;
