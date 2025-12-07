@@ -48,7 +48,9 @@ const styles = {
     cursor: "pointer",
     fontSize: 12,
     fontWeight: 500,
-    borderBottom: "2px solid transparent",
+    borderBottomWidth: 2,
+    borderBottomStyle: "solid",
+    borderBottomColor: "transparent",
     transition: "color 0.15s, border-color 0.15s",
   } as React.CSSProperties,
 
