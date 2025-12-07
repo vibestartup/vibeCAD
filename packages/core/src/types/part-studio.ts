@@ -166,8 +166,10 @@ export function createPartStudioWithCube(name: string): PartStudio {
     type: "extrude",
     name: "Extrude 1",
     suppressed: false,
-    sketchId: sketch.id,
-    profiles: [], // Empty means all closed loops
+    profile: {
+      type: "sketch",
+      sketchId: sketch.id,
+    },
     direction: "normal",
     depth: dimLiteral(100),
   };

@@ -903,12 +903,16 @@ export function Viewport() {
 
         // Handle extrude operations
         if (op.type === "extrude") {
-          const sketch = studio.sketches.get(op.sketchId);
+          // Only render extrusions from sketch profiles in the 3D view
+          if (op.profile.type !== "sketch") continue;
+
+          const extrudeSketchId = op.profile.sketchId;
+          const sketch = studio.sketches.get(extrudeSketchId);
           if (!sketch) continue;
 
           // Check if the source sketch operation is suppressed
           const sketchOpNode = Array.from(studio.opGraph.values()).find(
-            (node) => node.op.type === "sketch" && (node.op as SketchOp).sketchId === op.sketchId
+            (node) => node.op.type === "sketch" && (node.op as SketchOp).sketchId === extrudeSketchId
           );
           if (sketchOpNode?.op.suppressed) continue;
 

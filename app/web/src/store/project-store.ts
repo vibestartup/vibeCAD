@@ -123,8 +123,8 @@ function deserializeSketch(data: SerializedSketch): any {
 }
 
 function serializePartStudio(studio: any): SerializedPartStudio {
-  const serializedSketches = Array.from(studio.sketches.entries()).map(
-    ([id, sketch]: [string, any]) => [id, serializeSketch(sketch)] as [string, SerializedSketch]
+  const serializedSketches = Array.from(studio.sketches.entries() as Iterable<[string, any]>).map(
+    ([id, sketch]) => [id, serializeSketch(sketch)] as [string, SerializedSketch]
   );
 
   return {

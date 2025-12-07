@@ -62,11 +62,29 @@ export interface SketchOp extends OpBase {
 
 export type ExtrudeDirection = "normal" | "reverse" | "symmetric";
 
+/**
+ * Profile source for extrusion - can be from a sketch or an existing face.
+ * This unified abstraction allows the same extrude operation to work with:
+ * - Closed loops from sketches
+ * - Faces from existing bodies
+ */
+export type ExtrudeProfile =
+  | {
+      type: "sketch";
+      sketchId: SketchId;
+      /** Specific profile indices to extrude (empty = all closed loops) */
+      profileIndices?: number[];
+    }
+  | {
+      type: "face";
+      /** Reference to an existing face on a body */
+      faceRef: TopoRef;
+    };
+
 export interface ExtrudeOp extends OpBase {
   type: "extrude";
-  sketchId: SketchId;
-  /** Which profiles to extrude (empty = all closed loops) */
-  profiles: PrimitiveId[];
+  /** The profile(s) to extrude - from sketch or existing face */
+  profile: ExtrudeProfile;
   direction: ExtrudeDirection;
   depth: DimValue;
   /** Optional draft angle */
@@ -76,10 +94,23 @@ export interface ExtrudeOp extends OpBase {
   };
 }
 
+/**
+ * Profile source for revolve - similar to extrude.
+ */
+export type RevolveProfile =
+  | {
+      type: "sketch";
+      sketchId: SketchId;
+      profileIndices?: number[];
+    }
+  | {
+      type: "face";
+      faceRef: TopoRef;
+    };
+
 export interface RevolveOp extends OpBase {
   type: "revolve";
-  sketchId: SketchId;
-  profiles: PrimitiveId[];
+  profile: RevolveProfile;
   /** Axis of revolution - either a topo ref or explicit axis */
   axis: TopoRef | { origin: Vec3; direction: Vec3 };
   /** Angle in radians (2*PI for full revolution) */
@@ -98,16 +129,7 @@ export interface LoftOp extends OpBase {
   guideSketchIds?: SketchId[];
 }
 
-/** Extrude from an existing face of a body */
-export interface FaceExtrudeOp extends OpBase {
-  type: "faceExtrude";
-  /** Reference to the source face */
-  faceRef: TopoRef;
-  direction: ExtrudeDirection;
-  depth: DimValue;
-}
-
-export type PrimaryOp = ExtrudeOp | RevolveOp | SweepOp | LoftOp | FaceExtrudeOp;
+export type PrimaryOp = ExtrudeOp | RevolveOp | SweepOp | LoftOp;
 
 // ============================================================================
 // Secondary Operations (Solid -> Solid)
@@ -190,11 +212,7 @@ export function isSketchOp(op: Op): op is SketchOp {
 }
 
 export function isPrimaryOp(op: Op): op is PrimaryOp {
-  return ["extrude", "revolve", "sweep", "loft", "faceExtrude"].includes(op.type);
-}
-
-export function isFaceExtrudeOp(op: Op): op is FaceExtrudeOp {
-  return op.type === "faceExtrude";
+  return ["extrude", "revolve", "sweep", "loft"].includes(op.type);
 }
 
 export function isSecondaryOp(op: Op): op is SecondaryOp {
@@ -263,14 +281,21 @@ export function getOpDependencies(op: Op): OpId[] {
       }
       break;
 
-    case "revolve":
-      if (typeof op.axis === "object" && "opId" in op.axis) {
-        deps.push(op.axis.opId);
+    case "extrude":
+      // If profile is from a face, add dependency on source operation
+      if (op.profile.type === "face") {
+        deps.push(op.profile.faceRef.opId);
       }
       break;
 
-    case "faceExtrude":
-      deps.push(op.faceRef.opId);
+    case "revolve":
+      // If profile is from a face, add dependency on source operation
+      if (op.profile.type === "face") {
+        deps.push(op.profile.faceRef.opId);
+      }
+      if (typeof op.axis === "object" && "opId" in op.axis) {
+        deps.push(op.axis.opId);
+      }
       break;
   }
 

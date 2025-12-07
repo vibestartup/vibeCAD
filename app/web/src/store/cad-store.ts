@@ -597,15 +597,17 @@ export const useCadStore = create<CadStore>((set, get) => ({
       }
     }
 
-    // Create the extrude operation
+    // Create the extrude operation with unified profile abstraction
     const extrudeOpId = newId("Op") as OpId;
     const extrudeOp: ExtrudeOp = {
       id: extrudeOpId,
       type: "extrude",
       name: `Extrude ${sketch.name}`,
       suppressed: false,
-      sketchId: sketchId,
-      profiles: [], // Empty means all closed loops
+      profile: {
+        type: "sketch",
+        sketchId: sketchId,
+      },
       direction: direction,
       depth: dimLiteral(depth),
     };
@@ -650,17 +652,20 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const sourceOp = studio.opGraph.get(opId as OpId);
     if (!sourceOp) return null;
 
-    // Create the face extrude operation
-    const faceExtrudeOpId = newId("Op") as OpId;
-    const faceExtrudeOp = {
-      id: faceExtrudeOpId,
-      type: "faceExtrude" as const,
-      name: `Face Extrude from ${sourceOp.op.name}`,
+    // Create extrude operation with unified profile abstraction (face type)
+    const extrudeOpId = newId("Op") as OpId;
+    const extrudeOp: ExtrudeOp = {
+      id: extrudeOpId,
+      type: "extrude",
+      name: `Extrude from ${sourceOp.op.name}`,
       suppressed: false,
-      faceRef: {
-        opId: opId as OpId,
-        subType: "face" as const,
-        index: faceIndex,
+      profile: {
+        type: "face",
+        faceRef: {
+          opId: opId as OpId,
+          subType: "face",
+          index: faceIndex,
+        },
       },
       direction: direction,
       depth: dimLiteral(depth),
@@ -668,12 +673,12 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     // Update studio
     const newOpGraph = new Map(studio.opGraph);
-    newOpGraph.set(faceExtrudeOpId, {
-      op: faceExtrudeOp,
+    newOpGraph.set(extrudeOpId, {
+      op: extrudeOp,
       deps: [opId as OpId],
     });
 
-    const newOpOrder = [...studio.opOrder, faceExtrudeOpId];
+    const newOpOrder = [...studio.opOrder, extrudeOpId];
 
     const newStudio = {
       ...studio,
@@ -692,7 +697,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
       timelinePosition: null,
     });
 
-    return faceExtrudeOpId;
+    return extrudeOpId;
   },
 
   // Sketch primitive editing

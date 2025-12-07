@@ -230,35 +230,56 @@ opRegistry.register(
   }
 );
 
-// Extrude operation
+// Extrude operation - handles both sketch profiles and body faces
 opRegistry.register<ExtrudeOp>(
   "extrude",
   async (op: ExtrudeOp, ctx) => {
-    const sketch = ctx.getSketch(op.sketchId as string);
-    if (!sketch) throw new Error(`Sketch not found: ${op.sketchId}`);
+    let faceHandle: number;
+    let normalDirection: [number, number, number];
 
-    const plane = ctx.getPlane(sketch.planeId);
-    if (!plane) throw new Error(`Plane not found: ${sketch.planeId}`);
+    if (op.profile.type === "sketch") {
+      // Extrude from sketch profile
+      const sketch = ctx.getSketch(op.profile.sketchId as string);
+      if (!sketch) throw new Error(`Sketch not found: ${op.profile.sketchId}`);
 
-    const loops = findClosedLoops(sketch);
-    if (loops.length === 0) {
-      throw new Error("No closed profiles found in sketch");
+      const plane = ctx.getPlane(sketch.planeId);
+      if (!plane) throw new Error(`Plane not found: ${sketch.planeId}`);
+
+      const loops = findClosedLoops(sketch);
+      if (loops.length === 0) {
+        throw new Error("No closed profiles found in sketch");
+      }
+
+      const profileIndex = op.profile.profileIndices?.[0] ?? 0;
+      const loop = loops[profileIndex] ?? loops[0];
+      const points2d = getLoopPoints(sketch, loop);
+      const points3d = points2d.map((p) => sketchToWorld(p, plane));
+
+      const wire = ctx.occ.makePolygon(points3d);
+      faceHandle = ctx.occ.makeFace(wire);
+
+      // Compute normal from plane
+      const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
+      const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
+      const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
+      normalDirection = [nx, ny, nz];
+    } else {
+      // Extrude from existing body face
+      const sourceResult = ctx.getResult(op.profile.faceRef.opId);
+      if (!sourceResult) throw new Error(`Source operation not found: ${op.profile.faceRef.opId}`);
+
+      const faces = ctx.occ.getFaces(sourceResult.shapeHandle);
+      if (op.profile.faceRef.index >= faces.length) {
+        throw new Error(`Face index ${op.profile.faceRef.index} out of bounds (${faces.length} faces)`);
+      }
+
+      faceHandle = faces[op.profile.faceRef.index];
+      const faceNormal = ctx.occ.faceNormal(faceHandle);
+      normalDirection = [faceNormal[0], faceNormal[1], faceNormal[2]];
     }
 
-    const loop = loops[0];
-    const points2d = getLoopPoints(sketch, loop);
-    const points3d = points2d.map((p) => sketchToWorld(p, plane));
-
-    const wire = ctx.occ.makePolygon(points3d);
-    const face = ctx.occ.makeFace(wire);
-
-    // Compute normal
-    const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
-    const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
-    const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
-    const planeNormal: [number, number, number] = [nx, ny, nz];
-
-    let direction = planeNormal;
+    const [nx, ny, nz] = normalDirection;
+    let direction: [number, number, number] = normalDirection;
     if (op.direction === "reverse") {
       direction = [-nx, -ny, -nz];
     }
@@ -268,18 +289,18 @@ opRegistry.register<ExtrudeOp>(
     let shape: number;
     if (op.direction === "symmetric") {
       const half = depth / 2;
-      const pos = ctx.occ.extrude(face, planeNormal, half);
-      const neg = ctx.occ.extrude(face, [-nx, -ny, -nz], half);
+      const pos = ctx.occ.extrude(faceHandle, normalDirection, half);
+      const neg = ctx.occ.extrude(faceHandle, [-nx, -ny, -nz], half);
       shape = ctx.occ.fuse(pos, neg);
     } else {
-      shape = ctx.occ.extrude(face, direction, depth);
+      shape = ctx.occ.extrude(faceHandle, direction, depth);
     }
 
     return buildOpResult(op.id, shape, ctx.occ);
   },
   {
     name: "Extrude",
-    description: "Extrude a sketch profile along its normal",
+    description: "Extrude a sketch profile or face along its normal",
     category: "primary",
     icon: "arrow-up",
   }
