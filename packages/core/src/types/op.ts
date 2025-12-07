@@ -196,10 +196,84 @@ export type SecondaryOp =
   | MirrorOp;
 
 // ============================================================================
+// Primitive Solid Operations (Direct solid creation without sketch)
+// ============================================================================
+
+export interface BoxOp extends OpBase {
+  type: "box";
+  /** Center position of the box */
+  center: Vec3;
+  /** Dimensions [width, depth, height] */
+  dimensions: Vec3;
+}
+
+export interface CylinderOp extends OpBase {
+  type: "cylinder";
+  /** Center position of the cylinder base */
+  center: Vec3;
+  /** Axis direction (default: [0, 0, 1] for Z-up) */
+  axis: Vec3;
+  /** Cylinder radius */
+  radius: DimValue;
+  /** Cylinder height */
+  height: DimValue;
+}
+
+export interface SphereOp extends OpBase {
+  type: "sphere";
+  /** Center position of the sphere */
+  center: Vec3;
+  /** Sphere radius */
+  radius: DimValue;
+}
+
+export interface ConeOp extends OpBase {
+  type: "cone";
+  /** Center position of the cone base */
+  center: Vec3;
+  /** Axis direction (default: [0, 0, 1] for Z-up) */
+  axis: Vec3;
+  /** Base radius */
+  radius1: DimValue;
+  /** Top radius (0 for a point) */
+  radius2: DimValue;
+  /** Cone height */
+  height: DimValue;
+}
+
+export type PrimitiveOp = BoxOp | CylinderOp | SphereOp | ConeOp;
+
+// ============================================================================
+// Transform Operation (Solid -> Solid)
+// ============================================================================
+
+export type TransformType = "translate" | "rotate" | "scale";
+
+export interface TransformOp extends OpBase {
+  type: "transform";
+  /** The operation to transform */
+  targetOp: OpId;
+  /** Transform type */
+  transformType: TransformType;
+  /** Translation vector (for translate) */
+  translation?: Vec3;
+  /** Rotation axis origin (for rotate) */
+  rotationOrigin?: Vec3;
+  /** Rotation axis direction (for rotate) */
+  rotationAxis?: Vec3;
+  /** Rotation angle in radians (for rotate) */
+  rotationAngle?: DimValue;
+  /** Scale factor (for uniform scale) */
+  scaleFactor?: DimValue;
+  /** Scale center (for scale) */
+  scaleCenter?: Vec3;
+}
+
+// ============================================================================
 // Union Type
 // ============================================================================
 
-export type Op = SketchOp | PrimaryOp | SecondaryOp;
+export type Op = SketchOp | PrimaryOp | SecondaryOp | PrimitiveOp | TransformOp;
 
 export type OpType = Op["type"];
 
@@ -233,6 +307,30 @@ export function isBooleanOp(op: Op): op is BooleanOp {
 
 export function isFilletOp(op: Op): op is FilletOp {
   return op.type === "fillet";
+}
+
+export function isPrimitiveOp(op: Op): op is PrimitiveOp {
+  return ["box", "cylinder", "sphere", "cone"].includes(op.type);
+}
+
+export function isBoxOp(op: Op): op is BoxOp {
+  return op.type === "box";
+}
+
+export function isCylinderOp(op: Op): op is CylinderOp {
+  return op.type === "cylinder";
+}
+
+export function isSphereOp(op: Op): op is SphereOp {
+  return op.type === "sphere";
+}
+
+export function isConeOp(op: Op): op is ConeOp {
+  return op.type === "cone";
+}
+
+export function isTransformOp(op: Op): op is TransformOp {
+  return op.type === "transform";
 }
 
 // ============================================================================
@@ -296,6 +394,18 @@ export function getOpDependencies(op: Op): OpId[] {
       if (typeof op.axis === "object" && "opId" in op.axis) {
         deps.push(op.axis.opId);
       }
+      break;
+
+    case "transform":
+      deps.push(op.targetOp);
+      break;
+
+    // Primitive operations have no dependencies (they create geometry directly)
+    case "box":
+    case "cylinder":
+    case "sphere":
+    case "cone":
+      // No dependencies
       break;
   }
 
