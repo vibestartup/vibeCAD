@@ -2,10 +2,13 @@
  * Editor Page - main CAD editor view.
  */
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { EditorLayout } from "../layouts/EditorLayout";
 import { Toolbar, Viewport, OpTimeline, PropertiesPanel, SketchCanvas } from "../components";
+import { SettingsModal } from "../components/SettingsModal";
+import { MyLibrary } from "../components/MyLibrary";
 import { useCadStore } from "../store";
+import { useProjectStore } from "../store/project-store";
 
 // ============================================================================
 // Status Bar
@@ -60,6 +63,12 @@ function StatusBar() {
 // ============================================================================
 
 export function Editor() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const document = useCadStore((s) => s.document);
+  const saveProject = useProjectStore((s) => s.saveProject);
+  const downloadProject = useProjectStore((s) => s.downloadProject);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -80,7 +89,10 @@ export function Editor() {
           useCadStore.getState().redo();
         } else if (e.key === "s") {
           e.preventDefault();
-          console.log("Save (not implemented)");
+          saveProject(document);
+        } else if (e.key === "o") {
+          e.preventDefault();
+          setLibraryOpen(true);
         }
       }
 
@@ -93,29 +105,48 @@ export function Editor() {
         }
       }
 
-      // Escape to clear selection
-      if (e.key === "Escape") {
+      // Escape to clear selection (unless a modal is open)
+      if (e.key === "Escape" && !settingsOpen && !libraryOpen) {
         useCadStore.getState().setSelection(new Set());
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [document, saveProject, settingsOpen, libraryOpen]);
 
   return (
-    <EditorLayout
-      toolbar={<Toolbar />}
-      leftPanel={<OpTimeline />}
-      rightPanel={<PropertiesPanel />}
-      viewport={
-        <>
-          <Viewport />
-          <SketchCanvas />
-        </>
-      }
-      statusBar={<StatusBar />}
-    />
+    <>
+      <EditorLayout
+        toolbar={
+          <Toolbar
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenLibrary={() => setLibraryOpen(true)}
+            onSaveProject={() => saveProject(document)}
+            onDownloadProject={() => downloadProject(document)}
+          />
+        }
+        leftPanel={<OpTimeline />}
+        rightPanel={<PropertiesPanel />}
+        viewport={
+          <>
+            <Viewport />
+            <SketchCanvas />
+          </>
+        }
+        statusBar={<StatusBar />}
+      />
+
+      {/* Modals */}
+      <SettingsModal
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+      />
+      <MyLibrary
+        isOpen={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+      />
+    </>
   );
 }
 

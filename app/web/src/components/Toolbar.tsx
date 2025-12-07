@@ -171,7 +171,19 @@ function ToolButton({ tool, isActive, onClick }: ToolButtonProps) {
   );
 }
 
-export function Toolbar() {
+interface ToolbarProps {
+  onOpenSettings?: () => void;
+  onOpenLibrary?: () => void;
+  onSaveProject?: () => void;
+  onDownloadProject?: () => void;
+}
+
+export function Toolbar({
+  onOpenSettings,
+  onOpenLibrary,
+  onSaveProject,
+  onDownloadProject,
+}: ToolbarProps) {
   // Use store for active tool instead of local state
   const activeTool = useCadStore((s) => s.activeTool);
   const setActiveTool = useCadStore((s) => s.setActiveTool);
@@ -485,6 +497,53 @@ export function Toolbar() {
       {/* Status */}
       {isRebuilding && (
         <span style={styles.statusText}>⟳ Rebuilding...</span>
+      )}
+
+      {/* Right side actions */}
+      <div style={styles.divider} />
+
+      {/* Save */}
+      {onSaveProject && (
+        <button
+          style={styles.iconButton}
+          onClick={onSaveProject}
+          title="Save Project (Ctrl+S)"
+        >
+          &#x1F4BE;
+        </button>
+      )}
+
+      {/* Download */}
+      {onDownloadProject && (
+        <button
+          style={styles.iconButton}
+          onClick={onDownloadProject}
+          title="Download Project"
+        >
+          &#x2B73;
+        </button>
+      )}
+
+      {/* Library */}
+      {onOpenLibrary && (
+        <button
+          style={styles.iconButton}
+          onClick={onOpenLibrary}
+          title="My Library (Ctrl+O)"
+        >
+          &#x1F4C1;
+        </button>
+      )}
+
+      {/* Settings */}
+      {onOpenSettings && (
+        <button
+          style={styles.iconButton}
+          onClick={onOpenSettings}
+          title="Settings"
+        >
+          &#x2699;
+        </button>
       )}
     </div>
   );
