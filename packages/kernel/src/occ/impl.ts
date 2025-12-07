@@ -533,6 +533,87 @@ export class OccApiImpl implements OccApi {
   }
 
   // ============================================================================
+  // Import/Export
+  // ============================================================================
+
+  exportSTEP(shapes: ShapeHandle[], asCompound: boolean = true): string | null {
+    if (shapes.length === 0) {
+      console.warn("[OCC] No shapes to export to STEP");
+      return null;
+    }
+
+    try {
+      // Create STEP writer
+      const writer = new this.oc.STEPControl_Writer_1();
+      const progressRange = new this.oc.Message_ProgressRange_1();
+
+      if (asCompound && shapes.length > 1) {
+        // Export multiple shapes as a compound
+        const compound = new this.oc.TopoDS_Compound();
+        const builder = new this.oc.BRep_Builder();
+        builder.MakeCompound(compound);
+
+        for (const shapeHandle of shapes) {
+          const shape = this.store.get(shapeHandle);
+          builder.Add(compound, shape);
+        }
+
+        // Transfer compound to STEP
+        writer.Transfer(
+          compound,
+          this.oc.STEPControl_StepModelType.STEPControl_AsIs,
+          true,
+          progressRange
+        );
+      } else {
+        // Export shapes individually
+        for (const shapeHandle of shapes) {
+          const shape = this.store.get(shapeHandle);
+          writer.Transfer(
+            shape,
+            this.oc.STEPControl_StepModelType.STEPControl_AsIs,
+            true,
+            progressRange
+          );
+        }
+      }
+
+      // Generate unique filename to avoid conflicts
+      const timestamp = Date.now();
+      const stepFilename = `export_${timestamp}.step`;
+
+      // Write to Emscripten virtual filesystem
+      const status = writer.Write(stepFilename);
+
+      if (status !== this.oc.IFSelect_ReturnStatus.IFSelect_RetDone) {
+        console.error("[OCC] STEP write failed with status:", status);
+        return null;
+      }
+
+      // Read file from virtual filesystem
+      const stepContent = this.oc.FS.readFile("/" + stepFilename, {
+        encoding: "utf8",
+      });
+
+      // Clean up virtual filesystem
+      try {
+        this.oc.FS.unlink("/" + stepFilename);
+      } catch (e) {
+        console.warn("[OCC] Failed to clean up virtual STEP file:", e);
+      }
+
+      return stepContent;
+    } catch (error) {
+      console.error("[OCC] STEP export failed:", error);
+      return null;
+    }
+  }
+
+  exportShapeToSTEP(shape: ShapeHandle): string | null {
+    return this.exportSTEP([shape], false);
+  }
+
+  // ============================================================================
   // Memory Management
   // ============================================================================
 

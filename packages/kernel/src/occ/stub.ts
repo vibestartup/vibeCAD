@@ -236,6 +236,34 @@ export function createOccStub(): OccApi {
       return createBoxMesh(100, 100, 100, [0, 0, 0]);
     },
 
+    // Import/Export
+    exportSTEP(shapeHandles: ShapeHandle[], asCompound: boolean = true): string | null {
+      console.warn("[OCC Stub] STEP export called but using stub implementation");
+
+      // Generate a minimal valid STEP file header
+      const timestamp = new Date().toISOString();
+      const lines: string[] = [];
+
+      lines.push("ISO-10303-21;");
+      lines.push("HEADER;");
+      lines.push("FILE_DESCRIPTION(('vibeCAD STEP Export (Stub Implementation)'),'2;1');");
+      lines.push(`FILE_NAME('model.step','${timestamp}',(''),(''),'vibeCAD','','');`);
+      lines.push("FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));");
+      lines.push("ENDSEC;");
+      lines.push("DATA;");
+      lines.push("/* Stub implementation - no geometry data */");
+      lines.push(`/* Attempted to export ${shapeHandles.length} shape(s) */`);
+      lines.push(`/* As compound: ${asCompound} */`);
+      lines.push("ENDSEC;");
+      lines.push("END-ISO-10303-21;");
+
+      return lines.join("\n");
+    },
+
+    exportShapeToSTEP(shape: ShapeHandle): string | null {
+      return this.exportSTEP([shape], false);
+    },
+
     // Memory
     freeShape(handle: ShapeHandle): void {
       shapes.delete(handle);

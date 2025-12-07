@@ -121,6 +121,25 @@ export interface OccApi {
   mesh(shape: ShapeHandle, deflection: number): MeshData;
 
   // ============================================================================
+  // Import/Export
+  // ============================================================================
+
+  /**
+   * Export shapes to STEP format (ISO 10303-21).
+   * Returns STEP file content as a string, or null on error.
+   *
+   * @param shapes - Array of shape handles to export
+   * @param asCompound - If true and multiple shapes, export as a compound
+   */
+  exportSTEP(shapes: ShapeHandle[], asCompound?: boolean): string | null;
+
+  /**
+   * Export a single shape to STEP format.
+   * Convenience method for exporting a single shape.
+   */
+  exportShapeToSTEP(shape: ShapeHandle): string | null;
+
+  // ============================================================================
   // Memory Management
   // ============================================================================
 
