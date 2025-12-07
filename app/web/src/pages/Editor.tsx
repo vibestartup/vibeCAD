@@ -2,23 +2,25 @@
  * Editor Page - main CAD editor view.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { EditorLayout } from "../layouts/EditorLayout";
-import { Toolbar, Viewport, OpTimeline, PropertiesPanel, SketchCanvas } from "../components";
+import { Toolbar, Viewport, LeftSidebar, RightSidebar, SketchCanvas } from "../components";
 import { SettingsModal } from "../components/SettingsModal";
 import { AboutModal } from "../components/AboutModal";
 import { MyLibrary } from "../components/MyLibrary";
 import { useCadStore } from "../store";
 import { useProjectStore } from "../store/project-store";
+import { captureThumbnail } from "../utils/viewport-capture";
 
 // ============================================================================
 // Status Bar
 // ============================================================================
 
 function StatusBar() {
-  const selection = useCadStore((s) => s.selection);
+  const objectSelection = useCadStore((s) => s.objectSelection);
   const rebuildError = useCadStore((s) => s.rebuildError);
   const isRebuilding = useCadStore((s) => s.isRebuilding);
+  const editorMode = useCadStore((s) => s.editorMode);
 
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
@@ -28,8 +30,8 @@ function StatusBar() {
     <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
       {/* Selection info */}
       <span>
-        {selection.size > 0
-          ? `${selection.size} selected`
+        {objectSelection.size > 0
+          ? `${objectSelection.size} object${objectSelection.size > 1 ? 's' : ''} selected`
           : "No selection"}
       </span>
 
@@ -53,8 +55,12 @@ function StatusBar() {
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
-      {/* Version */}
-      <span>vibeCAD v0.0.1</span>
+      {/* Camera controls hint (right side) */}
+      {editorMode !== "select-plane" && (
+        <span style={{ fontFamily: "monospace" }}>
+          Orbit: Left Mouse · Pan: Right Mouse · Zoom: Scroll
+        </span>
+      )}
     </div>
   );
 }
@@ -63,14 +69,36 @@ function StatusBar() {
 // Editor Page
 // ============================================================================
 
+// Layout constants (must match EditorLayout)
+const TOOLBAR_HEIGHT = 48;
+const RIGHT_PANEL_WIDTH = 280;
+const PANEL_MARGIN = 12;
+const VIEWCUBE_GAP = 12;
+
 export function Editor() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
   const document = useCadStore((s) => s.document);
   const saveProject = useProjectStore((s) => s.saveProject);
   const downloadProject = useProjectStore((s) => s.downloadProject);
   const resetDocument = useCadStore((s) => s.resetDocument);
+
+  // Save project with thumbnail capture
+  const handleSaveProject = useCallback(() => {
+    // Capture thumbnail from viewport
+    const thumbnail = captureThumbnail(200, 150, 0.7);
+    // Save with thumbnail
+    saveProject(document, thumbnail ?? undefined);
+  }, [document, saveProject]);
+
+  // ViewCube positioning (accounts for toolbar and right panel collapse state)
+  const viewCubeTopOffset = TOOLBAR_HEIGHT + VIEWCUBE_GAP;
+  const viewCubeRightOffset = rightCollapsed
+    ? VIEWCUBE_GAP
+    : PANEL_MARGIN + RIGHT_PANEL_WIDTH + VIEWCUBE_GAP;
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -92,7 +120,7 @@ export function Editor() {
           useCadStore.getState().redo();
         } else if (e.key === "s") {
           e.preventDefault();
-          saveProject(document);
+          handleSaveProject();
         } else if (e.key === "o") {
           e.preventDefault();
           setLibraryOpen(true);
@@ -101,22 +129,24 @@ export function Editor() {
 
       // Delete selected
       if (e.key === "Delete" || e.key === "Backspace") {
-        const { selection } = useCadStore.getState();
-        if (selection.size > 0) {
+        const { objectSelection } = useCadStore.getState();
+        if (objectSelection.size > 0) {
           e.preventDefault();
           console.log("Delete selection (not implemented)");
         }
       }
 
-      // Escape to clear selection (unless a modal is open)
+      // Escape to clear both selections (unless a modal is open)
       if (e.key === "Escape" && !settingsOpen && !libraryOpen && !aboutOpen) {
-        useCadStore.getState().setSelection(new Set());
+        const store = useCadStore.getState();
+        store.clearObjectSelection();
+        store.clearOpSelection();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [document, saveProject, settingsOpen, libraryOpen, aboutOpen]);
+  }, [handleSaveProject, settingsOpen, libraryOpen, aboutOpen]);
 
   return (
     <>
@@ -125,8 +155,8 @@ export function Editor() {
           <Toolbar
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenLibrary={() => setLibraryOpen(true)}
-            onSaveProject={() => saveProject(document)}
-            onDownloadProject={() => downloadProject(document)}
+            onSaveProject={handleSaveProject}
+            onDownloadProject={() => { downloadProject(document); }}
             onNewProject={() => {
               if (confirm("Create a new project? Unsaved changes will be lost.")) {
                 resetDocument();
@@ -135,11 +165,18 @@ export function Editor() {
             onOpenAbout={() => setAboutOpen(true)}
           />
         }
-        leftPanel={<OpTimeline />}
-        rightPanel={<PropertiesPanel />}
+        leftPanel={<LeftSidebar />}
+        rightPanel={<RightSidebar />}
+        leftCollapsed={leftCollapsed}
+        onToggleLeft={() => setLeftCollapsed((c) => !c)}
+        rightCollapsed={rightCollapsed}
+        onToggleRight={() => setRightCollapsed((c) => !c)}
         viewport={
           <>
-            <Viewport />
+            <Viewport
+              viewCubeTopOffset={viewCubeTopOffset}
+              viewCubeRightOffset={viewCubeRightOffset}
+            />
             <SketchCanvas />
           </>
         }

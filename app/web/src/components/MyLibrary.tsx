@@ -10,6 +10,7 @@ import {
 } from "../store/project-store";
 import { useCadStore } from "../store/cad-store";
 import { createDocumentWithCube } from "@vibecad/core";
+import { captureThumbnail } from "../utils/viewport-capture";
 
 // ============================================================================
 // Styles
@@ -412,7 +413,9 @@ export function MyLibrary({ isOpen, onClose }: MyLibraryProps) {
 
   const handleSaveCurrentProject = () => {
     const doc = cadStore.document;
-    projectStore.saveProject(doc);
+    // Capture thumbnail from viewport
+    const thumbnail = captureThumbnail(200, 150, 0.7);
+    projectStore.saveProject(doc, thumbnail ?? undefined);
   };
 
   // Handle escape key

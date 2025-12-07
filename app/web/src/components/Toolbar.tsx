@@ -11,7 +11,7 @@ import { exportSTEP } from "../utils/step-export";
 import { getOcc } from "@vibecad/kernel";
 
 // Tool categories
-type ToolCategory = "select" | "sketch" | "sketch-draw" | "primitive" | "operation" | "modify";
+type ToolCategory = "select" | "sketch" | "sketch-draw" | "primitive" | "operation" | "modify" | "transform";
 
 // Which mode the tool is available in
 type ToolMode = "object" | "sketch" | "both";
@@ -42,6 +42,7 @@ const TOOLS: Tool[] = [
   { id: "box", label: "Box", icon: "⬡", category: "primitive", mode: "object" },
   { id: "cylinder", label: "Cylinder", icon: "⏣", category: "primitive", mode: "object" },
   { id: "sphere", label: "Sphere", icon: "◉", category: "primitive", mode: "object" },
+  { id: "cone", label: "Cone", icon: "△", category: "primitive", mode: "object" },
 
   // Operations (object mode)
   { id: "extrude", label: "Extrude", icon: "⏶", category: "operation", shortcut: "E", mode: "object" },
@@ -56,6 +57,11 @@ const TOOLS: Tool[] = [
   { id: "union", label: "Union", icon: "⊕", category: "modify", mode: "object" },
   { id: "subtract", label: "Subtract", icon: "⊖", category: "modify", mode: "object" },
   { id: "intersect", label: "Intersect", icon: "⊗", category: "modify", mode: "object" },
+
+  // Transform (object mode)
+  { id: "translate", label: "Move", icon: "↔", category: "transform", shortcut: "G", mode: "object" },
+  { id: "rotate", label: "Rotate", icon: "⟲", category: "transform", shortcut: "R", mode: "object" },
+  { id: "scale", label: "Scale", icon: "⤢", category: "transform", shortcut: "S", mode: "object" },
 ];
 
 const styles = {
@@ -63,7 +69,8 @@ const styles = {
     display: "flex",
     alignItems: "center",
     height: "100%",
-    width: "100%",
+    flex: 1,
+    minWidth: 0,
   } as React.CSSProperties,
 
   toolbarScrollable: {
@@ -86,14 +93,16 @@ const styles = {
     alignItems: "center",
     height: "100%",
     padding: "0 12px",
-    borderRight: "1px solid #333",
+    borderRight: "1px solid rgba(255, 255, 255, 0.1)",
     flexShrink: 0,
+    position: "relative",
+    zIndex: 100,
   } as React.CSSProperties,
 
   divider: {
     width: 1,
     height: 24,
-    backgroundColor: "#333",
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
     margin: "0 8px",
     flexShrink: 0,
   } as React.CSSProperties,
@@ -307,6 +316,7 @@ interface ProfileMenuProps {
   onOpen: () => void;
   onSave: () => void;
   onDownload: () => void;
+  onMyLibrary: () => void;
   onImport: (format: string) => void;
   onExport: (format: string) => void;
   onSettings: () => void;
@@ -320,6 +330,7 @@ function ProfileMenu({
   onOpen,
   onSave,
   onDownload,
+  onMyLibrary,
   onImport,
   onExport,
   onSettings,
@@ -403,6 +414,24 @@ function ProfileMenu({
           >
             <span style={styles.menuItemIcon}>+</span>
             <span>New</span>
+          </button>
+
+          {/* My Library */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "library" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onMyLibrary)}
+            onMouseEnter={() => {
+              setHoveredItem("library");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>&#x1F4DA;</span>
+            <span>My Library</span>
           </button>
 
           <div style={styles.menuDivider} />
@@ -638,7 +667,7 @@ function ProfileMenu({
 interface ToolbarProps {
   onOpenSettings?: () => void;
   onOpenLibrary?: () => void;
-  onSaveProject?: () => void;
+  onSaveProject?: () => Promise<void> | void;
   onDownloadProject?: () => void;
   onNewProject?: () => void;
   onImport?: (format: string) => void;
@@ -689,6 +718,16 @@ export function Toolbar({
   const cancelBoolean = useCadStore((s) => s.cancelBoolean);
   const pendingBoolean = useCadStore((s) => s.pendingBoolean);
 
+  // Primitive workflows
+  const startPrimitive = useCadStore((s) => s.startPrimitive);
+  const cancelPrimitive = useCadStore((s) => s.cancelPrimitive);
+  const pendingPrimitive = useCadStore((s) => s.pendingPrimitive);
+
+  // Transform workflows
+  const startTransform = useCadStore((s) => s.startTransform);
+  const cancelTransform = useCadStore((s) => s.cancelTransform);
+  const pendingTransform = useCadStore((s) => s.pendingTransform);
+
   // Handle tool click - some tools trigger immediate actions
   const handleToolClick = React.useCallback((toolId: string) => {
     console.log("[Toolbar] handleToolClick:", toolId);
@@ -716,11 +755,34 @@ export function Toolbar({
       case "intersect":
         startBoolean("intersect");
         break;
+      // Primitive solids
+      case "box":
+        startPrimitive("box");
+        break;
+      case "cylinder":
+        startPrimitive("cylinder");
+        break;
+      case "sphere":
+        startPrimitive("sphere");
+        break;
+      case "cone":
+        startPrimitive("cone");
+        break;
+      // Transform operations
+      case "translate":
+        startTransform("translate");
+        break;
+      case "rotate":
+        startTransform("rotate");
+        break;
+      case "scale":
+        startTransform("scale");
+        break;
       default:
         setActiveTool(toolId);
         break;
     }
-  }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, setActiveTool]);
+  }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, startPrimitive, startTransform, setActiveTool]);
 
   // Handle export for all formats
   const handleExport = React.useCallback((formatId: string) => {
@@ -799,6 +861,7 @@ export function Toolbar({
       primitive: [],
       operation: [],
       modify: [],
+      transform: [],
     };
     for (const tool of visibleTools) {
       groups[tool.category].push(tool);
@@ -823,6 +886,9 @@ export function Toolbar({
           })}
           onDownload={onDownloadProject || (() => {
             console.log("[Toolbar] Download project not implemented");
+          })}
+          onMyLibrary={onOpenLibrary || (() => {
+            console.log("[Toolbar] My Library not implemented");
           })}
           onImport={handleImport}
           onExport={handleExport}
@@ -951,12 +1017,46 @@ export function Toolbar({
           </>
         )}
 
+        {/* Object Mode: Primitive Tools */}
+        {toolsByCategory.primitive.length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory.primitive.map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
         {/* Object Mode: Operation Tools */}
         {toolsByCategory.operation.length > 0 && (
           <>
             <div style={styles.divider} />
             <div style={styles.toolGroup}>
               {toolsByCategory.operation.map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Object Mode: Transform Tools */}
+        {toolsByCategory.transform.length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory.transform.map((tool) => (
                 <ToolButton
                   key={tool.id}
                   tool={tool}
