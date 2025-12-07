@@ -4,6 +4,8 @@
 
 import React from "react";
 import { useCadStore } from "../store";
+import { useSettingsStore } from "../store/settings-store";
+import { getLengthUnitLabel, getAngleUnitLabel } from "../utils/units";
 import type { Op, Parameter, ParamId, SketchId } from "@vibecad/core";
 
 const styles = {
@@ -378,6 +380,8 @@ function PendingExtrudePanel() {
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const unitLabel = getLengthUnitLabel(lengthUnit);
 
   const [depthValue, setDepthValue] = React.useState(
     pendingExtrude?.depth?.toString() ?? "10"
@@ -486,7 +490,7 @@ function PendingExtrudePanel() {
       </div>
 
       <div style={styles.field}>
-        <label style={styles.fieldLabel}>Depth (mm)</label>
+        <label style={styles.fieldLabel}>Depth ({unitLabel})</label>
         <input
           type="number"
           value={depthValue}
@@ -642,6 +646,8 @@ function PendingFilletPanel() {
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const unitLabel = getLengthUnitLabel(lengthUnit);
 
   const [radiusValue, setRadiusValue] = React.useState(
     pendingFillet?.radius?.toString() ?? "5"
@@ -711,7 +717,7 @@ function PendingFilletPanel() {
       </div>
 
       <div style={styles.field}>
-        <label style={styles.fieldLabel}>Radius (mm)</label>
+        <label style={styles.fieldLabel}>Radius ({unitLabel})</label>
         <input
           type="number"
           value={radiusValue}

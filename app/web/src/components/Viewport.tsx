@@ -6,6 +6,7 @@ import React, { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useCadStore } from "../store";
+import { useSettingsStore } from "../store/settings-store";
 import { loadOcc, getOcc } from "@vibecad/kernel";
 import type { MeshData, OccApi } from "@vibecad/kernel";
 import {
@@ -16,6 +17,12 @@ import {
   DATUM_YZ,
 } from "@vibecad/core";
 import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, Vec2, Vec3 } from "@vibecad/core";
+import {
+  calculateGridSpacing as calcGridSpacing,
+  formatTickLabel as formatTick,
+  getLengthUnitLabel,
+} from "../utils/units";
+import type { LengthUnit } from "../store/settings-store";
 
 const styles = {
   container: {
@@ -91,57 +98,14 @@ const styles = {
 };
 
 // Calculate appropriate grid spacing based on camera distance
-function calculateGridSpacing(cameraDistance: number): { major: number; minor: number; label: string } {
-  // Target: keep major grid lines roughly 40-100 pixels apart on screen
-  // At distance 100, we want spacing ~10 units
-  const baseSpacing = cameraDistance / 8;
-
-  // Snap to nice numbers: 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000...
-  const niceNumbers = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000];
-  let majorSpacing = niceNumbers[0];
-  for (const n of niceNumbers) {
-    if (n >= baseSpacing) {
-      majorSpacing = n;
-      break;
-    }
-    majorSpacing = n;
-  }
-
-  // Minor grid is 1/5 of major
-  const minorSpacing = majorSpacing / 5;
-
-  // Format label (assuming units are mm)
-  let label: string;
-  if (majorSpacing < 1) {
-    label = `${majorSpacing * 1000}μm`;
-  } else if (majorSpacing < 10) {
-    label = `${majorSpacing}mm`;
-  } else if (majorSpacing < 1000) {
-    label = `${majorSpacing / 10}cm`;
-  } else {
-    label = `${majorSpacing / 1000}m`;
-  }
-
-  return { major: majorSpacing, minor: minorSpacing, label };
+// Uses unit-aware calculation from utils/units.ts
+function calculateGridSpacing(cameraDistance: number, unit: LengthUnit): { major: number; minor: number; label: string } {
+  return calcGridSpacing(cameraDistance, unit);
 }
 
 // Format a numeric value as a label with appropriate units (value is in mm)
-function formatTickLabel(value: number): string {
-  const absVal = Math.abs(value);
-  if (absVal === 0) return "0";
-
-  // Format with units
-  if (absVal < 1) {
-    return `${(value * 1000).toFixed(0)}μm`;
-  } else if (absVal < 10) {
-    return `${value.toFixed(0)}mm`;
-  } else if (absVal < 100) {
-    return `${(value / 10).toFixed(0)}cm`;
-  } else if (absVal < 1000) {
-    return `${(value / 10).toFixed(0)}cm`;
-  } else {
-    return `${(value / 1000).toFixed(1)}m`;
-  }
+function formatTickLabel(value: number, unit: LengthUnit): string {
+  return formatTick(value, unit);
 }
 
 // Create a text sprite for axis labels
@@ -181,6 +145,7 @@ function createTextSprite(text: string, color: number = 0x888888): THREE.Sprite 
 // Create dynamic grid with tick marks and labels
 function createDynamicGrid(
   spacing: { major: number; minor: number; label: string },
+  unit: LengthUnit,
   gridSize: number = 200
 ): THREE.Group {
   const group = new THREE.Group();
@@ -267,7 +232,7 @@ function createDynamicGrid(
 
     // Add labels along positive X axis
     if (i > 0 && i <= halfSize * 0.8) {
-      const xLabel = createTextSprite(formatTickLabel(i), 0xcc6666);
+      const xLabel = createTextSprite(formatTickLabel(i, unit), 0xcc6666);
       xLabel.position.set(i, 0.1, -labelOffset);
       xLabel.scale.set(labelSize, labelSize, 1);
       group.add(xLabel);
@@ -275,7 +240,7 @@ function createDynamicGrid(
 
     // Add labels along negative X axis
     if (i < 0 && i >= -halfSize * 0.8) {
-      const xLabel = createTextSprite(formatTickLabel(i), 0xcc6666);
+      const xLabel = createTextSprite(formatTickLabel(i, unit), 0xcc6666);
       xLabel.position.set(i, 0.1, -labelOffset);
       xLabel.scale.set(labelSize, labelSize, 1);
       group.add(xLabel);
@@ -283,7 +248,7 @@ function createDynamicGrid(
 
     // Add labels along positive Z axis
     if (i > 0 && i <= halfSize * 0.8) {
-      const zLabel = createTextSprite(formatTickLabel(i), 0x6666cc);
+      const zLabel = createTextSprite(formatTickLabel(i, unit), 0x6666cc);
       zLabel.position.set(-labelOffset, 0.1, i);
       zLabel.scale.set(labelSize, labelSize, 1);
       group.add(zLabel);
@@ -291,7 +256,7 @@ function createDynamicGrid(
 
     // Add labels along negative Z axis
     if (i < 0 && i >= -halfSize * 0.8) {
-      const zLabel = createTextSprite(formatTickLabel(i), 0x6666cc);
+      const zLabel = createTextSprite(formatTickLabel(i, unit), 0x6666cc);
       zLabel.position.set(-labelOffset, 0.1, i);
       zLabel.scale.set(labelSize, labelSize, 1);
       group.add(zLabel);
@@ -648,6 +613,7 @@ export function Viewport() {
   const planeGroupRef = useRef<THREE.Group | null>(null);
   const gridGroupRef = useRef<THREE.Group | null>(null);
   const lastGridSpacingRef = useRef<number>(0);
+  const lastUnitRef = useRef<LengthUnit>("mm");
   const previewGroupRef = useRef<THREE.Group | null>(null);
   const cursorPointRef = useRef<THREE.Mesh | null>(null);
   const faceHighlightRef = useRef<THREE.Mesh | null>(null);
@@ -656,6 +622,9 @@ export function Viewport() {
   const [occError, setOccError] = useState<string | null>(null);
   const [occApi, setOccApi] = useState<OccApi | null>(null);
   const [hoveredPlane, setHoveredPlane] = useState<string | null>(null);
+
+  // Get length unit from settings
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
 
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
@@ -741,8 +710,10 @@ export function Viewport() {
     scene.add(backLight);
 
     // Dynamic grid (will be updated based on camera distance)
-    const initialSpacing = calculateGridSpacing(camera.position.length());
-    const grid = createDynamicGrid(initialSpacing);
+    // Use 'mm' as default; will be updated by unit change effect
+    const initialUnit = lastUnitRef.current;
+    const initialSpacing = calculateGridSpacing(camera.position.length(), initialUnit);
+    const grid = createDynamicGrid(initialSpacing, initialUnit);
     scene.add(grid);
     gridGroupRef.current = grid;
     lastGridSpacingRef.current = initialSpacing.major;
@@ -784,9 +755,10 @@ export function Viewport() {
       frameId = requestAnimationFrame(animate);
       controls.update();
 
-      // Update grid based on camera distance
+      // Update grid based on camera distance and current unit
       const cameraDistance = camera.position.length();
-      const spacing = calculateGridSpacing(cameraDistance);
+      const currentUnit = lastUnitRef.current;
+      const spacing = calculateGridSpacing(cameraDistance, currentUnit);
 
       // Only regenerate grid if spacing changed significantly
       if (Math.abs(spacing.major - lastGridSpacingRef.current) > 0.001) {
@@ -808,7 +780,7 @@ export function Viewport() {
         }
 
         // Create new grid
-        const newGrid = createDynamicGrid(spacing);
+        const newGrid = createDynamicGrid(spacing, currentUnit);
         scene.add(newGrid);
         gridGroupRef.current = newGrid;
       }
@@ -869,6 +841,40 @@ export function Viewport() {
       }
     })();
   }, []);
+
+  // Update grid when unit changes
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+
+    // Update ref so animation loop uses the new unit
+    lastUnitRef.current = lengthUnit;
+
+    // Force grid regeneration by setting spacing to 0
+    // This will trigger a rebuild on the next animation frame
+    if (scene && camera && gridGroupRef.current) {
+      // Remove old grid immediately
+      scene.remove(gridGroupRef.current);
+      gridGroupRef.current.traverse((child) => {
+        if (child instanceof THREE.Line || child instanceof THREE.LineSegments) {
+          child.geometry.dispose();
+          (child.material as THREE.Material).dispose();
+        }
+        if (child instanceof THREE.Sprite) {
+          child.material.map?.dispose();
+          child.material.dispose();
+        }
+      });
+
+      // Create new grid with the new unit
+      const cameraDistance = camera.position.length();
+      const spacing = calculateGridSpacing(cameraDistance, lengthUnit);
+      const newGrid = createDynamicGrid(spacing, lengthUnit);
+      scene.add(newGrid);
+      gridGroupRef.current = newGrid;
+      lastGridSpacingRef.current = spacing.major;
+    }
+  }, [lengthUnit]);
 
   // Build and render geometry from the part studio operations
   useEffect(() => {
