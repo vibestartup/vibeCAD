@@ -266,8 +266,13 @@ const styles = {
   submenu: {
     position: "absolute",
     left: "100%",
-    top: 0,
-    marginLeft: 4,
+    top: -1,
+    marginLeft: -4,
+    paddingLeft: 8,
+    backgroundColor: "transparent",
+  } as React.CSSProperties,
+
+  submenuInner: {
     backgroundColor: "#252530",
     border: "1px solid #333",
     borderRadius: 6,
@@ -491,21 +496,23 @@ function ProfileMenu({
             </button>
             {showImportSubmenu && (
               <div style={styles.submenu}>
-                {importFormats.map((format) => (
-                  <button
-                    key={format.id}
-                    style={{
-                      ...styles.menuItem,
-                      ...(hoveredItem === `import-${format.id}` ? styles.menuItemHover : {}),
-                    }}
-                    onClick={() => handleMenuItemClick(() => onImport(format.id))}
-                    onMouseEnter={() => setHoveredItem(`import-${format.id}`)}
-                    onMouseLeave={() => setHoveredItem("import")}
-                  >
-                    <span style={styles.menuItemIcon}>{format.icon}</span>
-                    <span>{format.label}</span>
-                  </button>
-                ))}
+                <div style={styles.submenuInner}>
+                  {importFormats.map((format) => (
+                    <button
+                      key={format.id}
+                      style={{
+                        ...styles.menuItem,
+                        ...(hoveredItem === `import-${format.id}` ? styles.menuItemHover : {}),
+                      }}
+                      onClick={() => handleMenuItemClick(() => onImport(format.id))}
+                      onMouseEnter={() => setHoveredItem(`import-${format.id}`)}
+                      onMouseLeave={() => setHoveredItem("import")}
+                    >
+                      <span style={styles.menuItemIcon}>{format.icon}</span>
+                      <span>{format.label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -534,34 +541,36 @@ function ProfileMenu({
             </button>
             {showExportSubmenu && (
               <div style={styles.submenu}>
-                {exportFormats.map((format) => {
-                  const hasData = format.needsMesh ? hasGeometry : hasShapeHandles;
-                  const isDisabled = !hasData;
-                  return (
-                    <button
-                      key={format.id}
-                      style={{
-                        ...styles.menuItem,
-                        ...(hoveredItem === `export-${format.id}` && !isDisabled
-                          ? styles.menuItemHover
-                          : {}),
-                        ...(isDisabled ? styles.menuItemDisabled : {}),
-                      }}
-                      onClick={() => {
-                        if (!isDisabled) {
-                          handleMenuItemClick(() => onExport(format.id));
-                        }
-                      }}
-                      onMouseEnter={() => setHoveredItem(`export-${format.id}`)}
-                      onMouseLeave={() => setHoveredItem("export")}
-                      disabled={isDisabled}
-                      title={isDisabled ? "No geometry to export" : `Export as ${format.label}`}
-                    >
-                      <span style={{ fontWeight: 500 }}>{format.label}</span>
-                      <span style={{ color: "#666", fontSize: 11 }}>{format.extension}</span>
-                    </button>
-                  );
-                })}
+                <div style={styles.submenuInner}>
+                  {exportFormats.map((format) => {
+                    const hasData = format.needsMesh ? hasGeometry : hasShapeHandles;
+                    const isDisabled = !hasData;
+                    return (
+                      <button
+                        key={format.id}
+                        style={{
+                          ...styles.menuItem,
+                          ...(hoveredItem === `export-${format.id}` && !isDisabled
+                            ? styles.menuItemHover
+                            : {}),
+                          ...(isDisabled ? styles.menuItemDisabled : {}),
+                        }}
+                        onClick={() => {
+                          if (!isDisabled) {
+                            handleMenuItemClick(() => onExport(format.id));
+                          }
+                        }}
+                        onMouseEnter={() => setHoveredItem(`export-${format.id}`)}
+                        onMouseLeave={() => setHoveredItem("export")}
+                        disabled={isDisabled}
+                        title={isDisabled ? "No geometry to export" : `Export as ${format.label}`}
+                      >
+                        <span style={{ fontWeight: 500 }}>{format.label}</span>
+                        <span style={{ color: "#666", fontSize: 11 }}>{format.extension}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
