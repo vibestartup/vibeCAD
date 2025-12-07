@@ -18,6 +18,12 @@ import type {
   RevolveOp,
   BooleanOp,
   FilletOp,
+  BoxOp,
+  CylinderOp,
+  SphereOp,
+  ConeOp,
+  TransformOp,
+  Vec3,
   PrimitiveId,
   PointPrimitive,
   LinePrimitive,
@@ -67,7 +73,8 @@ interface CadState {
   // UI state
   activeStudioId: PartStudioId | null;
   activeSketchId: SketchId | null;
-  selection: Set<string>;
+  objectSelection: Set<string>;  // 3D solid/body selection
+  opSelection: Set<string>;      // Operation selection in timeline
 
   // Editor mode
   editorMode: EditorMode;
@@ -147,6 +154,42 @@ interface CadState {
     planeId: string;
   } | null;
 
+  // Pending primitive solid creation
+  pendingPrimitive: {
+    type: "box";
+    center: Vec3;
+    dimensions: Vec3;
+  } | {
+    type: "cylinder";
+    center: Vec3;
+    axis: Vec3;
+    radius: number;
+    height: number;
+  } | {
+    type: "sphere";
+    center: Vec3;
+    radius: number;
+  } | {
+    type: "cone";
+    center: Vec3;
+    axis: Vec3;
+    radius1: number;
+    radius2: number;
+    height: number;
+  } | null;
+
+  // Pending transform operation
+  pendingTransform: {
+    targetOpId: string | null;
+    transformType: "translate" | "rotate" | "scale";
+    translation: Vec3;
+    rotationOrigin: Vec3;
+    rotationAxis: Vec3;
+    rotationAngle: number;  // in degrees
+    scaleFactor: number;
+    scaleCenter: Vec3;
+  } | null;
+
   // Export mesh data (populated by Viewport for export)
   exportMeshes: ExportableMesh[];
 
@@ -162,9 +205,12 @@ interface CadActions {
   // UI actions
   setActiveStudio: (id: PartStudioId | null) => void;
   setActiveSketch: (id: SketchId | null) => void;
-  setSelection: (ids: Set<string>) => void;
-  clearSelection: () => void;
-  toggleSelected: (id: string) => void;
+  setObjectSelection: (ids: Set<string>) => void;
+  clearObjectSelection: () => void;
+  toggleObjectSelected: (id: string) => void;
+  setOpSelection: (ids: Set<string>) => void;
+  clearOpSelection: () => void;
+  toggleOpSelected: (id: string) => void;
 
   // Timeline actions
   setTimelinePosition: (position: number | null) => void;
@@ -265,6 +311,35 @@ interface CadActions {
   // Hover state for face selection
   setHoveredFace: (face: CadState["hoveredFace"]) => void;
 
+  // Primitive solid workflow
+  startPrimitive: (type: "box" | "cylinder" | "sphere" | "cone") => void;
+  updatePendingPrimitive: (updates: Partial<NonNullable<CadState["pendingPrimitive"]>>) => void;
+  confirmPrimitive: () => void;
+  cancelPrimitive: () => void;
+  createBox: (center: Vec3, dimensions: Vec3) => OpId | null;
+  createCylinder: (center: Vec3, axis: Vec3, radius: number, height: number) => OpId | null;
+  createSphere: (center: Vec3, radius: number) => OpId | null;
+  createCone: (center: Vec3, axis: Vec3, radius1: number, radius2: number, height: number) => OpId | null;
+
+  // Transform workflow
+  startTransform: (type: "translate" | "rotate" | "scale") => void;
+  setPendingTransformTarget: (opId: string | null) => void;
+  updatePendingTransform: (updates: Partial<NonNullable<CadState["pendingTransform"]>>) => void;
+  confirmTransform: () => void;
+  cancelTransform: () => void;
+  createTransform: (
+    targetOpId: OpId,
+    transformType: "translate" | "rotate" | "scale",
+    params: {
+      translation?: Vec3;
+      rotationOrigin?: Vec3;
+      rotationAxis?: Vec3;
+      rotationAngle?: number;
+      scaleFactor?: number;
+      scaleCenter?: Vec3;
+    }
+  ) => OpId | null;
+
   // Export actions
   setExportMeshes: (meshes: ExportableMesh[]) => void;
   setExportShapeHandles: (handles: ShapeHandle[]) => void;
@@ -287,7 +362,8 @@ function createInitialState(): CadState {
     historyState: createHistory(document),
     activeStudioId: defaultStudio?.id ?? null,
     activeSketchId: null,
-    selection: new Set(),
+    objectSelection: new Set(),
+    opSelection: new Set(),
     editorMode: "object" as EditorMode,
     timelinePosition: null, // null = show all operations
     activeTool: "select",
@@ -304,6 +380,8 @@ function createInitialState(): CadState {
     pendingFillet: null,
     pendingBoolean: null,
     hoveredFace: null,
+    pendingPrimitive: null,
+    pendingTransform: null,
     exportMeshes: [],
     exportShapeHandles: [],
   };
@@ -340,23 +418,42 @@ export const useCadStore = create<CadStore>((set, get) => ({
     set({ activeSketchId: id });
   },
 
-  setSelection: (ids) => {
-    set({ selection: ids });
+  setObjectSelection: (ids) => {
+    set({ objectSelection: ids });
   },
 
-  clearSelection: () => {
-    set({ selection: new Set() });
+  clearObjectSelection: () => {
+    set({ objectSelection: new Set() });
   },
 
-  toggleSelected: (id) => {
-    const { selection } = get();
-    const newSelection = new Set(selection);
+  toggleObjectSelected: (id) => {
+    const { objectSelection } = get();
+    const newSelection = new Set(objectSelection);
     if (newSelection.has(id)) {
       newSelection.delete(id);
     } else {
       newSelection.add(id);
     }
-    set({ selection: newSelection });
+    set({ objectSelection: newSelection });
+  },
+
+  setOpSelection: (ids) => {
+    set({ opSelection: ids });
+  },
+
+  clearOpSelection: () => {
+    set({ opSelection: new Set() });
+  },
+
+  toggleOpSelected: (id) => {
+    const { opSelection } = get();
+    const newSelection = new Set(opSelection);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+    } else {
+      newSelection.add(id);
+    }
+    set({ opSelection: newSelection });
   },
 
   // Timeline actions
@@ -500,7 +597,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   deleteOp: (opId) => {
-    const { document, activeStudioId, historyState, selection } = get();
+    const { document, activeStudioId, historyState, objectSelection, opSelection } = get();
     if (!activeStudioId) return;
 
     const studio = document.partStudios.get(activeStudioId);
@@ -535,14 +632,17 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newDoc = { ...document, partStudios: newPartStudios };
 
-    // Remove from selection if selected
-    const newSelection = new Set(selection);
-    newSelection.delete(opId);
+    // Remove from both selections if selected
+    const newObjectSelection = new Set(objectSelection);
+    newObjectSelection.delete(opId);
+    const newOpSelection = new Set(opSelection);
+    newOpSelection.delete(opId);
 
     set({
       document: newDoc,
       historyState: pushState(historyState, newDoc),
-      selection: newSelection,
+      objectSelection: newObjectSelection,
+      opSelection: newOpSelection,
     });
   },
 
@@ -1332,7 +1432,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   setPendingExtrudeSketch: (sketchId, loopIndex) => {
-    const { pendingExtrude, selection, document, activeStudioId } = get();
+    const { pendingExtrude, opSelection, document, activeStudioId } = get();
     if (pendingExtrude) {
       // Clear body face when setting sketch, exit face selection mode
       set({
@@ -1341,9 +1441,9 @@ export const useCadStore = create<CadStore>((set, get) => ({
         faceSelectionTarget: null,
         selectedFace: sketchId ? { type: "sketch-profile", sketchId, loopIndex } : null,
       });
-    } else if (selection.size === 1 && activeStudioId && sketchId) {
+    } else if (opSelection.size === 1 && activeStudioId && sketchId) {
       // If no pending extrude but an op is selected, update that op's profile
-      const selectedOpId = Array.from(selection)[0];
+      const selectedOpId = Array.from(opSelection)[0];
       const studio = document.partStudios.get(activeStudioId);
       const opNode = studio?.opGraph.get(selectedOpId as OpId);
       if (opNode && opNode.op.type === "extrude") {
@@ -1779,6 +1879,368 @@ export const useCadStore = create<CadStore>((set, get) => ({
     return booleanOpId;
   },
 
+  // Primitive solid workflow
+  startPrimitive: (type) => {
+    const defaultPrimitives = {
+      box: {
+        type: "box" as const,
+        center: [0, 0, 0] as Vec3,
+        dimensions: [50, 50, 50] as Vec3,
+      },
+      cylinder: {
+        type: "cylinder" as const,
+        center: [0, 0, 0] as Vec3,
+        axis: [0, 0, 1] as Vec3,
+        radius: 25,
+        height: 50,
+      },
+      sphere: {
+        type: "sphere" as const,
+        center: [0, 0, 0] as Vec3,
+        radius: 25,
+      },
+      cone: {
+        type: "cone" as const,
+        center: [0, 0, 0] as Vec3,
+        axis: [0, 0, 1] as Vec3,
+        radius1: 25,
+        radius2: 0,
+        height: 50,
+      },
+    };
+    set({
+      pendingPrimitive: defaultPrimitives[type],
+      activeTool: type,
+    });
+  },
+
+  updatePendingPrimitive: (updates) => {
+    const { pendingPrimitive } = get();
+    if (pendingPrimitive) {
+      set({ pendingPrimitive: { ...pendingPrimitive, ...updates } as typeof pendingPrimitive });
+    }
+  },
+
+  confirmPrimitive: () => {
+    const { pendingPrimitive, createBox, createCylinder, createSphere, createCone } = get();
+    if (!pendingPrimitive) return;
+
+    switch (pendingPrimitive.type) {
+      case "box":
+        createBox(pendingPrimitive.center, pendingPrimitive.dimensions);
+        break;
+      case "cylinder":
+        createCylinder(pendingPrimitive.center, pendingPrimitive.axis, pendingPrimitive.radius, pendingPrimitive.height);
+        break;
+      case "sphere":
+        createSphere(pendingPrimitive.center, pendingPrimitive.radius);
+        break;
+      case "cone":
+        createCone(pendingPrimitive.center, pendingPrimitive.axis, pendingPrimitive.radius1, pendingPrimitive.radius2, pendingPrimitive.height);
+        break;
+    }
+
+    set({
+      pendingPrimitive: null,
+      activeTool: "select",
+    });
+  },
+
+  cancelPrimitive: () => {
+    set({
+      pendingPrimitive: null,
+      activeTool: "select",
+    });
+  },
+
+  createBox: (center, dimensions) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const boxOpId = newId("Op") as OpId;
+    const boxOp: BoxOp = {
+      id: boxOpId,
+      type: "box",
+      name: "Box",
+      suppressed: false,
+      center,
+      dimensions,
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(boxOpId, { op: boxOp, deps: [] });
+
+    const newOpOrder = [...studio.opOrder, boxOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return boxOpId;
+  },
+
+  createCylinder: (center, axis, radius, height) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const cylinderOpId = newId("Op") as OpId;
+    const cylinderOp: CylinderOp = {
+      id: cylinderOpId,
+      type: "cylinder",
+      name: "Cylinder",
+      suppressed: false,
+      center,
+      axis,
+      radius: dimLiteral(radius),
+      height: dimLiteral(height),
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(cylinderOpId, { op: cylinderOp, deps: [] });
+
+    const newOpOrder = [...studio.opOrder, cylinderOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return cylinderOpId;
+  },
+
+  createSphere: (center, radius) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const sphereOpId = newId("Op") as OpId;
+    const sphereOp: SphereOp = {
+      id: sphereOpId,
+      type: "sphere",
+      name: "Sphere",
+      suppressed: false,
+      center,
+      radius: dimLiteral(radius),
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(sphereOpId, { op: sphereOp, deps: [] });
+
+    const newOpOrder = [...studio.opOrder, sphereOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return sphereOpId;
+  },
+
+  createCone: (center, axis, radius1, radius2, height) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const coneOpId = newId("Op") as OpId;
+    const coneOp: ConeOp = {
+      id: coneOpId,
+      type: "cone",
+      name: "Cone",
+      suppressed: false,
+      center,
+      axis,
+      radius1: dimLiteral(radius1),
+      radius2: dimLiteral(radius2),
+      height: dimLiteral(height),
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(coneOpId, { op: coneOp, deps: [] });
+
+    const newOpOrder = [...studio.opOrder, coneOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return coneOpId;
+  },
+
+  // Transform workflow
+  startTransform: (type) => {
+    set({
+      pendingTransform: {
+        targetOpId: null,
+        transformType: type,
+        translation: [0, 0, 0],
+        rotationOrigin: [0, 0, 0],
+        rotationAxis: [0, 0, 1],
+        rotationAngle: 0,
+        scaleFactor: 1,
+        scaleCenter: [0, 0, 0],
+      },
+      activeTool: `transform-${type}`,
+    });
+  },
+
+  setPendingTransformTarget: (opId) => {
+    const { pendingTransform } = get();
+    if (pendingTransform) {
+      set({ pendingTransform: { ...pendingTransform, targetOpId: opId } });
+    }
+  },
+
+  updatePendingTransform: (updates) => {
+    const { pendingTransform } = get();
+    if (pendingTransform) {
+      set({ pendingTransform: { ...pendingTransform, ...updates } });
+    }
+  },
+
+  confirmTransform: () => {
+    const { pendingTransform, createTransform } = get();
+    if (!pendingTransform?.targetOpId) return;
+
+    createTransform(
+      pendingTransform.targetOpId as OpId,
+      pendingTransform.transformType,
+      {
+        translation: pendingTransform.translation,
+        rotationOrigin: pendingTransform.rotationOrigin,
+        rotationAxis: pendingTransform.rotationAxis,
+        rotationAngle: pendingTransform.rotationAngle,
+        scaleFactor: pendingTransform.scaleFactor,
+        scaleCenter: pendingTransform.scaleCenter,
+      }
+    );
+
+    set({
+      pendingTransform: null,
+      activeTool: "select",
+    });
+  },
+
+  cancelTransform: () => {
+    set({
+      pendingTransform: null,
+      activeTool: "select",
+    });
+  },
+
+  createTransform: (targetOpId, transformType, params) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const targetOp = studio.opGraph.get(targetOpId);
+    if (!targetOp) return null;
+
+    const transformOpId = newId("Op") as OpId;
+    const transformOp: TransformOp = {
+      id: transformOpId,
+      type: "transform",
+      name: `${transformType.charAt(0).toUpperCase() + transformType.slice(1)} ${targetOp.op.name}`,
+      suppressed: false,
+      targetOp: targetOpId,
+      transformType: transformType,
+      translation: params.translation,
+      rotationOrigin: params.rotationOrigin,
+      rotationAxis: params.rotationAxis,
+      rotationAngle: params.rotationAngle !== undefined ? dimLiteral(params.rotationAngle * Math.PI / 180) : undefined,
+      scaleFactor: params.scaleFactor !== undefined ? dimLiteral(params.scaleFactor) : undefined,
+      scaleCenter: params.scaleCenter,
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(transformOpId, {
+      op: transformOp,
+      deps: [targetOpId],
+    });
+
+    const newOpOrder = [...studio.opOrder, transformOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return transformOpId;
+  },
+
   setHoveredFace: (face) => {
     set({ hoveredFace: face });
   },
@@ -1813,7 +2275,8 @@ export const selectActiveSketch = (state: CadStore) => {
   return studio.sketches.get(activeSketchId) ?? null;
 };
 export const selectParams = (state: CadStore) => state.document.params;
-export const selectSelection = (state: CadStore) => state.selection;
+export const selectObjectSelection = (state: CadStore) => state.objectSelection;
+export const selectOpSelection = (state: CadStore) => state.opSelection;
 export const selectIsRebuilding = (state: CadStore) => state.isRebuilding;
 export const selectTimelinePosition = (state: CadStore) => state.timelinePosition;
 export const selectExportMeshes = (state: CadStore) => state.exportMeshes;
