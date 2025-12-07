@@ -168,6 +168,67 @@ export function formatFileSize(bytes: number): string {
 }
 
 /**
+ * Capture a thumbnail of the viewport for project storage
+ * Returns a small, compressed image suitable for localStorage
+ */
+export function captureThumbnail(
+  maxWidth: number = 200,
+  maxHeight: number = 150,
+  quality: number = 0.7
+): string | null {
+  // Find the WebGL canvas (Three.js renderer)
+  const canvas = document.querySelector(
+    'canvas[data-engine="three.js"]'
+  ) as HTMLCanvasElement | null;
+
+  // Fallback: find any canvas in the viewport area
+  const fallbackCanvas = document.querySelector(
+    ".viewport canvas, [class*='viewport'] canvas, canvas"
+  ) as HTMLCanvasElement | null;
+
+  const targetCanvas = canvas || fallbackCanvas;
+
+  if (!targetCanvas) {
+    console.error("[Capture] No canvas found for thumbnail");
+    return null;
+  }
+
+  try {
+    // Calculate scaled dimensions maintaining aspect ratio
+    const aspectRatio = targetCanvas.width / targetCanvas.height;
+    let width = maxWidth;
+    let height = maxWidth / aspectRatio;
+
+    if (height > maxHeight) {
+      height = maxHeight;
+      width = maxHeight * aspectRatio;
+    }
+
+    // Create offscreen canvas for resizing
+    const offscreen = document.createElement("canvas");
+    offscreen.width = width;
+    offscreen.height = height;
+
+    const ctx = offscreen.getContext("2d");
+    if (!ctx) {
+      console.error("[Capture] Failed to get 2D context for thumbnail");
+      return null;
+    }
+
+    // Draw the viewport canvas scaled down
+    ctx.drawImage(targetCanvas, 0, 0, width, height);
+
+    // Export as JPEG for smaller size
+    const dataUrl = offscreen.toDataURL("image/jpeg", quality);
+
+    return dataUrl;
+  } catch (err) {
+    console.error("[Capture] Failed to capture thumbnail:", err);
+    return null;
+  }
+}
+
+/**
  * Preset resolutions
  */
 export const RESOLUTION_PRESETS = [

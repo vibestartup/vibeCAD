@@ -10,14 +10,16 @@ import { useSettingsStore } from "../store/settings-store";
 import { loadOcc, getOcc } from "@vibecad/kernel";
 import type { MeshData, OccApi } from "@vibecad/kernel";
 import type { ExportableMesh } from "../utils/stl-export";
+import { ViewCube, type RenderMode } from "./ViewCube";
 import {
   sketch as sketchUtils,
   getDatumPlanes,
   DATUM_XY,
   DATUM_XZ,
   DATUM_YZ,
+  getPointPosition,
 } from "@vibecad/core";
-import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, Vec2, Vec3 } from "@vibecad/core";
+import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, Vec2, Vec3, PrimitiveId } from "@vibecad/core";
 import {
   calculateGridSpacing as calcGridSpacing,
   formatTickLabel as formatTick,
@@ -48,23 +50,6 @@ const styles = {
     textAlign: "center",
   } as React.CSSProperties,
 
-  viewCube: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    width: 80,
-    height: 80,
-    backgroundColor: "rgba(30, 30, 60, 0.8)",
-    borderRadius: 4,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#888",
-    fontSize: 11,
-    cursor: "pointer",
-    border: "1px solid #333",
-  } as React.CSSProperties,
-
   controls: {
     position: "absolute",
     bottom: 16,
@@ -88,14 +73,6 @@ const styles = {
     justifyContent: "center",
   } as React.CSSProperties,
 
-  info: {
-    position: "absolute",
-    bottom: 16,
-    left: 16,
-    color: "#666",
-    fontSize: 11,
-    fontFamily: "monospace",
-  } as React.CSSProperties,
 };
 
 // Calculate appropriate grid spacing based on camera distance
@@ -195,21 +172,21 @@ function createDynamicGrid(
   const majorLines = new THREE.LineSegments(majorGeometry, majorMaterial);
   group.add(majorLines);
 
-  // Axis lines (X = red, Z = blue)
+  // Axis lines (X = red, Y = green) - CAD convention: Z-up, XY ground plane
   const xAxisMaterial = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 2 });
-  const zAxisMaterial = new THREE.LineBasicMaterial({ color: 0x4444ff, linewidth: 2 });
+  const yAxisMaterial = new THREE.LineBasicMaterial({ color: 0x44ff44, linewidth: 2 });
 
   const xAxisGeom = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(-halfSize, 0.01, 0),
     new THREE.Vector3(halfSize, 0.01, 0),
   ]);
-  const zAxisGeom = new THREE.BufferGeometry().setFromPoints([
+  const yAxisGeom = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0.01, -halfSize),
     new THREE.Vector3(0, 0.01, halfSize),
   ]);
 
   group.add(new THREE.Line(xAxisGeom, xAxisMaterial));
-  group.add(new THREE.Line(zAxisGeom, zAxisMaterial));
+  group.add(new THREE.Line(yAxisGeom, yAxisMaterial));
 
   // Tick marks along axes
   const tickLength = spacing.major * 0.15;
@@ -227,7 +204,7 @@ function createDynamicGrid(
     tickPoints.push(new THREE.Vector3(i, 0.01, -tickLength));
     tickPoints.push(new THREE.Vector3(i, 0.01, tickLength));
 
-    // Ticks on Z axis (perpendicular to Z, in X direction)
+    // Ticks on Y axis (perpendicular to Y, in X direction) - CAD Y is Three.js Z
     tickPoints.push(new THREE.Vector3(-tickLength, 0.01, i));
     tickPoints.push(new THREE.Vector3(tickLength, 0.01, i));
 
@@ -247,20 +224,20 @@ function createDynamicGrid(
       group.add(xLabel);
     }
 
-    // Add labels along positive Z axis
+    // Add labels along positive Y axis (CAD Y is Three.js Z)
     if (i > 0 && i <= halfSize * 0.8) {
-      const zLabel = createTextSprite(formatTickLabel(i, unit), 0x6666cc);
-      zLabel.position.set(-labelOffset, 0.1, i);
-      zLabel.scale.set(labelSize, labelSize, 1);
-      group.add(zLabel);
+      const yLabel = createTextSprite(formatTickLabel(i, unit), 0x66cc66);
+      yLabel.position.set(-labelOffset, 0.1, i);
+      yLabel.scale.set(labelSize, labelSize, 1);
+      group.add(yLabel);
     }
 
-    // Add labels along negative Z axis
+    // Add labels along negative Y axis (CAD Y is Three.js Z)
     if (i < 0 && i >= -halfSize * 0.8) {
-      const zLabel = createTextSprite(formatTickLabel(i, unit), 0x6666cc);
-      zLabel.position.set(-labelOffset, 0.1, i);
-      zLabel.scale.set(labelSize, labelSize, 1);
-      group.add(zLabel);
+      const yLabel = createTextSprite(formatTickLabel(i, unit), 0x66cc66);
+      yLabel.position.set(-labelOffset, 0.1, i);
+      yLabel.scale.set(labelSize, labelSize, 1);
+      group.add(yLabel);
     }
   }
 
@@ -270,10 +247,10 @@ function createDynamicGrid(
   xNameLabel.scale.set(labelSize * 1.5, labelSize * 1.5, 1);
   group.add(xNameLabel);
 
-  const zNameLabel = createTextSprite("Z", 0x4444ff);
-  zNameLabel.position.set(-labelOffset * 2, 0.1, halfSize * 0.95);
-  zNameLabel.scale.set(labelSize * 1.5, labelSize * 1.5, 1);
-  group.add(zNameLabel);
+  const yNameLabel = createTextSprite("Y", 0x44ff44);
+  yNameLabel.position.set(-labelOffset * 2, 0.1, halfSize * 0.95);
+  yNameLabel.scale.set(labelSize * 1.5, labelSize * 1.5, 1);
+  group.add(yNameLabel);
 
   // Origin label
   const originLabel = createTextSprite("0", 0x888888);
@@ -288,10 +265,37 @@ function createDynamicGrid(
   return group;
 }
 
-// Axes helper
+// Axes helper - CAD convention: X(red), Y(green), Z(blue) with Z-up
+// Three.js uses Y-up internally, so we swap: CAD Y -> Three.js Z, CAD Z -> Three.js Y
 function createAxes() {
-  const axesHelper = new THREE.AxesHelper(50);
-  return axesHelper;
+  const group = new THREE.Group();
+  const axisLength = 50;
+
+  // X axis (red) - same in both conventions
+  const xGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(axisLength, 0, 0),
+  ]);
+  const xMat = new THREE.LineBasicMaterial({ color: 0xff4444 });
+  group.add(new THREE.Line(xGeom, xMat));
+
+  // Y axis (green) - CAD Y is Three.js Z (horizontal)
+  const yGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, axisLength),
+  ]);
+  const yMat = new THREE.LineBasicMaterial({ color: 0x44ff44 });
+  group.add(new THREE.Line(yGeom, yMat));
+
+  // Z axis (blue) - CAD Z is Three.js Y (vertical/up)
+  const zGeom = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, axisLength, 0),
+  ]);
+  const zMat = new THREE.LineBasicMaterial({ color: 0x4444ff });
+  group.add(new THREE.Line(zGeom, zMat));
+
+  return group;
 }
 
 // Create mesh from MeshData
@@ -657,27 +661,42 @@ function createSketchLines(
   return group;
 }
 
-export function Viewport() {
+interface ViewportProps {
+  /** Offset for ViewCube from top */
+  viewCubeTopOffset?: number;
+  /** Offset for ViewCube from right */
+  viewCubeRightOffset?: number;
+}
+
+export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: ViewportProps = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | THREE.OrthographicCamera | null>(null);
+  const perspCameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const orthoCameraRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const meshGroupRef = useRef<THREE.Group | null>(null);
   const sketchGroupRef = useRef<THREE.Group | null>(null);
   const planeGroupRef = useRef<THREE.Group | null>(null);
   const gridGroupRef = useRef<THREE.Group | null>(null);
+  const axesHelperRef = useRef<THREE.Group | null>(null);
   const lastGridSpacingRef = useRef<number>(0);
   const lastUnitRef = useRef<LengthUnit>("mm");
   const previewGroupRef = useRef<THREE.Group | null>(null);
   const cursorPointRef = useRef<THREE.Mesh | null>(null);
   const faceHighlightRef = useRef<THREE.Mesh | null>(null);
+  const selectionHighlightGroupRef = useRef<THREE.Group | null>(null);
   const extrudePreviewRef = useRef<THREE.Group | null>(null);
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
   const [occApi, setOccApi] = useState<OccApi | null>(null);
   const [hoveredPlane, setHoveredPlane] = useState<string | null>(null);
+  const [isOrthographic, setIsOrthographic] = useState(false);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showAxes, setShowAxes] = useState(true);
+  const [renderMode, setRenderMode] = useState<RenderMode>("solid");
 
   // Get length unit from settings
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
@@ -687,6 +706,8 @@ export function Viewport() {
   );
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const editorMode = useCadStore((s) => s.editorMode);
+  const objectSelection = useCadStore((s) => s.objectSelection);
+  const setObjectSelection = useCadStore((s) => s.setObjectSelection);
   const createNewSketch = useCadStore((s) => s.createNewSketch);
   const activeSketchId = useCadStore((s) => s.activeSketchId);
   const setSketchMousePos = useCadStore((s) => s.setSketchMousePos);
@@ -731,11 +752,29 @@ export function Viewport() {
     scene.background = new THREE.Color(0x1a1a2e);
     sceneRef.current = scene;
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 50000);
-    camera.position.set(50, 50, 50);
-    camera.lookAt(0, 0, 0);
-    cameraRef.current = camera;
+    // Cameras - create both perspective and orthographic
+    const perspCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 50000);
+    perspCamera.position.set(200, 200, 200);
+    perspCamera.lookAt(0, 0, 0);
+    perspCameraRef.current = perspCamera;
+
+    // Orthographic camera with frustum based on initial view
+    const frustumSize = 400;
+    const aspect = width / height;
+    const orthoCamera = new THREE.OrthographicCamera(
+      -frustumSize * aspect / 2,
+      frustumSize * aspect / 2,
+      frustumSize / 2,
+      -frustumSize / 2,
+      0.1,
+      50000
+    );
+    orthoCamera.position.set(200, 200, 200);
+    orthoCamera.lookAt(0, 0, 0);
+    orthoCameraRef.current = orthoCamera;
+
+    // Start with perspective camera
+    cameraRef.current = perspCamera;
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({
@@ -750,7 +789,7 @@ export function Viewport() {
     rendererRef.current = renderer;
 
     // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
+    const controls = new OrbitControls(perspCamera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.target.set(0, 0, 0);
@@ -775,14 +814,16 @@ export function Viewport() {
     // Dynamic grid (will be updated based on camera distance)
     // Use 'mm' as default; will be updated by unit change effect
     const initialUnit = lastUnitRef.current;
-    const initialSpacing = calculateGridSpacing(camera.position.length(), initialUnit);
+    const initialSpacing = calculateGridSpacing(perspCamera.position.length(), initialUnit);
     const grid = createDynamicGrid(initialSpacing, initialUnit);
     scene.add(grid);
     gridGroupRef.current = grid;
     lastGridSpacingRef.current = initialSpacing.major;
 
     // Axes helper
-    scene.add(createAxes());
+    const axesHelper = createAxes();
+    scene.add(axesHelper);
+    axesHelperRef.current = axesHelper;
 
     // Mesh group for CAD geometry
     const meshGroup = new THREE.Group();
@@ -823,8 +864,11 @@ export function Viewport() {
       frameId = requestAnimationFrame(animate);
       controls.update();
 
+      const activeCamera = cameraRef.current;
+      if (!activeCamera) return;
+
       // Update grid based on camera distance and current unit
-      const cameraDistance = camera.position.length();
+      const cameraDistance = activeCamera.position.length();
       const currentUnit = lastUnitRef.current;
       const spacing = calculateGridSpacing(cameraDistance, currentUnit);
 
@@ -855,7 +899,7 @@ export function Viewport() {
 
       // Update cursor point scale for constant screen size
       if (cursorPointRef.current && cursorPointRef.current.visible) {
-        const distToCamera = cursorPointRef.current.position.distanceTo(camera.position);
+        const distToCamera = cursorPointRef.current.position.distanceTo(activeCamera.position);
         const scale = distToCamera * 0.006;
         cursorPointRef.current.scale.setScalar(scale);
       }
@@ -864,14 +908,14 @@ export function Viewport() {
       if (previewGroupRef.current) {
         previewGroupRef.current.traverse((child) => {
           if (child instanceof THREE.Mesh && child.userData.isMarker) {
-            const distToCamera = child.position.distanceTo(camera.position);
+            const distToCamera = child.position.distanceTo(activeCamera.position);
             const scale = distToCamera * 0.005;
             child.scale.setScalar(scale);
           }
         });
       }
 
-      renderer.render(scene, camera);
+      renderer.render(scene, activeCamera);
     };
     animate();
 
@@ -879,8 +923,22 @@ export function Viewport() {
     const handleResize = () => {
       const width = container.clientWidth;
       const height = container.clientHeight;
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
+      const aspect = width / height;
+
+      // Update perspective camera
+      if (perspCameraRef.current) {
+        perspCameraRef.current.aspect = aspect;
+        perspCameraRef.current.updateProjectionMatrix();
+      }
+
+      // Update orthographic camera - maintain frustum height, adjust width
+      if (orthoCameraRef.current) {
+        const frustumHeight = orthoCameraRef.current.top - orthoCameraRef.current.bottom;
+        orthoCameraRef.current.left = -frustumHeight * aspect / 2;
+        orthoCameraRef.current.right = frustumHeight * aspect / 2;
+        orthoCameraRef.current.updateProjectionMatrix();
+      }
+
       renderer.setSize(width, height);
     };
 
@@ -986,12 +1044,21 @@ export function Viewport() {
 
         // Handle extrude operations
         if (op.type === "extrude") {
+          console.log("[Extrude] Processing extrude op:", op.name, op);
+
           // Only render extrusions from sketch profiles in the 3D view
-          if (op.profile.type !== "sketch") continue;
+          if (op.profile.type !== "sketch") {
+            console.log("[Extrude] Skipping - profile type is not sketch:", op.profile.type);
+            continue;
+          }
 
           const extrudeSketchId = op.profile.sketchId;
           const sketch = studio.sketches.get(extrudeSketchId);
-          if (!sketch) continue;
+          if (!sketch) {
+            console.log("[Extrude] Skipping - sketch not found:", extrudeSketchId);
+            continue;
+          }
+          console.log("[Extrude] Found sketch:", sketch.name, "primitives:", sketch.primitives.size);
 
           // Check if the source sketch operation is suppressed
           const sketchOpNode = Array.from(studio.opGraph.values()).find(
@@ -1003,74 +1070,203 @@ export function Viewport() {
           const plane = getPlaneById(sketch.planeId, studio.planes);
           if (!plane) continue;
 
-          // Build profile from sketch lines
-          // Get all lines and build a polygon from them
-          const lines: Array<{ start: string; end: string }> = [];
-          const points2d: Map<string, [number, number]> = new Map();
-
-          // Collect points and lines from sketch
-          for (const [id, prim] of sketch.primitives) {
-            if (prim.type === "point") {
-              const solved = sketch.solvedPositions?.get(id);
-              const pos: [number, number] = solved ? [solved[0], solved[1]] : [prim.x, prim.y];
-              points2d.set(id, pos);
-            } else if (prim.type === "line") {
-              lines.push({ start: prim.start, end: prim.end });
-            }
-          }
-
-          // Order the lines into a closed loop
-          if (lines.length < 3) continue;
-
-          const orderedPoints: [number, number, number][] = [];
-          let currentEnd = lines[0].start;
-
-          for (let i = 0; i < lines.length; i++) {
-            const nextLine = lines.find(
-              (l) => l.start === currentEnd || l.end === currentEnd
-            );
-            if (!nextLine) break;
-
-            if (nextLine.start === currentEnd) {
-              const pos2d = points2d.get(nextLine.start);
-              if (pos2d) {
-                // Transform 2D sketch point to 3D world using plane
-                const world = sketchUtils.sketchToWorld(pos2d, plane);
-                orderedPoints.push([world[0], world[1], world[2]]);
-              }
-              currentEnd = nextLine.end;
-            } else {
-              const pos2d = points2d.get(nextLine.end);
-              if (pos2d) {
-                // Transform 2D sketch point to 3D world using plane
-                const world = sketchUtils.sketchToWorld(pos2d, plane);
-                orderedPoints.push([world[0], world[1], world[2]]);
-              }
-              currentEnd = nextLine.start;
-            }
-            lines.splice(lines.indexOf(nextLine), 1);
-            i = -1; // restart the search
-          }
-
-          if (orderedPoints.length < 3) continue;
-
-          // Get extrude depth
-          const depth = op.depth.value;
-
           // Calculate plane normal for extrude direction: cross(axisX, axisY)
           const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
           const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
           const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
+          const planeNormal: [number, number, number] = [nx, ny, nz];
+
+          // Get extrude depth and direction
+          const depth = op.depth.value;
           const direction: [number, number, number] =
             op.direction === "reverse" ? [-nx, -ny, -nz] : [nx, ny, nz];
 
-          // Create geometry using OCC
-          const wire = occApi.makePolygon(orderedPoints);
-          const face = occApi.makeFace(wire);
-          const solid = occApi.extrude(face, direction, depth);
+          // Helper to get point position in 2D
+          const getPos2D = (pointId: PrimitiveId): Vec2 | null => {
+            const pos = getPointPosition(sketch, pointId);
+            return pos || null;
+          };
+
+          // Helper to transform 2D to 3D world coordinates
+          const toWorld = (pos2d: Vec2): Vec3 => {
+            return sketchUtils.sketchToWorld(pos2d, plane);
+          };
+
+          // Build wires for each extrudable shape
+          const wires: number[] = [];
+          const wiresCreated: number[] = [];
+
+          // Log all primitives
+          console.log("[Extrude] Primitives in sketch:");
+          for (const [primId, prim] of sketch.primitives) {
+            console.log(`  - ${primId}: ${prim.type}`, prim);
+          }
+
+          // First, handle rect primitives directly (they're not detected by loop detection)
+          for (const [primId, prim] of sketch.primitives) {
+            if (prim.type === "rect" && !prim.construction) {
+              console.log("[Extrude] Found rect primitive:", primId);
+              const c1 = getPos2D(prim.corner1);
+              const c2 = getPos2D(prim.corner2);
+              console.log("[Extrude] Rect corners:", c1, c2);
+              if (!c1 || !c2) continue;
+
+              // Create 4 corners of the rectangle
+              const corners: Vec3[] = [
+                toWorld([c1[0], c1[1]]),
+                toWorld([c2[0], c1[1]]),
+                toWorld([c2[0], c2[1]]),
+                toWorld([c1[0], c2[1]]),
+              ];
+              console.log("[Extrude] Rect world corners:", corners);
+
+              try {
+                const wire = occApi.makePolygon(corners);
+                console.log("[Extrude] Created rect wire:", wire);
+                wires.push(wire);
+                wiresCreated.push(wire);
+              } catch (err) {
+                console.error("[Extrude] Failed to create rect wire:", err);
+              }
+            }
+          }
+
+          // Next, handle circles directly
+          for (const [primId, prim] of sketch.primitives) {
+            if (prim.type === "circle" && !prim.construction) {
+              console.log("[Extrude] Found circle primitive:", primId);
+              const centerPos = getPos2D(prim.center);
+              console.log("[Extrude] Circle center:", centerPos);
+              if (!centerPos) continue;
+
+              const centerWorld = toWorld(centerPos);
+              console.log("[Extrude] Circle world center:", centerWorld, "radius:", prim.radius);
+              try {
+                const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
+                console.log("[Extrude] Created circle wire:", wire);
+                wires.push(wire);
+                wiresCreated.push(wire);
+              } catch (err) {
+                console.error("[Extrude] Failed to create circle wire:", err);
+              }
+            }
+          }
+
+          // Use loop detection for edges (lines, arcs)
+          const loops = sketchUtils.findClosedLoops(sketch);
+          console.log("[Extrude] Found loops:", loops.length, loops);
+
+          // Filter to only loops that are made of edges (not circles, which we already handled)
+          for (const loop of loops) {
+            // Skip if this is a circle loop (already handled above)
+            if (loop.primitiveIds.length === 1) {
+              const prim = sketch.primitives.get(loop.primitiveIds[0]);
+              if (prim?.type === "circle") continue;
+            }
+
+            // For loops made of multiple edges (lines, arcs)
+            const edges: number[] = [];
+
+            for (const primId of loop.primitiveIds) {
+              const prim = sketch.primitives.get(primId);
+              if (!prim) continue;
+
+              if (prim.type === "line") {
+                const startPos = getPos2D(prim.start);
+                const endPos = getPos2D(prim.end);
+                if (!startPos || !endPos) continue;
+
+                const startWorld = toWorld(startPos);
+                const endWorld = toWorld(endPos);
+                const edge = occApi.makeLineEdge(startWorld, endWorld);
+                edges.push(edge);
+              } else if (prim.type === "arc") {
+                const centerPos = getPos2D(prim.center);
+                const startPos = getPos2D(prim.start);
+                const endPos = getPos2D(prim.end);
+                if (!centerPos || !startPos || !endPos) continue;
+
+                const centerWorld = toWorld(centerPos);
+                const startWorld = toWorld(startPos);
+                const endWorld = toWorld(endPos);
+                const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
+                edges.push(edge);
+              }
+            }
+
+            if (edges.length === 0) {
+              // Fallback: if we have point IDs, create polygon from points
+              if (loop.pointIds.length >= 3) {
+                const worldPoints: Vec3[] = [];
+                for (const pointId of loop.pointIds) {
+                  const pos2d = getPos2D(pointId);
+                  if (pos2d) {
+                    worldPoints.push(toWorld(pos2d));
+                  }
+                }
+                if (worldPoints.length >= 3) {
+                  const wire = occApi.makePolygon(worldPoints);
+                  wires.push(wire);
+                  wiresCreated.push(wire);
+                }
+              }
+            } else {
+              // Create wire from edges
+              const wire = occApi.makeWire(edges);
+              wires.push(wire);
+              wiresCreated.push(wire);
+              // Free individual edges
+              for (const edge of edges) {
+                occApi.freeShape(edge);
+              }
+            }
+          }
+
+          console.log("[Extrude] Total wires created:", wires.length);
+          if (wires.length === 0) {
+            console.log("[Extrude] No wires - skipping extrude");
+            continue;
+          }
+
+          // Create faces from wires and extrude
+          // For now, extrude each loop separately and fuse them
+          let resultSolid: number | null = null;
+          const shapesToFree: number[] = [];
+
+          for (const wire of wires) {
+            try {
+              const face = occApi.makeFace(wire);
+              shapesToFree.push(face);
+
+              const solid = occApi.extrude(face, direction, depth);
+
+              if (resultSolid === null) {
+                resultSolid = solid;
+              } else {
+                // Fuse multiple solids together
+                const fused: number = occApi.fuse(resultSolid, solid);
+                shapesToFree.push(resultSolid);
+                shapesToFree.push(solid);
+                resultSolid = fused;
+              }
+            } catch (err) {
+              console.error("Failed to extrude loop:", err);
+            }
+          }
+
+          // Free wires
+          for (const wire of wiresCreated) {
+            occApi.freeShape(wire);
+          }
+          // Free intermediate shapes (but not the final solid)
+          for (const shape of shapesToFree) {
+            occApi.freeShape(shape);
+          }
+
+          if (resultSolid === null) continue;
 
           // Mesh the shape
-          const meshData = occApi.mesh(solid, 0.5);
+          const meshData = occApi.mesh(resultSolid, 0.5);
 
           // Store mesh data for export
           exportableMeshes.push({
@@ -1081,7 +1277,7 @@ export function Viewport() {
           });
 
           // Store shape handle for STEP export (don't free solid - kept for export)
-          exportableShapeHandles.push(solid);
+          exportableShapeHandles.push(resultSolid);
 
           // Create Three.js mesh
           const mesh = createMeshFromData(meshData);
@@ -1098,11 +1294,165 @@ export function Viewport() {
 
           meshGroup.add(mesh);
           meshGroup.add(edges);
+        }
 
-          // Free intermediate OCC shapes (keep solid for STEP export)
-          occApi.freeShape(wire);
-          occApi.freeShape(face);
-          // Note: solid is NOT freed - kept in exportableShapeHandles for STEP export
+        // Handle primitive solid operations
+        else if (op.type === "box") {
+          console.log("[Box] Processing box op:", op.name, op);
+          try {
+            const solid = occApi.makeBox(op.center, op.dimensions);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(solid, 0.5);
+
+            // Store mesh data for export
+            exportableMeshes.push({
+              positions: new Float32Array(meshData.positions),
+              normals: new Float32Array(meshData.normals),
+              indices: new Uint32Array(meshData.indices),
+              name: op.name,
+            });
+
+            // Store shape handle for STEP export
+            exportableShapeHandles.push(solid);
+
+            // Create Three.js mesh
+            const mesh = createMeshFromData(meshData);
+            mesh.userData.opId = opId;
+            mesh.userData.opType = op.type;
+            mesh.userData.isBody = true;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Add edges
+            const edges = createEdges(mesh.geometry);
+            edges.userData.opId = opId;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Box] Failed to create box:", err);
+          }
+        }
+
+        else if (op.type === "cylinder") {
+          console.log("[Cylinder] Processing cylinder op:", op.name, op);
+          try {
+            const solid = occApi.makeCylinder(op.center, op.axis, op.radius.value, op.height.value);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(solid, 0.5);
+
+            // Store mesh data for export
+            exportableMeshes.push({
+              positions: new Float32Array(meshData.positions),
+              normals: new Float32Array(meshData.normals),
+              indices: new Uint32Array(meshData.indices),
+              name: op.name,
+            });
+
+            // Store shape handle for STEP export
+            exportableShapeHandles.push(solid);
+
+            // Create Three.js mesh
+            const mesh = createMeshFromData(meshData);
+            mesh.userData.opId = opId;
+            mesh.userData.opType = op.type;
+            mesh.userData.isBody = true;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Add edges
+            const edges = createEdges(mesh.geometry);
+            edges.userData.opId = opId;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Cylinder] Failed to create cylinder:", err);
+          }
+        }
+
+        else if (op.type === "sphere") {
+          console.log("[Sphere] Processing sphere op:", op.name, op);
+          try {
+            const solid = occApi.makeSphere(op.center, op.radius.value);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(solid, 0.5);
+
+            // Store mesh data for export
+            exportableMeshes.push({
+              positions: new Float32Array(meshData.positions),
+              normals: new Float32Array(meshData.normals),
+              indices: new Uint32Array(meshData.indices),
+              name: op.name,
+            });
+
+            // Store shape handle for STEP export
+            exportableShapeHandles.push(solid);
+
+            // Create Three.js mesh
+            const mesh = createMeshFromData(meshData);
+            mesh.userData.opId = opId;
+            mesh.userData.opType = op.type;
+            mesh.userData.isBody = true;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Add edges
+            const edges = createEdges(mesh.geometry);
+            edges.userData.opId = opId;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Sphere] Failed to create sphere:", err);
+          }
+        }
+
+        else if (op.type === "cone") {
+          console.log("[Cone] Processing cone op:", op.name, op);
+          try {
+            const solid = occApi.makeCone(op.center, op.axis, op.radius1.value, op.radius2.value, op.height.value);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(solid, 0.5);
+
+            // Store mesh data for export
+            exportableMeshes.push({
+              positions: new Float32Array(meshData.positions),
+              normals: new Float32Array(meshData.normals),
+              indices: new Uint32Array(meshData.indices),
+              name: op.name,
+            });
+
+            // Store shape handle for STEP export
+            exportableShapeHandles.push(solid);
+
+            // Create Three.js mesh
+            const mesh = createMeshFromData(meshData);
+            mesh.userData.opId = opId;
+            mesh.userData.opType = op.type;
+            mesh.userData.isBody = true;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Add edges
+            const edges = createEdges(mesh.geometry);
+            edges.userData.opId = opId;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Cone] Failed to create cone:", err);
+          }
+        }
+
+        // Handle transform operations
+        else if (op.type === "transform") {
+          console.log("[Transform] Processing transform op:", op.name, op);
+          // Transform operations need to find their target solid first
+          // For now, we need to rebuild the target shape and then apply the transform
+          // This is a simplified approach - ideally we'd cache intermediate results
+          // Skip for now - transform will be applied to the already-rendered geometry
+          console.log("[Transform] Transform operations pending proper implementation");
         }
       }
 
@@ -1286,6 +1636,99 @@ export function Viewport() {
     faceHighlightRef.current = highlightMesh;
   }, [editorMode, hoveredFace]);
 
+  // Render object selection highlight (highlight all faces of selected objects)
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const meshGroup = meshGroupRef.current;
+
+    // Clean up existing selection highlight group
+    if (selectionHighlightGroupRef.current) {
+      selectionHighlightGroupRef.current.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          (obj.material as THREE.Material).dispose();
+        }
+      });
+      scene?.remove(selectionHighlightGroupRef.current);
+      selectionHighlightGroupRef.current = null;
+    }
+
+    if (!meshGroup || !scene || objectSelection.size === 0) return;
+
+    // Create a group for all selection highlights
+    const selectionGroup = new THREE.Group();
+    selectionGroup.name = "selection-highlight";
+
+    // Find all body meshes
+    const bodyMeshes: THREE.Mesh[] = [];
+    meshGroup.traverse((obj) => {
+      if (obj instanceof THREE.Mesh && obj.userData.isBody) {
+        bodyMeshes.push(obj);
+      }
+    });
+
+    // Highlight material (blue tint for selection)
+    const highlightMat = new THREE.MeshBasicMaterial({
+      color: 0x4dabf7,
+      transparent: true,
+      opacity: 0.25,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+    });
+
+    // For each selected object, highlight all its faces
+    objectSelection.forEach((opId) => {
+      const targetMesh = bodyMeshes.find((m) => m.userData.opId === opId);
+      if (!targetMesh) return;
+
+      const geometry = targetMesh.geometry as THREE.BufferGeometry;
+      const position = geometry.getAttribute("position");
+      const index = geometry.getIndex();
+
+      if (!position) return;
+
+      // Clone the entire geometry for the highlight (all faces)
+      const highlightGeo = new THREE.BufferGeometry();
+      const vertices: number[] = [];
+
+      if (index) {
+        // Indexed geometry: extract all triangles
+        for (let i = 0; i < index.count; i += 3) {
+          const i0 = index.getX(i);
+          const i1 = index.getX(i + 1);
+          const i2 = index.getX(i + 2);
+          vertices.push(
+            position.getX(i0), position.getY(i0), position.getZ(i0),
+            position.getX(i1), position.getY(i1), position.getZ(i1),
+            position.getX(i2), position.getY(i2), position.getZ(i2)
+          );
+        }
+      } else {
+        // Non-indexed geometry: copy all vertices
+        for (let i = 0; i < position.count; i++) {
+          vertices.push(position.getX(i), position.getY(i), position.getZ(i));
+        }
+      }
+
+      highlightGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(vertices), 3));
+
+      const highlightMesh = new THREE.Mesh(highlightGeo, highlightMat.clone());
+      // Copy transform from target mesh
+      highlightMesh.position.copy(targetMesh.position);
+      highlightMesh.rotation.copy(targetMesh.rotation);
+      highlightMesh.scale.copy(targetMesh.scale);
+      highlightMesh.renderOrder = 998;
+
+      selectionGroup.add(highlightMesh);
+    });
+
+    if (selectionGroup.children.length > 0) {
+      scene.add(selectionGroup);
+      selectionHighlightGroupRef.current = selectionGroup;
+    }
+  }, [objectSelection, studio]); // Re-run when selection or studio changes
+
   // Render extrude preview when pending extrude has a sketch selected
   useEffect(() => {
     const extrudePreviewGroup = extrudePreviewRef.current;
@@ -1320,75 +1763,172 @@ export function Viewport() {
     if (!plane) return;
 
     try {
-      // Build profile from sketch lines (same logic as in the main geometry builder)
-      const lines: Array<{ start: string; end: string }> = [];
-      const points2d: Map<string, [number, number]> = new Map();
-
-      for (const [id, prim] of sketch.primitives) {
-        if (prim.type === "point") {
-          const solved = sketch.solvedPositions?.get(id);
-          const pos: [number, number] = solved ? [solved[0], solved[1]] : [prim.x, prim.y];
-          points2d.set(id, pos);
-        } else if (prim.type === "line") {
-          lines.push({ start: prim.start, end: prim.end });
-        }
-      }
-
-      if (lines.length < 3) return;
-
-      // Order lines into closed loop
-      const orderedPoints: [number, number, number][] = [];
-      let currentEnd = lines[0].start;
-
-      for (let i = 0; i < lines.length; i++) {
-        const nextLine = lines.find(
-          (l) => l.start === currentEnd || l.end === currentEnd
-        );
-        if (!nextLine) break;
-
-        if (nextLine.start === currentEnd) {
-          const pos2d = points2d.get(nextLine.start);
-          if (pos2d) {
-            // Transform 2D sketch point to 3D world using plane
-            const world = sketchUtils.sketchToWorld(pos2d, plane);
-            orderedPoints.push([world[0], world[1], world[2]]);
-          }
-          currentEnd = nextLine.end;
-        } else {
-          const pos2d = points2d.get(nextLine.end);
-          if (pos2d) {
-            // Transform 2D sketch point to 3D world using plane
-            const world = sketchUtils.sketchToWorld(pos2d, plane);
-            orderedPoints.push([world[0], world[1], world[2]]);
-          }
-          currentEnd = nextLine.start;
-        }
-        lines.splice(lines.indexOf(nextLine), 1);
-        i = -1;
-      }
-
-      if (orderedPoints.length < 3) return;
-
-      // Get depth from pending extrude
-      const depth = pendingExtrude.depth || 10;
-
       // Calculate plane normal for extrude direction: cross(axisX, axisY)
       const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
       const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
       const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
+      const planeNormal: [number, number, number] = [nx, ny, nz];
+
+      // Get depth from pending extrude
+      const depth = pendingExtrude.depth || 10;
       const direction: [number, number, number] =
         pendingExtrude.direction === "reverse" ? [-nx, -ny, -nz] : [nx, ny, nz];
 
-      // Create preview geometry using OCC
-      const wire = occApi.makePolygon(orderedPoints);
-      const face = occApi.makeFace(wire);
-      const solid = occApi.extrude(face, direction, depth);
-      const meshData = occApi.mesh(solid, 0.5);
+      // Helper to get point position in 2D
+      const getPos2D = (pointId: PrimitiveId): Vec2 | null => {
+        const pos = getPointPosition(sketch, pointId);
+        return pos || null;
+      };
 
-      // Clean up OCC shapes
-      occApi.freeShape(wire);
-      occApi.freeShape(face);
-      occApi.freeShape(solid);
+      // Helper to transform 2D to 3D world coordinates
+      const toWorld = (pos2d: Vec2): Vec3 => {
+        return sketchUtils.sketchToWorld(pos2d, plane);
+      };
+
+      // Build wires for each extrudable shape
+      const wires: number[] = [];
+      const wiresCreated: number[] = [];
+
+      // First, handle rect primitives directly (they're not detected by loop detection)
+      for (const [primId, prim] of sketch.primitives) {
+        if (prim.type === "rect" && !prim.construction) {
+          const c1 = getPos2D(prim.corner1);
+          const c2 = getPos2D(prim.corner2);
+          if (!c1 || !c2) continue;
+
+          // Create 4 corners of the rectangle
+          const corners: Vec3[] = [
+            toWorld([c1[0], c1[1]]),
+            toWorld([c2[0], c1[1]]),
+            toWorld([c2[0], c2[1]]),
+            toWorld([c1[0], c2[1]]),
+          ];
+
+          const wire = occApi.makePolygon(corners);
+          wires.push(wire);
+          wiresCreated.push(wire);
+        }
+      }
+
+      // Next, handle circles directly
+      for (const [primId, prim] of sketch.primitives) {
+        if (prim.type === "circle" && !prim.construction) {
+          const centerPos = getPos2D(prim.center);
+          if (!centerPos) continue;
+
+          const centerWorld = toWorld(centerPos);
+          const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
+          wires.push(wire);
+          wiresCreated.push(wire);
+        }
+      }
+
+      // Use loop detection for edges (lines, arcs)
+      const loops = sketchUtils.findClosedLoops(sketch);
+
+      // Filter to only loops that are made of edges (not circles, which we already handled)
+      for (const loop of loops) {
+        // Skip if this is a circle loop (already handled above)
+        if (loop.primitiveIds.length === 1) {
+          const prim = sketch.primitives.get(loop.primitiveIds[0]);
+          if (prim?.type === "circle") continue;
+        }
+
+        // For loops made of multiple edges (lines, arcs)
+        const edges: number[] = [];
+
+        for (const primId of loop.primitiveIds) {
+          const prim = sketch.primitives.get(primId);
+          if (!prim) continue;
+
+          if (prim.type === "line") {
+            const startPos = getPos2D(prim.start);
+            const endPos = getPos2D(prim.end);
+            if (!startPos || !endPos) continue;
+
+            const startWorld = toWorld(startPos);
+            const endWorld = toWorld(endPos);
+            const edge = occApi.makeLineEdge(startWorld, endWorld);
+            edges.push(edge);
+          } else if (prim.type === "arc") {
+            const centerPos = getPos2D(prim.center);
+            const startPos = getPos2D(prim.start);
+            const endPos = getPos2D(prim.end);
+            if (!centerPos || !startPos || !endPos) continue;
+
+            const centerWorld = toWorld(centerPos);
+            const startWorld = toWorld(startPos);
+            const endWorld = toWorld(endPos);
+            const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
+            edges.push(edge);
+          }
+        }
+
+        if (edges.length === 0) {
+          // Fallback: if we have point IDs, create polygon from points
+          if (loop.pointIds.length >= 3) {
+            const worldPoints: Vec3[] = [];
+            for (const pointId of loop.pointIds) {
+              const pos2d = getPos2D(pointId);
+              if (pos2d) {
+                worldPoints.push(toWorld(pos2d));
+              }
+            }
+            if (worldPoints.length >= 3) {
+              const wire = occApi.makePolygon(worldPoints);
+              wires.push(wire);
+              wiresCreated.push(wire);
+            }
+          }
+        } else {
+          // Create wire from edges
+          const wire = occApi.makeWire(edges);
+          wires.push(wire);
+          wiresCreated.push(wire);
+          // Free individual edges
+          for (const edge of edges) {
+            occApi.freeShape(edge);
+          }
+        }
+      }
+
+      if (wires.length === 0) return;
+
+      // Create faces from wires and extrude
+      let resultSolid: number | null = null;
+      const shapesToFree: number[] = [];
+
+      for (const wire of wires) {
+        const face = occApi.makeFace(wire);
+        shapesToFree.push(face);
+
+        const solid = occApi.extrude(face, direction, depth);
+
+        if (resultSolid === null) {
+          resultSolid = solid;
+        } else {
+          const fused: number = occApi.fuse(resultSolid, solid);
+          shapesToFree.push(resultSolid);
+          shapesToFree.push(solid);
+          resultSolid = fused;
+        }
+      }
+
+      // Free wires
+      for (const wire of wiresCreated) {
+        occApi.freeShape(wire);
+      }
+      // Free intermediate shapes
+      for (const shape of shapesToFree) {
+        occApi.freeShape(shape);
+      }
+
+      if (resultSolid === null) return;
+
+      const meshData = occApi.mesh(resultSolid, 0.5);
+
+      // Free the solid after meshing
+      occApi.freeShape(resultSolid);
 
       // Create Three.js preview mesh with transparent green material
       // Swap Y/Z to convert from CAD (Z-up) to Three.js (Y-up)
@@ -1671,6 +2211,36 @@ export function Viewport() {
     planeGroup.add(yzMesh);
   }, [editorMode, hoveredPlane, hoveredFace]);
 
+  // Update mesh materials based on render mode
+  useEffect(() => {
+    if (!meshGroupRef.current) return;
+
+    meshGroupRef.current.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
+        const mat = child.material;
+        switch (renderMode) {
+          case "wireframe":
+            mat.wireframe = true;
+            mat.metalness = 0.1;
+            mat.roughness = 0.9;
+            break;
+          case "material":
+            mat.wireframe = false;
+            mat.metalness = 0.5;
+            mat.roughness = 0.3;
+            break;
+          case "solid":
+          default:
+            mat.wireframe = false;
+            mat.metalness = 0.3;
+            mat.roughness = 0.6;
+            break;
+        }
+        mat.needsUpdate = true;
+      }
+    });
+  }, [renderMode]);
+
   // Handle mouse events for plane selection and sketch mode raycasting
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const container = containerRef.current;
@@ -1918,12 +2488,61 @@ export function Viewport() {
         selectFace({ type: "datum-plane", planeId: hoveredFace.planeId });
       }
     }
-  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace]);
+
+    // Handle object selection in "object" mode
+    if (editorMode === "object") {
+      const container = containerRef.current;
+      const camera = cameraRef.current;
+      const meshGroup = meshGroupRef.current;
+      if (!container || !camera || !meshGroup) return;
+
+      const rect = container.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, camera);
+
+      // Find all body meshes
+      const bodyMeshes: THREE.Mesh[] = [];
+      meshGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.userData.isBody) {
+          bodyMeshes.push(obj);
+        }
+      });
+
+      const intersects = raycaster.intersectObjects(bodyMeshes);
+      if (intersects.length > 0) {
+        const opId = intersects[0].object.userData.opId;
+        if (opId) {
+          // Ctrl/Cmd click to add to selection, otherwise replace
+          if (e.ctrlKey || e.metaKey) {
+            const newSelection = new Set(objectSelection);
+            if (newSelection.has(opId)) {
+              newSelection.delete(opId);
+            } else {
+              newSelection.add(opId);
+            }
+            setObjectSelection(newSelection);
+          } else {
+            setObjectSelection(new Set([opId]));
+          }
+        }
+      } else {
+        // Clicked on empty space - clear selection (unless holding ctrl/cmd)
+        if (!e.ctrlKey && !e.metaKey) {
+          setObjectSelection(new Set());
+        }
+      }
+    }
+  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection]);
 
   // View controls
   const handleResetView = useCallback(() => {
     if (controlsRef.current && cameraRef.current) {
-      cameraRef.current.position.set(50, 50, 50);
+      cameraRef.current.position.set(200, 200, 200);
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
@@ -1931,13 +2550,31 @@ export function Viewport() {
 
   const handleZoomIn = useCallback(() => {
     if (cameraRef.current) {
-      cameraRef.current.position.multiplyScalar(0.8);
+      if (cameraRef.current instanceof THREE.OrthographicCamera) {
+        // For ortho, shrink frustum to zoom in
+        cameraRef.current.left *= 0.8;
+        cameraRef.current.right *= 0.8;
+        cameraRef.current.top *= 0.8;
+        cameraRef.current.bottom *= 0.8;
+        cameraRef.current.updateProjectionMatrix();
+      } else {
+        cameraRef.current.position.multiplyScalar(0.8);
+      }
     }
   }, []);
 
   const handleZoomOut = useCallback(() => {
     if (cameraRef.current) {
-      cameraRef.current.position.multiplyScalar(1.25);
+      if (cameraRef.current instanceof THREE.OrthographicCamera) {
+        // For ortho, expand frustum to zoom out
+        cameraRef.current.left *= 1.25;
+        cameraRef.current.right *= 1.25;
+        cameraRef.current.top *= 1.25;
+        cameraRef.current.bottom *= 1.25;
+        cameraRef.current.updateProjectionMatrix();
+      } else {
+        cameraRef.current.position.multiplyScalar(1.25);
+      }
     }
   }, []);
 
@@ -1963,6 +2600,84 @@ export function Viewport() {
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
+  }, []);
+
+  // Toggle between perspective and orthographic camera
+  const handleToggleProjection = useCallback(() => {
+    if (!controlsRef.current || !rendererRef.current || !containerRef.current) return;
+    const perspCamera = perspCameraRef.current;
+    const orthoCamera = orthoCameraRef.current;
+    if (!perspCamera || !orthoCamera) return;
+
+    const container = containerRef.current;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+    const aspect = width / height;
+    const target = controlsRef.current.target.clone();
+
+    if (isOrthographic) {
+      // Switch to perspective
+      // Copy position and orientation from ortho camera
+      perspCamera.position.copy(orthoCamera.position);
+      perspCamera.quaternion.copy(orthoCamera.quaternion);
+      perspCamera.up.copy(orthoCamera.up);
+
+      cameraRef.current = perspCamera;
+      controlsRef.current.object = perspCamera;
+      controlsRef.current.target.copy(target);
+      controlsRef.current.update();
+      setIsOrthographic(false);
+    } else {
+      // Switch to orthographic
+      // Calculate frustum size based on distance to target
+      const distance = perspCamera.position.distanceTo(target);
+      const fov = perspCamera.fov * (Math.PI / 180);
+      const frustumHeight = 2 * distance * Math.tan(fov / 2);
+
+      orthoCamera.left = -frustumHeight * aspect / 2;
+      orthoCamera.right = frustumHeight * aspect / 2;
+      orthoCamera.top = frustumHeight / 2;
+      orthoCamera.bottom = -frustumHeight / 2;
+      orthoCamera.updateProjectionMatrix();
+
+      // Copy position and orientation from perspective camera
+      orthoCamera.position.copy(perspCamera.position);
+      orthoCamera.quaternion.copy(perspCamera.quaternion);
+      orthoCamera.up.copy(perspCamera.up);
+
+      cameraRef.current = orthoCamera;
+      controlsRef.current.object = orthoCamera;
+      controlsRef.current.target.copy(target);
+      controlsRef.current.update();
+      setIsOrthographic(true);
+    }
+  }, [isOrthographic]);
+
+  // Toggle grid visibility
+  const handleToggleGrid = useCallback(() => {
+    setShowGrid((prev) => {
+      const next = !prev;
+      if (gridGroupRef.current) {
+        gridGroupRef.current.visible = next;
+      }
+      return next;
+    });
+  }, []);
+
+  // Toggle axes visibility
+  const handleToggleAxes = useCallback(() => {
+    setShowAxes((prev) => {
+      const next = !prev;
+      if (axesHelperRef.current) {
+        axesHelperRef.current.visible = next;
+      }
+      return next;
+    });
+  }, []);
+
+  // Set render mode
+  const handleSetRenderMode = useCallback((mode: RenderMode) => {
+    setRenderMode(mode);
   }, []);
 
   // Determine cursor style based on mode
@@ -2004,9 +2719,21 @@ export function Viewport() {
       )}
 
       {/* View cube */}
-      <div style={styles.viewCube} onClick={handleResetView}>
-        <span>ISO</span>
-      </div>
+      <ViewCube
+        cameraRef={cameraRef}
+        controlsRef={controlsRef}
+        size={100}
+        topOffset={viewCubeTopOffset}
+        rightOffset={viewCubeRightOffset}
+        isOrthographic={isOrthographic}
+        onToggleProjection={handleToggleProjection}
+        showGrid={showGrid}
+        onToggleGrid={handleToggleGrid}
+        showAxes={showAxes}
+        onToggleAxes={handleToggleAxes}
+        renderMode={renderMode}
+        onSetRenderMode={handleSetRenderMode}
+      />
 
       {/* View controls */}
       <div style={styles.controls}>
@@ -2030,18 +2757,6 @@ export function Viewport() {
           R
         </button>
       </div>
-
-      {/* Info */}
-      <div style={styles.info}>
-        {!isOccLoading && !occError && editorMode !== "select-plane" && (
-          <>
-            <div>Orbit: Left Mouse</div>
-            <div>Pan: Right Mouse</div>
-            <div>Zoom: Scroll</div>
-          </>
-        )}
-      </div>
-
 
       {/* Plane selection hint */}
       {editorMode === "select-plane" && (
