@@ -32,6 +32,63 @@ export interface OccApi {
   /** Create a face from a wire */
   makeFace(wire: ShapeHandle): ShapeHandle;
 
+  /** Create a face from multiple wires (outer + holes) */
+  makeFaceWithHoles(outerWire: ShapeHandle, innerWires: ShapeHandle[]): ShapeHandle;
+
+  /** Create a circular wire */
+  makeCircleWire(center: Vec3, normal: Vec3, radius: number): ShapeHandle;
+
+  /** Create an arc edge */
+  makeArcEdge(center: Vec3, start: Vec3, end: Vec3, normal: Vec3): ShapeHandle;
+
+  /** Create a line edge */
+  makeLineEdge(start: Vec3, end: Vec3): ShapeHandle;
+
+  // ============================================================================
+  // Primitive Solids (Direct solid creation)
+  // ============================================================================
+
+  /** Create a box (rectangular prism) centered at a point */
+  makeBox(center: Vec3, dimensions: Vec3): ShapeHandle;
+
+  /** Create a cylinder */
+  makeCylinder(
+    center: Vec3,
+    axis: Vec3,
+    radius: number,
+    height: number
+  ): ShapeHandle;
+
+  /** Create a sphere */
+  makeSphere(center: Vec3, radius: number): ShapeHandle;
+
+  /** Create a cone (or truncated cone if radius2 > 0) */
+  makeCone(
+    center: Vec3,
+    axis: Vec3,
+    radius1: number,
+    radius2: number,
+    height: number
+  ): ShapeHandle;
+
+  // ============================================================================
+  // Transform Operations
+  // ============================================================================
+
+  /** Translate a shape by a vector */
+  translate(shape: ShapeHandle, vector: Vec3): ShapeHandle;
+
+  /** Rotate a shape around an axis */
+  rotate(
+    shape: ShapeHandle,
+    axisOrigin: Vec3,
+    axisDir: Vec3,
+    angleRad: number
+  ): ShapeHandle;
+
+  /** Scale a shape uniformly from a center point */
+  scale(shape: ShapeHandle, center: Vec3, factor: number): ShapeHandle;
+
   // ============================================================================
   // Primary Operations (Sketch -> Solid)
   // ============================================================================

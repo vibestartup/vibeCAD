@@ -90,6 +90,273 @@ export class OccApiImpl implements OccApi {
     return this.store.store(face.Face());
   }
 
+  makeFaceWithHoles(outerWire: ShapeHandle, innerWires: ShapeHandle[]): ShapeHandle {
+    const outerWireObj = this.store.get(outerWire);
+    const faceMaker = new this.oc.BRepBuilderAPI_MakeFace_15(outerWireObj, true);
+
+    if (!faceMaker.IsDone()) {
+      throw new Error("Failed to create face from outer wire");
+    }
+
+    // Add inner wires (holes)
+    for (const innerWireHandle of innerWires) {
+      const innerWireObj = this.store.get(innerWireHandle);
+      faceMaker.Add(innerWireObj);
+    }
+
+    return this.store.store(faceMaker.Face());
+  }
+
+  makeCircleWire(center: Vec3, normal: Vec3, radius: number): ShapeHandle {
+    const centerPnt = new this.oc.gp_Pnt_3(center[0], center[1], center[2]);
+    const normalDir = new this.oc.gp_Dir_4(normal[0], normal[1], normal[2]);
+    const axis = new this.oc.gp_Ax2_3(centerPnt, normalDir);
+
+    const circle = new this.oc.gp_Circ_2(axis, radius);
+    const edge = new this.oc.BRepBuilderAPI_MakeEdge_8(circle);
+
+    if (!edge.IsDone()) {
+      throw new Error("Failed to create circle edge");
+    }
+
+    const wire = new this.oc.BRepBuilderAPI_MakeWire_2(edge.Edge());
+
+    if (!wire.IsDone()) {
+      throw new Error("Failed to create circle wire");
+    }
+
+    return this.store.store(wire.Wire());
+  }
+
+  makeArcEdge(center: Vec3, start: Vec3, end: Vec3, normal: Vec3): ShapeHandle {
+    const centerPnt = new this.oc.gp_Pnt_3(center[0], center[1], center[2]);
+    const startPnt = new this.oc.gp_Pnt_3(start[0], start[1], start[2]);
+    const endPnt = new this.oc.gp_Pnt_3(end[0], end[1], end[2]);
+    const normalDir = new this.oc.gp_Dir_4(normal[0], normal[1], normal[2]);
+
+    // Calculate radius from center to start
+    const dx = start[0] - center[0];
+    const dy = start[1] - center[1];
+    const dz = start[2] - center[2];
+    const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    const axis = new this.oc.gp_Ax2_3(centerPnt, normalDir);
+    const circle = new this.oc.gp_Circ_2(axis, radius);
+
+    // Create arc edge from start to end along the circle
+    const edge = new this.oc.BRepBuilderAPI_MakeEdge_9(circle, startPnt, endPnt);
+
+    if (!edge.IsDone()) {
+      throw new Error("Failed to create arc edge");
+    }
+
+    return this.store.store(edge.Edge());
+  }
+
+  makeLineEdge(start: Vec3, end: Vec3): ShapeHandle {
+    const startPnt = new this.oc.gp_Pnt_3(start[0], start[1], start[2]);
+    const endPnt = new this.oc.gp_Pnt_3(end[0], end[1], end[2]);
+
+    const edge = new this.oc.BRepBuilderAPI_MakeEdge_3(startPnt, endPnt);
+
+    if (!edge.IsDone()) {
+      throw new Error("Failed to create line edge");
+    }
+
+    return this.store.store(edge.Edge());
+  }
+
+  // ============================================================================
+  // Primitive Solids
+  // ============================================================================
+
+  makeBox(center: Vec3, dimensions: Vec3): ShapeHandle {
+    const [width, depth, height] = dimensions;
+
+    // Following official opencascade.js examples:
+    // BRepPrimAPI_MakeBox_2(dx, dy, dz) creates box at origin
+    const box = new this.oc.BRepPrimAPI_MakeBox_2(width, depth, height);
+    let shape = box.Shape();
+
+    // Translate to center (box is created with one corner at origin)
+    // So we need to translate by center - half dimensions
+    const offsetX = center[0] - width / 2;
+    const offsetY = center[1] - depth / 2;
+    const offsetZ = center[2] - height / 2;
+
+    if (Math.abs(offsetX) > 1e-9 || Math.abs(offsetY) > 1e-9 || Math.abs(offsetZ) > 1e-9) {
+      const vec = new this.oc.gp_Vec_4(offsetX, offsetY, offsetZ);
+      const trsf = new this.oc.gp_Trsf_1();
+      trsf.SetTranslation_1(vec);
+
+      const transform = new this.oc.BRepBuilderAPI_Transform_2(shape, trsf, true);
+      if (transform.IsDone()) {
+        shape = transform.Shape();
+      }
+    }
+
+    return this.store.store(shape);
+  }
+
+  makeCylinder(center: Vec3, axis: Vec3, radius: number, height: number): ShapeHandle {
+    // BRepPrimAPI_MakeCylinder_2(R, H) creates cylinder at origin along Z
+    const cylinder = new this.oc.BRepPrimAPI_MakeCylinder_2(radius, height);
+    let shape = cylinder.Shape();
+
+    // Transform to desired position/orientation
+    const needsTransform =
+      Math.abs(center[0]) > 1e-9 || Math.abs(center[1]) > 1e-9 || Math.abs(center[2]) > 1e-9 ||
+      Math.abs(axis[0]) > 1e-9 || Math.abs(axis[1]) > 1e-9 || Math.abs(axis[2] - 1) > 1e-9;
+
+    if (needsTransform) {
+      // Build transformation matrix
+      const trsf = new this.oc.gp_Trsf_1();
+
+      // First handle rotation if axis is not Z
+      const isZAxis = Math.abs(axis[0]) < 1e-6 && Math.abs(axis[1]) < 1e-6 && Math.abs(axis[2] - 1) < 1e-6;
+      if (!isZAxis) {
+        const sourceDir = new this.oc.gp_Dir_4(0, 0, 1);
+        const targetDir = new this.oc.gp_Dir_4(axis[0], axis[1], axis[2]);
+        const rotAxis = sourceDir.IsParallel(targetDir, 1e-6)
+          ? new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), new this.oc.gp_Dir_4(1, 0, 0))
+          : new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), sourceDir.Crossed(targetDir));
+        const angle = Math.acos(Math.max(-1, Math.min(1, sourceDir.Dot(targetDir))));
+        if (Math.abs(angle) > 1e-9) {
+          trsf.SetRotation_1(rotAxis, angle);
+        }
+      }
+
+      // Then translate
+      const vec = new this.oc.gp_Vec_4(center[0], center[1], center[2]);
+      const transTrsf = new this.oc.gp_Trsf_1();
+      transTrsf.SetTranslation_1(vec);
+      trsf.Multiply(transTrsf);
+
+      const transform = new this.oc.BRepBuilderAPI_Transform_2(shape, trsf, true);
+      if (transform.IsDone()) {
+        shape = transform.Shape();
+      }
+    }
+
+    return this.store.store(shape);
+  }
+
+  makeSphere(center: Vec3, radius: number): ShapeHandle {
+    // BRepPrimAPI_MakeSphere_2(R) creates sphere at origin with radius R
+    const sphere = new this.oc.BRepPrimAPI_MakeSphere_2(radius);
+    let shape = sphere.Shape();
+
+    // Translate to center
+    if (Math.abs(center[0]) > 1e-9 || Math.abs(center[1]) > 1e-9 || Math.abs(center[2]) > 1e-9) {
+      const vec = new this.oc.gp_Vec_4(center[0], center[1], center[2]);
+      const trsf = new this.oc.gp_Trsf_1();
+      trsf.SetTranslation_1(vec);
+
+      const transform = new this.oc.BRepBuilderAPI_Transform_2(shape, trsf, true);
+      if (transform.IsDone()) {
+        shape = transform.Shape();
+      }
+    }
+
+    return this.store.store(shape);
+  }
+
+  makeCone(center: Vec3, axis: Vec3, radius1: number, radius2: number, height: number): ShapeHandle {
+    // BRepPrimAPI_MakeCone_2(R1, R2, H) creates cone at origin along Z
+    const cone = new this.oc.BRepPrimAPI_MakeCone_2(radius1, radius2, height);
+    let shape = cone.Shape();
+
+    // Transform to desired position/orientation (same logic as cylinder)
+    const needsTransform =
+      Math.abs(center[0]) > 1e-9 || Math.abs(center[1]) > 1e-9 || Math.abs(center[2]) > 1e-9 ||
+      Math.abs(axis[0]) > 1e-9 || Math.abs(axis[1]) > 1e-9 || Math.abs(axis[2] - 1) > 1e-9;
+
+    if (needsTransform) {
+      const trsf = new this.oc.gp_Trsf_1();
+
+      const isZAxis = Math.abs(axis[0]) < 1e-6 && Math.abs(axis[1]) < 1e-6 && Math.abs(axis[2] - 1) < 1e-6;
+      if (!isZAxis) {
+        const sourceDir = new this.oc.gp_Dir_4(0, 0, 1);
+        const targetDir = new this.oc.gp_Dir_4(axis[0], axis[1], axis[2]);
+        const rotAxis = sourceDir.IsParallel(targetDir, 1e-6)
+          ? new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), new this.oc.gp_Dir_4(1, 0, 0))
+          : new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), sourceDir.Crossed(targetDir));
+        const angle = Math.acos(Math.max(-1, Math.min(1, sourceDir.Dot(targetDir))));
+        if (Math.abs(angle) > 1e-9) {
+          trsf.SetRotation_1(rotAxis, angle);
+        }
+      }
+
+      const vec = new this.oc.gp_Vec_4(center[0], center[1], center[2]);
+      const transTrsf = new this.oc.gp_Trsf_1();
+      transTrsf.SetTranslation_1(vec);
+      trsf.Multiply(transTrsf);
+
+      const transform = new this.oc.BRepBuilderAPI_Transform_2(shape, trsf, true);
+      if (transform.IsDone()) {
+        shape = transform.Shape();
+      }
+    }
+
+    return this.store.store(shape);
+  }
+
+  // ============================================================================
+  // Transform Operations
+  // ============================================================================
+
+  translate(shape: ShapeHandle, vector: Vec3): ShapeHandle {
+    const shapeObj = this.store.get(shape);
+    const vec = new this.oc.gp_Vec_4(vector[0], vector[1], vector[2]);
+
+    const trsf = new this.oc.gp_Trsf_1();
+    trsf.SetTranslation_1(vec);
+
+    const transform = new this.oc.BRepBuilderAPI_Transform_2(shapeObj, trsf, true);
+
+    if (!transform.IsDone()) {
+      throw new Error("Failed to translate shape");
+    }
+
+    return this.store.store(transform.Shape());
+  }
+
+  rotate(shape: ShapeHandle, axisOrigin: Vec3, axisDir: Vec3, angleRad: number): ShapeHandle {
+    const shapeObj = this.store.get(shape);
+
+    const origin = new this.oc.gp_Pnt_3(axisOrigin[0], axisOrigin[1], axisOrigin[2]);
+    const direction = new this.oc.gp_Dir_4(axisDir[0], axisDir[1], axisDir[2]);
+    const axis = new this.oc.gp_Ax1_2(origin, direction);
+
+    const trsf = new this.oc.gp_Trsf_1();
+    trsf.SetRotation_1(axis, angleRad);
+
+    const transform = new this.oc.BRepBuilderAPI_Transform_2(shapeObj, trsf, true);
+
+    if (!transform.IsDone()) {
+      throw new Error("Failed to rotate shape");
+    }
+
+    return this.store.store(transform.Shape());
+  }
+
+  scale(shape: ShapeHandle, center: Vec3, factor: number): ShapeHandle {
+    const shapeObj = this.store.get(shape);
+
+    const centerPnt = new this.oc.gp_Pnt_3(center[0], center[1], center[2]);
+
+    const trsf = new this.oc.gp_Trsf_1();
+    trsf.SetScale(centerPnt, factor);
+
+    const transform = new this.oc.BRepBuilderAPI_Transform_2(shapeObj, trsf, true);
+
+    if (!transform.IsDone()) {
+      throw new Error("Failed to scale shape");
+    }
+
+    return this.store.store(transform.Shape());
+  }
+
   // ============================================================================
   // Primary Operations
   // ============================================================================
