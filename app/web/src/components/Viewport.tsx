@@ -295,18 +295,34 @@ function createAxes() {
 }
 
 // Create mesh from MeshData
+// Converts from CAD coordinates (Z-up) to Three.js coordinates (Y-up)
 function createMeshFromData(meshData: MeshData): THREE.Mesh {
   const geometry = new THREE.BufferGeometry();
 
+  // Swap Y and Z to convert from CAD (Z-up) to Three.js (Y-up)
+  const swappedPositions = new Float32Array(meshData.positions.length);
+  for (let i = 0; i < meshData.positions.length; i += 3) {
+    swappedPositions[i] = meshData.positions[i];         // X stays X
+    swappedPositions[i + 1] = meshData.positions[i + 2]; // Y becomes Z
+    swappedPositions[i + 2] = meshData.positions[i + 1]; // Z becomes Y
+  }
+
   geometry.setAttribute(
     "position",
-    new THREE.BufferAttribute(meshData.positions, 3)
+    new THREE.BufferAttribute(swappedPositions, 3)
   );
 
   if (meshData.normals.length > 0) {
+    // Also swap normals Y/Z
+    const swappedNormals = new Float32Array(meshData.normals.length);
+    for (let i = 0; i < meshData.normals.length; i += 3) {
+      swappedNormals[i] = meshData.normals[i];         // X stays X
+      swappedNormals[i + 1] = meshData.normals[i + 2]; // Y becomes Z
+      swappedNormals[i + 2] = meshData.normals[i + 1]; // Z becomes Y
+    }
     geometry.setAttribute(
       "normal",
-      new THREE.BufferAttribute(meshData.normals, 3)
+      new THREE.BufferAttribute(swappedNormals, 3)
     );
   }
 
@@ -512,26 +528,41 @@ function createSketchLines(
         const line = new THREE.Line(geometry, lineMaterial);
         group.add(line);
 
-        // Add filled circle mesh
-        const circleShape = new THREE.Shape();
-        circleShape.absarc(0, 0, prim.radius, 0, Math.PI * 2, false);
-        const fillGeometry = new THREE.ShapeGeometry(circleShape);
+        // Add filled circle mesh using proper 3D transformation
+        const fillSegments = 32;
+        const centerPoint3D = sketchPointTo3D(centerPos, plane);
+        const circlePoints3D: THREE.Vector3[] = [];
+
+        for (let i = 0; i < fillSegments; i++) {
+          const angle = (i / fillSegments) * Math.PI * 2;
+          const x = centerPos[0] + Math.cos(angle) * prim.radius;
+          const y = centerPos[1] + Math.sin(angle) * prim.radius;
+          circlePoints3D.push(sketchPointTo3D([x, y], plane));
+        }
+
+        // Create triangulated geometry with center point
+        const vertices: number[] = [];
+        const indices: number[] = [];
+
+        // Add center point first
+        vertices.push(centerPoint3D.x, centerPoint3D.y, centerPoint3D.z);
+
+        // Add circle perimeter points
+        for (const p of circlePoints3D) {
+          vertices.push(p.x, p.y, p.z);
+        }
+
+        // Create triangle fan from center
+        for (let i = 0; i < fillSegments; i++) {
+          indices.push(0, i + 1, ((i + 1) % fillSegments) + 1);
+        }
+
+        const fillGeometry = new THREE.BufferGeometry();
+        fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        fillGeometry.setIndex(indices);
+        fillGeometry.computeVertexNormals();
+
         const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
-
-        // Position and orient the fill to match the plane
-        const center3D = sketchPointTo3D(centerPos, plane);
-        fillMesh.position.copy(center3D);
-
-        // Orient to plane normal
-        const normal = new THREE.Vector3(
-          plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1],
-          plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2],
-          plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0]
-        ).normalize();
-        // Swap Y/Z for Three.js
-        const threeNormal = new THREE.Vector3(normal.x, normal.z, normal.y);
-        fillMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), threeNormal);
-
         group.add(fillMesh);
       }
     } else if (prim.type === "arc") {
@@ -588,37 +619,36 @@ function createSketchLines(
     const loops = findClosedLoops(lineSegments);
     for (let loopIndex = 0; loopIndex < loops.length; loopIndex++) {
       const loop = loops[loopIndex];
-      // Create a THREE.Shape from the loop points (in 2D sketch coords)
-      const shape = new THREE.Shape();
-      shape.moveTo(loop[0][0], loop[0][1]);
-      for (let i = 1; i < loop.length; i++) {
-        shape.lineTo(loop[i][0], loop[i][1]);
-      }
-      shape.closePath();
+      if (loop.length < 3) continue;
 
-      const fillGeometry = new THREE.ShapeGeometry(shape);
+      // Transform all loop points to 3D using the same method as lines
+      const points3D: THREE.Vector3[] = loop.map(p => sketchPointTo3D(p, plane));
+
+      // Create triangulated geometry from the 3D polygon
+      // Use earcut-style fan triangulation from first vertex
+      const vertices: number[] = [];
+      const indices: number[] = [];
+
+      // Add all vertices
+      for (const p of points3D) {
+        vertices.push(p.x, p.y, p.z);
+      }
+
+      // Create triangle fan from first vertex
+      for (let i = 1; i < points3D.length - 1; i++) {
+        indices.push(0, i, i + 1);
+      }
+
+      const fillGeometry = new THREE.BufferGeometry();
+      fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+      fillGeometry.setIndex(indices);
+      fillGeometry.computeVertexNormals();
+
       const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
 
       // Tag mesh with loop index for hit detection
       fillMesh.userData.isSketchLoop = true;
       fillMesh.userData.loopIndex = loopIndex;
-
-      // Position at plane origin and orient to plane
-      const origin3D = new THREE.Vector3(
-        plane.origin[0],
-        plane.origin[2], // Swap Y/Z
-        plane.origin[1]
-      );
-      fillMesh.position.copy(origin3D);
-
-      // Orient to plane - the shape is in XY, we need to rotate to match the sketch plane
-      const normal = new THREE.Vector3(
-        plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1],
-        plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2],
-        plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0]
-      ).normalize();
-      const threeNormal = new THREE.Vector3(normal.x, normal.z, normal.y);
-      fillMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), threeNormal);
 
       group.add(fillMesh);
     }
@@ -968,17 +998,21 @@ export function Viewport() {
           );
           if (sketchOpNode?.op.suppressed) continue;
 
+          // Get the plane for this sketch
+          const plane = getPlaneById(sketch.planeId, studio.planes);
+          if (!plane) continue;
+
           // Build profile from sketch lines
           // Get all lines and build a polygon from them
           const lines: Array<{ start: string; end: string }> = [];
-          const points: Map<string, [number, number]> = new Map();
+          const points2d: Map<string, [number, number]> = new Map();
 
           // Collect points and lines from sketch
           for (const [id, prim] of sketch.primitives) {
             if (prim.type === "point") {
               const solved = sketch.solvedPositions?.get(id);
               const pos: [number, number] = solved ? [solved[0], solved[1]] : [prim.x, prim.y];
-              points.set(id, pos);
+              points2d.set(id, pos);
             } else if (prim.type === "line") {
               lines.push({ start: prim.start, end: prim.end });
             }
@@ -997,12 +1031,20 @@ export function Viewport() {
             if (!nextLine) break;
 
             if (nextLine.start === currentEnd) {
-              const pos = points.get(nextLine.start);
-              if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+              const pos2d = points2d.get(nextLine.start);
+              if (pos2d) {
+                // Transform 2D sketch point to 3D world using plane
+                const world = sketchUtils.sketchToWorld(pos2d, plane);
+                orderedPoints.push([world[0], world[1], world[2]]);
+              }
               currentEnd = nextLine.end;
             } else {
-              const pos = points.get(nextLine.end);
-              if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+              const pos2d = points2d.get(nextLine.end);
+              if (pos2d) {
+                // Transform 2D sketch point to 3D world using plane
+                const world = sketchUtils.sketchToWorld(pos2d, plane);
+                orderedPoints.push([world[0], world[1], world[2]]);
+              }
               currentEnd = nextLine.start;
             }
             lines.splice(lines.indexOf(nextLine), 1);
@@ -1013,8 +1055,13 @@ export function Viewport() {
 
           // Get extrude depth
           const depth = op.depth.value;
+
+          // Calculate plane normal for extrude direction: cross(axisX, axisY)
+          const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
+          const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
+          const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
           const direction: [number, number, number] =
-            op.direction === "reverse" ? [0, 0, -1] : [0, 0, 1];
+            op.direction === "reverse" ? [-nx, -ny, -nz] : [nx, ny, nz];
 
           // Create geometry using OCC
           const wire = occApi.makePolygon(orderedPoints);
@@ -1267,16 +1314,20 @@ export function Viewport() {
     const sketch = studio.sketches.get(pendingExtrude.sketchId as any);
     if (!sketch) return;
 
+    // Get the plane for this sketch
+    const plane = getPlaneById(sketch.planeId, studio.planes);
+    if (!plane) return;
+
     try {
       // Build profile from sketch lines (same logic as in the main geometry builder)
       const lines: Array<{ start: string; end: string }> = [];
-      const points: Map<string, [number, number]> = new Map();
+      const points2d: Map<string, [number, number]> = new Map();
 
       for (const [id, prim] of sketch.primitives) {
         if (prim.type === "point") {
           const solved = sketch.solvedPositions?.get(id);
           const pos: [number, number] = solved ? [solved[0], solved[1]] : [prim.x, prim.y];
-          points.set(id, pos);
+          points2d.set(id, pos);
         } else if (prim.type === "line") {
           lines.push({ start: prim.start, end: prim.end });
         }
@@ -1295,12 +1346,20 @@ export function Viewport() {
         if (!nextLine) break;
 
         if (nextLine.start === currentEnd) {
-          const pos = points.get(nextLine.start);
-          if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+          const pos2d = points2d.get(nextLine.start);
+          if (pos2d) {
+            // Transform 2D sketch point to 3D world using plane
+            const world = sketchUtils.sketchToWorld(pos2d, plane);
+            orderedPoints.push([world[0], world[1], world[2]]);
+          }
           currentEnd = nextLine.end;
         } else {
-          const pos = points.get(nextLine.end);
-          if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+          const pos2d = points2d.get(nextLine.end);
+          if (pos2d) {
+            // Transform 2D sketch point to 3D world using plane
+            const world = sketchUtils.sketchToWorld(pos2d, plane);
+            orderedPoints.push([world[0], world[1], world[2]]);
+          }
           currentEnd = nextLine.start;
         }
         lines.splice(lines.indexOf(nextLine), 1);
@@ -1309,10 +1368,15 @@ export function Viewport() {
 
       if (orderedPoints.length < 3) return;
 
-      // Get depth and direction from pending extrude
+      // Get depth from pending extrude
       const depth = pendingExtrude.depth || 10;
+
+      // Calculate plane normal for extrude direction: cross(axisX, axisY)
+      const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
+      const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
+      const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
       const direction: [number, number, number] =
-        pendingExtrude.direction === "reverse" ? [0, 0, -1] : [0, 0, 1];
+        pendingExtrude.direction === "reverse" ? [-nx, -ny, -nz] : [nx, ny, nz];
 
       // Create preview geometry using OCC
       const wire = occApi.makePolygon(orderedPoints);
@@ -1326,10 +1390,25 @@ export function Viewport() {
       occApi.freeShape(solid);
 
       // Create Three.js preview mesh with transparent green material
+      // Swap Y/Z to convert from CAD (Z-up) to Three.js (Y-up)
       const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+
+      const swappedPositions = new Float32Array(meshData.positions.length);
+      for (let i = 0; i < meshData.positions.length; i += 3) {
+        swappedPositions[i] = meshData.positions[i];         // X stays X
+        swappedPositions[i + 1] = meshData.positions[i + 2]; // Y becomes Z
+        swappedPositions[i + 2] = meshData.positions[i + 1]; // Z becomes Y
+      }
+      geometry.setAttribute("position", new THREE.BufferAttribute(swappedPositions, 3));
+
       if (meshData.normals.length > 0) {
-        geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+        const swappedNormals = new Float32Array(meshData.normals.length);
+        for (let i = 0; i < meshData.normals.length; i += 3) {
+          swappedNormals[i] = meshData.normals[i];         // X stays X
+          swappedNormals[i + 1] = meshData.normals[i + 2]; // Y becomes Z
+          swappedNormals[i + 2] = meshData.normals[i + 1]; // Z becomes Y
+        }
+        geometry.setAttribute("normal", new THREE.BufferAttribute(swappedNormals, 3));
       }
       geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
       if (meshData.normals.length === 0) {
