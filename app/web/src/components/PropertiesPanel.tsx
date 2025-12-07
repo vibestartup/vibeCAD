@@ -378,6 +378,149 @@ function FaceSelector({ label, value, targetType, onClear }: FaceSelectorProps) 
 }
 
 // ============================================================================
+// Plane Selector Component (for editing sketch plane)
+// ============================================================================
+
+interface PlaneSelectorProps {
+  opId: string;
+  sketchId: string;
+  currentPlaneId: string;
+}
+
+function PlaneSelector({ opId, sketchId, currentPlaneId }: PlaneSelectorProps) {
+  const faceSelectionTarget = useCadStore((s) => s.faceSelectionTarget);
+  const enterFaceSelectionMode = useCadStore((s) => s.enterFaceSelectionMode);
+  const exitFaceSelectionMode = useCadStore((s) => s.exitFaceSelectionMode);
+
+  const isListening =
+    faceSelectionTarget?.type === "edit-sketch-plane" &&
+    faceSelectionTarget.opId === opId;
+
+  // Get display name for the plane
+  const planeDisplayName = React.useMemo(() => {
+    if (currentPlaneId === "datum_xy") return "XY Plane";
+    if (currentPlaneId === "datum_xz") return "XZ Plane";
+    if (currentPlaneId === "datum_yz") return "YZ Plane";
+    return `Plane ${currentPlaneId.slice(0, 8)}`;
+  }, [currentPlaneId]);
+
+  const handleClick = () => {
+    if (isListening) {
+      exitFaceSelectionMode();
+    } else {
+      enterFaceSelectionMode({ type: "edit-sketch-plane", opId, sketchId });
+    }
+  };
+
+  return (
+    <div style={styles.field}>
+      <label style={styles.fieldLabel}>Sketch Plane</label>
+      <div style={styles.faceSelector}>
+        <button
+          style={{
+            ...styles.faceSelectorButton,
+            ...(isListening ? styles.faceSelectorButtonListening : {}),
+            ...(!isListening ? styles.faceSelectorButtonSelected : {}),
+          }}
+          onClick={handleClick}
+        >
+          <span style={styles.faceSelectorIcon}>
+            {isListening ? "◉" : "✓"}
+          </span>
+          <span style={{ flex: 1 }}>
+            {isListening
+              ? "Click a plane in viewport..."
+              : planeDisplayName}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Sketch Properties Component
+// ============================================================================
+
+function SketchProperties({ op }: { op: any }) {
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+
+  // Get the sketch from the op
+  const sketch = React.useMemo(() => {
+    if (!studio || !op.sketchId) return null;
+    return studio.sketches.get(op.sketchId as SketchId) ?? null;
+  }, [studio, op.sketchId]);
+
+  // Get plane info
+  const currentPlaneId = sketch?.planeId ?? op.planeRef ?? "datum_xy";
+
+  // Count entities
+  const entityCount = React.useMemo(() => {
+    if (!sketch) return { points: 0, lines: 0, circles: 0, arcs: 0 };
+    let points = 0, lines = 0, circles = 0, arcs = 0;
+    for (const [, prim] of sketch.primitives) {
+      if (prim.type === "point") points++;
+      else if (prim.type === "line") lines++;
+      else if (prim.type === "circle") circles++;
+      else if (prim.type === "arc") arcs++;
+    }
+    return { points, lines, circles, arcs };
+  }, [sketch]);
+
+  const constraintCount = sketch?.constraints?.size ?? 0;
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>Sketch</div>
+
+      <PlaneSelector
+        opId={op.id}
+        sketchId={op.sketchId}
+        currentPlaneId={currentPlaneId}
+      />
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Entities</label>
+        <div style={{ fontSize: 12, color: "#aaa", paddingLeft: 4 }}>
+          {entityCount.points > 0 && <div>{entityCount.points} points</div>}
+          {entityCount.lines > 0 && <div>{entityCount.lines} lines</div>}
+          {entityCount.circles > 0 && <div>{entityCount.circles} circles</div>}
+          {entityCount.arcs > 0 && <div>{entityCount.arcs} arcs</div>}
+          {entityCount.points === 0 && entityCount.lines === 0 && entityCount.circles === 0 && entityCount.arcs === 0 && (
+            <div style={{ color: "#666" }}>No entities</div>
+          )}
+        </div>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Constraints</label>
+        <div style={{ fontSize: 12, color: "#aaa", paddingLeft: 4 }}>
+          {constraintCount} constraint{constraintCount !== 1 ? "s" : ""}
+        </div>
+      </div>
+
+      {sketch?.solveStatus && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Solve Status</label>
+          <div style={{
+            fontSize: 12,
+            paddingLeft: 4,
+            color: sketch.solveStatus === "ok" ? "#69db7c" :
+                   sketch.solveStatus === "under-constrained" ? "#ffd43b" : "#ff6b6b"
+          }}>
+            {sketch.solveStatus === "ok" ? "Fully Constrained" :
+             sketch.solveStatus === "under-constrained" ? `Under-constrained (${sketch.dof ?? "?"} DOF)` :
+             sketch.solveStatus}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Revolve Properties (unified for both pending and existing ops)
 // ============================================================================
 
@@ -910,6 +1053,7 @@ function OpProperties({ op }: OpPropertiesProps) {
       </div>
 
       {/* Type-specific properties */}
+      {op.type === "sketch" && <SketchProperties op={op} />}
       {op.type === "extrude" && <ExtrudeProperties op={op} />}
       {op.type === "revolve" && <RevolveProperties op={op} />}
       {op.type === "fillet" && <FilletProperties op={op} />}

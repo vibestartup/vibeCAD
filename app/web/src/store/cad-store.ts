@@ -49,6 +49,7 @@ export type EditorMode = "object" | "select-plane" | "sketch" | "select-face";
 // Face selection target - what operation is requesting the face
 export type FaceSelectionTarget =
   | { type: "sketch-plane" }  // Selecting a plane for a new sketch
+  | { type: "edit-sketch-plane"; opId: string; sketchId: string }  // Editing an existing sketch's plane
   | { type: "extrude-profile"; opId?: string }  // Selecting a sketch profile for extrude
   | { type: "extrude-face"; opId?: string };  // Selecting a face for face extrude
 
@@ -132,7 +133,7 @@ interface CadState {
     toolOpId: string | null;
   } | null;
 
-  // Hovered face for face selection mode
+  // Hovered face for face selection mode (includes datum planes for unified selection)
   hoveredFace: {
     type: "sketch";
     sketchId: string;
@@ -141,6 +142,9 @@ interface CadState {
     type: "body-face";
     opId: string;
     faceIndex: number;
+  } | {
+    type: "datum-plane";
+    planeId: string;
   } | null;
 
   // Export mesh data (populated by Viewport for export)
@@ -1223,7 +1227,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   selectFace: (face) => {
-    const { faceSelectionTarget, pendingExtrude } = get();
+    const { faceSelectionTarget, pendingExtrude, document, activeStudioId, historyState } = get();
 
     // If selecting for sketch plane
     if (faceSelectionTarget?.type === "sketch-plane") {
@@ -1237,6 +1241,53 @@ export const useCadStore = create<CadStore>((set, get) => ({
         faceSelectionTarget: null,
         selectedFace: null,
       });
+      return;
+    }
+
+    // If editing an existing sketch's plane
+    if (faceSelectionTarget?.type === "edit-sketch-plane") {
+      if (face.type === "datum-plane" && activeStudioId) {
+        const studio = document.partStudios.get(activeStudioId);
+        if (studio) {
+          const { opId, sketchId } = faceSelectionTarget;
+          const newPlaneId = face.planeId as SketchPlaneId;
+
+          // Update the SketchOp's planeRef
+          const opNode = studio.opGraph.get(opId as OpId);
+          if (opNode && opNode.op.type === "sketch") {
+            const updatedOp = { ...opNode.op, planeRef: newPlaneId };
+            const newOpGraph = new Map(studio.opGraph);
+            newOpGraph.set(opId as OpId, { ...opNode, op: updatedOp });
+
+            // Update the Sketch's planeId
+            const sketch = studio.sketches.get(sketchId as SketchId);
+            if (sketch) {
+              const updatedSketch = { ...sketch, planeId: newPlaneId };
+              const newSketches = new Map(studio.sketches);
+              newSketches.set(sketchId as SketchId, updatedSketch);
+
+              const newStudio = { ...studio, opGraph: newOpGraph, sketches: newSketches };
+              const newPartStudios = new Map(document.partStudios);
+              newPartStudios.set(activeStudioId, newStudio);
+
+              const newDoc = { ...document, partStudios: newPartStudios };
+              set({
+                document: newDoc,
+                historyState: pushState(historyState, newDoc),
+                editorMode: "object",
+                faceSelectionTarget: null,
+                selectedFace: null,
+              });
+            }
+          }
+        }
+      } else {
+        set({
+          editorMode: "object",
+          faceSelectionTarget: null,
+          selectedFace: null,
+        });
+      }
       return;
     }
 

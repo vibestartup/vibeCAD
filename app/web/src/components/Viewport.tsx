@@ -703,6 +703,7 @@ export function Viewport() {
   const hoveredFace = useCadStore((s) => s.hoveredFace);
   const setHoveredFace = useCadStore((s) => s.setHoveredFace);
   const selectedFace = useCadStore((s) => s.selectedFace);
+  const selectFace = useCadStore((s) => s.selectFace);
   const setExportMeshes = useCadStore((s) => s.setExportMeshes);
   const setExportShapeHandles = useCadStore((s) => s.setExportShapeHandles);
 
@@ -1619,17 +1620,20 @@ export function Viewport() {
       }
     }
 
-    // Only show planes in select-plane mode
-    if (editorMode !== "select-plane") return;
+    // Show planes in select-plane mode AND select-face mode (unified plane/face selection)
+    if (editorMode !== "select-plane" && editorMode !== "select-face") return;
+
+    // Determine which plane is hovered (from hoveredPlane OR hoveredFace.type === "datum-plane")
+    const activeHoveredPlane = hoveredPlane || (hoveredFace?.type === "datum-plane" ? hoveredFace.planeId : null);
 
     const planeSize = 60;
 
     // XY Plane (Blue) - at Z=0, normal is +Z
     const xyGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
     const xyMaterial = new THREE.MeshBasicMaterial({
-      color: hoveredPlane === "datum_xy" ? 0x6699ff : 0x4477cc,
+      color: activeHoveredPlane === "datum_xy" ? 0x6699ff : 0x4477cc,
       transparent: true,
-      opacity: hoveredPlane === "datum_xy" ? 0.5 : 0.3,
+      opacity: activeHoveredPlane === "datum_xy" ? 0.5 : 0.3,
       side: THREE.DoubleSide,
     });
     const xyMesh = new THREE.Mesh(xyGeometry, xyMaterial);
@@ -1641,9 +1645,9 @@ export function Viewport() {
     // XZ Plane (Green) - at Y=0, normal is +Y
     const xzGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
     const xzMaterial = new THREE.MeshBasicMaterial({
-      color: hoveredPlane === "datum_xz" ? 0x66ff66 : 0x44aa44,
+      color: activeHoveredPlane === "datum_xz" ? 0x66ff66 : 0x44aa44,
       transparent: true,
-      opacity: hoveredPlane === "datum_xz" ? 0.5 : 0.3,
+      opacity: activeHoveredPlane === "datum_xz" ? 0.5 : 0.3,
       side: THREE.DoubleSide,
     });
     const xzMesh = new THREE.Mesh(xzGeometry, xzMaterial);
@@ -1655,9 +1659,9 @@ export function Viewport() {
     // YZ Plane (Red) - at X=0, normal is +X
     const yzGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
     const yzMaterial = new THREE.MeshBasicMaterial({
-      color: hoveredPlane === "datum_yz" ? 0xff6666 : 0xcc4444,
+      color: activeHoveredPlane === "datum_yz" ? 0xff6666 : 0xcc4444,
       transparent: true,
-      opacity: hoveredPlane === "datum_yz" ? 0.5 : 0.3,
+      opacity: activeHoveredPlane === "datum_yz" ? 0.5 : 0.3,
       side: THREE.DoubleSide,
     });
     const yzMesh = new THREE.Mesh(yzGeometry, yzMaterial);
@@ -1665,7 +1669,7 @@ export function Viewport() {
     yzMesh.position.x = 0.01;
     yzMesh.userData = { planeId: "datum_yz", planeName: "YZ Plane" };
     planeGroup.add(yzMesh);
-  }, [editorMode, hoveredPlane]);
+  }, [editorMode, hoveredPlane, hoveredFace]);
 
   // Handle mouse events for plane selection and sketch mode raycasting
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -1751,12 +1755,13 @@ export function Viewport() {
       return;
     }
 
-    // Handle face/sketch selection mode - detect hover over sketches and body faces
+    // Handle face/sketch selection mode - detect hover over sketches, body faces, and datum planes
     if (editorMode === "select-face") {
       const sketchGroup = sketchGroupRef.current;
       const meshGroup = meshGroupRef.current;
+      const planeGroup = planeGroupRef.current;
 
-      // First, check for body face intersections (they're in front of sketches)
+      // First, check for body face intersections (they're in front of everything)
       if (meshGroup) {
         const bodyMeshes: THREE.Mesh[] = [];
         meshGroup.traverse((obj) => {
@@ -1787,7 +1792,7 @@ export function Viewport() {
         }
       }
 
-      // Then check for sketch intersections
+      // Then check for sketch intersections (only for extrude-profile target)
       if (sketchGroup && faceSelectionTarget?.type === "extrude-profile") {
         const allSketchObjects: THREE.Object3D[] = [];
         sketchGroup.traverse((obj) => {
@@ -1820,6 +1825,21 @@ export function Viewport() {
             if (hoveredFace?.type !== "sketch" ||
                 hoveredFace.sketchId !== sketchId ||
                 hoveredFace.loopIndex !== loopIndex) {
+              setHoveredFace(newHover);
+            }
+            return;
+          }
+        }
+      }
+
+      // Finally, check for datum plane intersections (for edit-sketch-plane and sketch-plane targets)
+      if (planeGroup && (faceSelectionTarget?.type === "edit-sketch-plane" || faceSelectionTarget?.type === "sketch-plane")) {
+        const planeIntersects = raycaster.intersectObjects(planeGroup.children);
+        if (planeIntersects.length > 0) {
+          const planeId = planeIntersects[0].object.userData.planeId;
+          if (planeId) {
+            const newHover = { type: "datum-plane" as const, planeId };
+            if (hoveredFace?.type !== "datum-plane" || hoveredFace.planeId !== planeId) {
               setHoveredFace(newHover);
             }
             return;
@@ -1891,8 +1911,14 @@ export function Viewport() {
           setPendingExtrudeBodyFace({ opId: hoveredFace.opId, faceIndex: hoveredFace.faceIndex });
         }
       }
+
+      // For edit-sketch-plane, we want to select datum planes
+      if (faceSelectionTarget.type === "edit-sketch-plane" && hoveredFace.type === "datum-plane") {
+        console.log("[Viewport] Selected datum plane for sketch:", hoveredFace.planeId);
+        selectFace({ type: "datum-plane", planeId: hoveredFace.planeId });
+      }
     }
-  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace]);
+  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace]);
 
   // View controls
   const handleResetView = useCallback(() => {
@@ -2034,6 +2060,26 @@ export function Viewport() {
           {hoveredPlane
             ? `Click to create sketch on ${hoveredPlane === "datum_xy" ? "XY" : hoveredPlane === "datum_xz" ? "XZ" : "YZ"} Plane`
             : "Click on a plane to create a new sketch"}
+        </div>
+      )}
+
+      {/* Face/plane selection hint for edit-sketch-plane */}
+      {editorMode === "select-face" && faceSelectionTarget?.type === "edit-sketch-plane" && (
+        <div style={{
+          position: "absolute",
+          bottom: 60,
+          left: "50%",
+          transform: "translateX(-50%)",
+          backgroundColor: "rgba(30, 30, 60, 0.9)",
+          color: "#fff",
+          padding: "8px 16px",
+          borderRadius: 4,
+          fontSize: 12,
+          pointerEvents: "none",
+        }}>
+          {hoveredFace?.type === "datum-plane"
+            ? `Click to move sketch to ${hoveredFace.planeId === "datum_xy" ? "XY" : hoveredFace.planeId === "datum_xz" ? "XZ" : "YZ"} Plane`
+            : "Click on a plane to change the sketch plane"}
         </div>
       )}
     </div>
