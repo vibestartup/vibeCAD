@@ -4,17 +4,19 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import path from 'path';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     wasm(),
     topLevelAwait(),
   ],
   resolve: {
-    alias: {
-      '@vibecad/core': path.resolve(__dirname, '../../packages/core/src/index.ts'),
-      '@vibecad/kernel': path.resolve(__dirname, '../../packages/kernel/src/index.ts'),
-    },
+    // In dev mode, use source files for HMR; in production, use dist
+    alias: mode === 'development' ? [
+      { find: '@vibecad/core', replacement: path.resolve(__dirname, '../../packages/core/src/index.ts') },
+      { find: '@vibecad/kernel', replacement: path.resolve(__dirname, '../../packages/kernel/src/index.ts') },
+    ] : [],
+    preserveSymlinks: true,
   },
   server: {
     port: 3000,
@@ -32,4 +34,4 @@ export default defineConfig({
     format: 'es',
     plugins: () => [wasm(), topLevelAwait()],
   },
-});
+}));
