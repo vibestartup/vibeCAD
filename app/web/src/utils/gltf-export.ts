@@ -3,12 +3,8 @@
  * Converts mesh data to glTF 2.0 format with embedded binary data
  */
 
-export interface ExportableMesh {
-  positions: Float32Array;
-  normals: Float32Array;
-  indices: Uint32Array;
-  name?: string;
-}
+import type { ExportableMesh } from "./stl-export";
+import { downloadFile } from "./stl-export";
 
 interface GLTFAccessor {
   bufferView: number;
@@ -299,20 +295,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-/**
- * Trigger a download of a file
- */
-export function downloadFile(content: string | ArrayBuffer, filename: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
 
 /**
  * Export meshes to glTF and download as a single .gltf file with embedded binary data
