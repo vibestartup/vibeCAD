@@ -30,3 +30,16 @@ export {
   type ProjectMetadata,
   type SavedProject,
 } from "./project-store";
+
+export {
+  useTabsStore,
+  createCadTab,
+  createImageTabFromFile,
+  createRawTabFromFile,
+  getDocumentTypeFromFile,
+  type DocumentType,
+  type TabDocument,
+  type CadDocument,
+  type ImageDocument,
+  type RawDocument,
+} from "./tabs-store";
