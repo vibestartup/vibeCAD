@@ -268,6 +268,7 @@ interface CadActions {
   // Export actions
   setExportMeshes: (meshes: ExportableMesh[]) => void;
   setExportShapeHandles: (handles: ShapeHandle[]) => void;
+  resetDocument: () => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -1788,6 +1789,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   setExportShapeHandles: (handles) => {
     set({ exportShapeHandles: handles });
+  },
+
+  resetDocument: () => {
+    set(createInitialState());
   },
 }));
 

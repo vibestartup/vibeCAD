@@ -59,12 +59,35 @@ const TOOLS: Tool[] = [
 ];
 
 const styles = {
-  toolbar: {
+  toolbarContainer: {
+    display: "flex",
+    alignItems: "center",
+    height: "100%",
+    width: "100%",
+  } as React.CSSProperties,
+
+  toolbarScrollable: {
     display: "flex",
     alignItems: "center",
     height: "100%",
     gap: 8,
     padding: "0 12px",
+    overflowX: "auto",
+    overflowY: "hidden",
+    flexWrap: "nowrap",
+    scrollbarWidth: "thin",
+    scrollbarColor: "#444 transparent",
+    flex: 1,
+    minWidth: 0,
+  } as React.CSSProperties,
+
+  toolbarFixed: {
+    display: "flex",
+    alignItems: "center",
+    height: "100%",
+    padding: "0 12px",
+    borderLeft: "1px solid #333",
+    flexShrink: 0,
   } as React.CSSProperties,
 
   logo: {
@@ -73,6 +96,7 @@ const styles = {
     color: "#646cff",
     marginRight: 16,
     userSelect: "none",
+    flexShrink: 0,
   } as React.CSSProperties,
 
   divider: {
@@ -80,12 +104,14 @@ const styles = {
     height: 24,
     backgroundColor: "#333",
     margin: "0 8px",
+    flexShrink: 0,
   } as React.CSSProperties,
 
   toolGroup: {
     display: "flex",
     alignItems: "center",
     gap: 2,
+    flexShrink: 0,
   } as React.CSSProperties,
 
   toolButton: {
@@ -102,6 +128,7 @@ const styles = {
     minWidth: 40,
     fontSize: 16,
     transition: "background-color 0.15s, color 0.15s",
+    flexShrink: 0,
   } as React.CSSProperties,
 
   toolButtonActive: {
@@ -132,6 +159,7 @@ const styles = {
     color: "#aaa",
     cursor: "pointer",
     fontSize: 14,
+    flexShrink: 0,
   } as React.CSSProperties,
 
   iconButtonDisabled: {
@@ -141,75 +169,112 @@ const styles = {
 
   spacer: {
     flex: 1,
+    minWidth: 8,
   } as React.CSSProperties,
 
   statusText: {
     fontSize: 12,
     color: "#888",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
   } as React.CSSProperties,
 
-  dropdownContainer: {
+  profileButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 36,
+    height: 36,
+    border: "none",
+    borderRadius: "50%",
+    backgroundColor: "#333",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 18,
+    transition: "background-color 0.15s, color 0.15s",
+  } as React.CSSProperties,
+
+  profileButtonHover: {
+    backgroundColor: "#646cff",
+    color: "#fff",
+  } as React.CSSProperties,
+
+  menuContainer: {
     position: "relative",
     display: "inline-block",
   } as React.CSSProperties,
 
-  dropdownButton: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    padding: "4px 10px",
-    border: "none",
-    borderRadius: 4,
-    backgroundColor: "transparent",
-    color: "#aaa",
-    cursor: "pointer",
-    fontSize: 13,
-    transition: "background-color 0.15s, color 0.15s",
-    minWidth: 70,
-  } as React.CSSProperties,
-
-  dropdownButtonHover: {
-    backgroundColor: "#333",
-    color: "#fff",
-  } as React.CSSProperties,
-
-  dropdownMenu: {
+  menu: {
     position: "absolute",
     top: "100%",
-    left: 0,
-    marginTop: 4,
+    right: 0,
+    marginTop: 8,
     backgroundColor: "#252530",
     border: "1px solid #333",
-    borderRadius: 4,
-    minWidth: 140,
+    borderRadius: 6,
+    minWidth: 200,
     zIndex: 1000,
-    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+    overflow: "hidden",
   } as React.CSSProperties,
 
-  dropdownItem: {
+  menuItem: {
     display: "flex",
     alignItems: "center",
-    gap: 8,
+    gap: 12,
     width: "100%",
-    padding: "8px 12px",
+    padding: "10px 14px",
     border: "none",
     backgroundColor: "transparent",
-    color: "#aaa",
+    color: "#ccc",
     cursor: "pointer",
-    fontSize: 12,
+    fontSize: 13,
     textAlign: "left",
     transition: "background-color 0.15s",
+    position: "relative",
   } as React.CSSProperties,
 
-  dropdownItemHover: {
+  menuItemHover: {
     backgroundColor: "#333",
     color: "#fff",
   } as React.CSSProperties,
 
-  dropdownItemDisabled: {
+  menuItemDisabled: {
     opacity: 0.4,
     cursor: "not-allowed",
+  } as React.CSSProperties,
+
+  menuItemIcon: {
+    width: 18,
+    textAlign: "center",
+    fontSize: 14,
+    opacity: 0.8,
+  } as React.CSSProperties,
+
+  menuDivider: {
+    height: 1,
+    backgroundColor: "#333",
+    margin: "4px 0",
+  } as React.CSSProperties,
+
+  submenuArrow: {
+    marginLeft: "auto",
+    fontSize: 10,
+    opacity: 0.6,
+  } as React.CSSProperties,
+
+  submenu: {
+    position: "absolute",
+    left: "100%",
+    top: 0,
+    marginLeft: 4,
+    backgroundColor: "#252530",
+    border: "1px solid #333",
+    borderRadius: 6,
+    minWidth: 160,
+    zIndex: 1001,
+    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+    overflow: "hidden",
   } as React.CSSProperties,
 };
 
@@ -240,38 +305,46 @@ function ToolButton({ tool, isActive, onClick }: ToolButtonProps) {
   );
 }
 
-// Export format options
-interface ExportFormat {
-  id: string;
-  label: string;
-  extension: string;
-  enabled: boolean;
-}
-
-const EXPORT_FORMATS: ExportFormat[] = [
-  { id: "stl", label: "STL", extension: ".stl", enabled: true },
-  { id: "step", label: "STEP", extension: ".step", enabled: true },
-  { id: "obj", label: "OBJ", extension: ".obj", enabled: true },
-  { id: "gltf", label: "glTF", extension: ".gltf", enabled: true },
-];
-
-interface ExportDropdownProps {
-  onExport: (formatId: string) => void;
+// Profile Menu Component
+interface ProfileMenuProps {
+  onNew: () => void;
+  onOpen: () => void;
+  onSave: () => void;
+  onDownload: () => void;
+  onImport: (format: string) => void;
+  onExport: (format: string) => void;
+  onSettings: () => void;
+  onAbout: () => void;
   hasGeometry: boolean;
   hasShapeHandles: boolean;
 }
 
-function ExportDropdown({ onExport, hasGeometry, hasShapeHandles }: ExportDropdownProps) {
+function ProfileMenu({
+  onNew,
+  onOpen,
+  onSave,
+  onDownload,
+  onImport,
+  onExport,
+  onSettings,
+  onAbout,
+  hasGeometry,
+  hasShapeHandles,
+}: ProfileMenuProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
   const [hoveredItem, setHoveredItem] = React.useState<string | null>(null);
-  const dropdownRef = React.useRef<HTMLDivElement>(null);
+  const [showImportSubmenu, setShowImportSubmenu] = React.useState(false);
+  const [showExportSubmenu, setShowExportSubmenu] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
+  // Close menu when clicking outside
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsOpen(false);
+        setShowImportSubmenu(false);
+        setShowExportSubmenu(false);
       }
     }
 
@@ -281,65 +354,255 @@ function ExportDropdown({ onExport, hasGeometry, hasShapeHandles }: ExportDropdo
     }
   }, [isOpen]);
 
-  const handleExport = (format: ExportFormat) => {
-    // STEP requires shape handles, others require mesh data
-    const hasData = format.id === "step" ? hasShapeHandles : hasGeometry;
-    if (!format.enabled || !hasData) return;
-
-    onExport(format.id);
+  const handleMenuItemClick = (action: () => void) => {
+    action();
     setIsOpen(false);
+    setShowImportSubmenu(false);
+    setShowExportSubmenu(false);
   };
 
+  const importFormats = [
+    { id: "stl", label: "STL", icon: "▲" },
+    { id: "step", label: "STEP", icon: "◆" },
+    { id: "obj", label: "OBJ", icon: "◇" },
+  ];
+
+  const exportFormats = [
+    { id: "stl", label: "STL", extension: ".stl", needsMesh: true },
+    { id: "step", label: "STEP", extension: ".step", needsMesh: false },
+    { id: "obj", label: "OBJ", extension: ".obj", needsMesh: true },
+    { id: "gltf", label: "glTF", extension: ".gltf", needsMesh: true },
+  ];
+
   return (
-    <div style={styles.dropdownContainer} ref={dropdownRef}>
+    <div style={styles.menuContainer} ref={menuRef}>
       <button
         style={{
-          ...styles.dropdownButton,
-          ...(isHovered || isOpen ? styles.dropdownButtonHover : {}),
+          ...styles.profileButton,
+          ...(isHovered || isOpen ? styles.profileButtonHover : {}),
         }}
         onClick={() => setIsOpen(!isOpen)}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        title="Export model to file"
+        title="Menu"
       >
-        <span>&#x2B73;</span>
-        <span>Export</span>
-        <span style={{ fontSize: 8, marginLeft: 2 }}>{isOpen ? "▲" : "▼"}</span>
+        &#x2630;
       </button>
 
       {isOpen && (
-        <div style={styles.dropdownMenu}>
-          {EXPORT_FORMATS.map((format) => {
-            // STEP requires shape handles, others require mesh data
-            const hasData = format.id === "step" ? hasShapeHandles : hasGeometry;
-            const isDisabled = !format.enabled || !hasData;
-            const isItemHovered = hoveredItem === format.id && !isDisabled;
+        <div style={styles.menu}>
+          {/* New */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "new" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onNew)}
+            onMouseEnter={() => {
+              setHoveredItem("new");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>+</span>
+            <span>New</span>
+          </button>
 
-            return (
-              <button
-                key={format.id}
-                style={{
-                  ...styles.dropdownItem,
-                  ...(isItemHovered ? styles.dropdownItemHover : {}),
-                  ...(isDisabled ? styles.dropdownItemDisabled : {}),
-                }}
-                onClick={() => handleExport(format)}
-                onMouseEnter={() => setHoveredItem(format.id)}
-                onMouseLeave={() => setHoveredItem(null)}
-                disabled={isDisabled}
-                title={
-                  !format.enabled
-                    ? `${format.label} export coming soon`
-                    : !hasData
-                    ? "No geometry to export"
-                    : `Export as ${format.label}`
-                }
-              >
-                <span style={{ fontWeight: 500 }}>{format.label}</span>
-                <span style={{ color: "#666", fontSize: 11 }}>{format.extension}</span>
-              </button>
-            );
-          })}
+          <div style={styles.menuDivider} />
+
+          {/* Open */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "open" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onOpen)}
+            onMouseEnter={() => {
+              setHoveredItem("open");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>&#x1F4C1;</span>
+            <span>Open</span>
+          </button>
+
+          {/* Save */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "save" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onSave)}
+            onMouseEnter={() => {
+              setHoveredItem("save");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>&#x1F4BE;</span>
+            <span>Save</span>
+          </button>
+
+          {/* Download */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "download" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onDownload)}
+            onMouseEnter={() => {
+              setHoveredItem("download");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>&#x2B73;</span>
+            <span>Download Project</span>
+          </button>
+
+          <div style={styles.menuDivider} />
+
+          {/* Import with submenu */}
+          <div
+            style={{ position: "relative" }}
+            onMouseEnter={() => {
+              setHoveredItem("import");
+              setShowImportSubmenu(true);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => {
+              setHoveredItem(null);
+            }}
+          >
+            <button
+              style={{
+                ...styles.menuItem,
+                ...(hoveredItem === "import" ? styles.menuItemHover : {}),
+              }}
+            >
+              <span style={styles.menuItemIcon}>&#x2B06;</span>
+              <span>Import</span>
+              <span style={styles.submenuArrow}>▶</span>
+            </button>
+            {showImportSubmenu && (
+              <div style={styles.submenu}>
+                {importFormats.map((format) => (
+                  <button
+                    key={format.id}
+                    style={{
+                      ...styles.menuItem,
+                      ...(hoveredItem === `import-${format.id}` ? styles.menuItemHover : {}),
+                    }}
+                    onClick={() => handleMenuItemClick(() => onImport(format.id))}
+                    onMouseEnter={() => setHoveredItem(`import-${format.id}`)}
+                    onMouseLeave={() => setHoveredItem("import")}
+                  >
+                    <span style={styles.menuItemIcon}>{format.icon}</span>
+                    <span>{format.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Export with submenu */}
+          <div
+            style={{ position: "relative" }}
+            onMouseEnter={() => {
+              setHoveredItem("export");
+              setShowExportSubmenu(true);
+              setShowImportSubmenu(false);
+            }}
+            onMouseLeave={() => {
+              setHoveredItem(null);
+            }}
+          >
+            <button
+              style={{
+                ...styles.menuItem,
+                ...(hoveredItem === "export" ? styles.menuItemHover : {}),
+              }}
+            >
+              <span style={styles.menuItemIcon}>&#x2B07;</span>
+              <span>Export</span>
+              <span style={styles.submenuArrow}>▶</span>
+            </button>
+            {showExportSubmenu && (
+              <div style={styles.submenu}>
+                {exportFormats.map((format) => {
+                  const hasData = format.needsMesh ? hasGeometry : hasShapeHandles;
+                  const isDisabled = !hasData;
+                  return (
+                    <button
+                      key={format.id}
+                      style={{
+                        ...styles.menuItem,
+                        ...(hoveredItem === `export-${format.id}` && !isDisabled
+                          ? styles.menuItemHover
+                          : {}),
+                        ...(isDisabled ? styles.menuItemDisabled : {}),
+                      }}
+                      onClick={() => {
+                        if (!isDisabled) {
+                          handleMenuItemClick(() => onExport(format.id));
+                        }
+                      }}
+                      onMouseEnter={() => setHoveredItem(`export-${format.id}`)}
+                      onMouseLeave={() => setHoveredItem("export")}
+                      disabled={isDisabled}
+                      title={isDisabled ? "No geometry to export" : `Export as ${format.label}`}
+                    >
+                      <span style={{ fontWeight: 500 }}>{format.label}</span>
+                      <span style={{ color: "#666", fontSize: 11 }}>{format.extension}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={styles.menuDivider} />
+
+          {/* Settings */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "settings" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onSettings)}
+            onMouseEnter={() => {
+              setHoveredItem("settings");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>&#x2699;</span>
+            <span>Settings</span>
+          </button>
+
+          {/* About */}
+          <button
+            style={{
+              ...styles.menuItem,
+              ...(hoveredItem === "about" ? styles.menuItemHover : {}),
+            }}
+            onClick={() => handleMenuItemClick(onAbout)}
+            onMouseEnter={() => {
+              setHoveredItem("about");
+              setShowImportSubmenu(false);
+              setShowExportSubmenu(false);
+            }}
+            onMouseLeave={() => setHoveredItem(null)}
+          >
+            <span style={styles.menuItemIcon}>&#x2139;</span>
+            <span>About</span>
+          </button>
         </div>
       )}
     </div>
@@ -351,6 +614,9 @@ interface ToolbarProps {
   onOpenLibrary?: () => void;
   onSaveProject?: () => void;
   onDownloadProject?: () => void;
+  onNewProject?: () => void;
+  onImport?: (format: string) => void;
+  onOpenAbout?: () => void;
 }
 
 export function Toolbar({
@@ -358,15 +624,16 @@ export function Toolbar({
   onOpenLibrary,
   onSaveProject,
   onDownloadProject,
+  onNewProject,
+  onImport,
+  onOpenAbout,
 }: ToolbarProps) {
   // Use store for active tool instead of local state
   const activeTool = useCadStore((s) => s.activeTool);
   const setActiveTool = useCadStore((s) => s.setActiveTool);
-  const activeSketchId = useCadStore((s) => s.activeSketchId);
   const editorMode = useCadStore((s) => s.editorMode);
   const enterPlaneSelectionMode = useCadStore((s) => s.enterPlaneSelectionMode);
   const cancelPlaneSelection = useCadStore((s) => s.cancelPlaneSelection);
-  const createExtrude = useCadStore((s) => s.createExtrude);
   const exitSketchMode = useCadStore((s) => s.exitSketchMode);
   const exportMeshes = useCadStore(selectExportMeshes);
   const exportShapeHandles = useCadStore(selectExportShapeHandles);
@@ -480,6 +747,16 @@ export function Toolbar({
     }
   }, [exportMeshes, exportShapeHandles, documentName]);
 
+  // Handle import (stub)
+  const handleImport = React.useCallback((formatId: string) => {
+    if (onImport) {
+      onImport(formatId);
+    } else {
+      console.log("[Toolbar] Import not implemented:", formatId);
+      alert(`Import ${formatId.toUpperCase()} coming soon!`);
+    }
+  }, [onImport]);
+
   // Filter tools based on current mode
   const visibleTools = React.useMemo(() => {
     return TOOLS.filter(tool => {
@@ -504,94 +781,80 @@ export function Toolbar({
   }, [visibleTools]);
 
   return (
-    <div style={styles.toolbar}>
-      {/* Logo */}
-      <div style={styles.logo}>vibeCAD</div>
+    <div style={styles.toolbarContainer}>
+      {/* Scrollable toolbar content */}
+      <div style={styles.toolbarScrollable}>
+        {/* Logo */}
+        <div style={styles.logo}>vibeCAD</div>
 
-      {/* Undo/Redo */}
-      <button
-        style={{
-          ...styles.iconButton,
-          ...(canUndo ? {} : styles.iconButtonDisabled),
-        }}
-        onClick={undo}
-        disabled={!canUndo}
-        title="Undo (Ctrl+Z)"
-      >
-        ↩
-      </button>
-      <button
-        style={{
-          ...styles.iconButton,
-          ...(canRedo ? {} : styles.iconButtonDisabled),
-        }}
-        onClick={redo}
-        disabled={!canRedo}
-        title="Redo (Ctrl+Y)"
-      >
-        ↪
-      </button>
+        {/* Undo/Redo */}
+        <button
+          style={{
+            ...styles.iconButton,
+            ...(canUndo ? {} : styles.iconButtonDisabled),
+          }}
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+        >
+          ↩
+        </button>
+        <button
+          style={{
+            ...styles.iconButton,
+            ...(canRedo ? {} : styles.iconButtonDisabled),
+          }}
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+        >
+          ↪
+        </button>
 
-      <div style={styles.divider} />
+        <div style={styles.divider} />
 
-      {/* Mode indicator */}
-      {editorMode === "select-plane" && (
-        <div style={{
-          backgroundColor: "#ffa94d",
-          color: "#000",
-          padding: "4px 12px",
-          borderRadius: 4,
-          fontSize: 12,
-          fontWeight: 600,
-        }}>
-          SELECT PLANE
-        </div>
-      )}
-      {editorMode === "select-face" && (
-        <div style={{
-          backgroundColor: "#da77f2",
-          color: "#000",
-          padding: "4px 12px",
-          borderRadius: 4,
-          fontSize: 12,
-          fontWeight: 600,
-        }}>
-          {faceSelectionTarget?.type === "extrude-profile" ? "SELECT SKETCH" : "SELECT FACE"}
-        </div>
-      )}
-      {editorMode === "sketch" && (
-        <div style={{
-          backgroundColor: "#4dabf7",
-          color: "#000",
-          padding: "4px 12px",
-          borderRadius: 4,
-          fontSize: 12,
-          fontWeight: 600,
-        }}>
-          SKETCH MODE
-        </div>
-      )}
+        {/* Mode indicator */}
+        {editorMode === "select-plane" && (
+          <div style={{
+            backgroundColor: "#ffa94d",
+            color: "#000",
+            padding: "4px 12px",
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 600,
+          }}>
+            SELECT PLANE
+          </div>
+        )}
+        {editorMode === "select-face" && (
+          <div style={{
+            backgroundColor: "#da77f2",
+            color: "#000",
+            padding: "4px 12px",
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 600,
+          }}>
+            {faceSelectionTarget?.type === "extrude-profile" ? "SELECT SKETCH" : "SELECT FACE"}
+          </div>
+        )}
+        {editorMode === "sketch" && (
+          <div style={{
+            backgroundColor: "#4dabf7",
+            color: "#000",
+            padding: "4px 12px",
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 600,
+          }}>
+            SKETCH MODE
+          </div>
+        )}
 
-      {/* Selection Tools */}
-      {toolsByCategory.select.length > 0 && (
-        <div style={styles.toolGroup}>
-          {toolsByCategory.select.map((tool) => (
-            <ToolButton
-              key={tool.id}
-              tool={tool}
-              isActive={activeTool === tool.id}
-              onClick={() => handleToolClick(tool.id)}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Object Mode: Sketch creation */}
-      {toolsByCategory.sketch.length > 0 && (
-        <>
-          <div style={styles.divider} />
+        {/* Selection Tools */}
+        {toolsByCategory.select.length > 0 && (
           <div style={styles.toolGroup}>
-            {toolsByCategory.sketch.map((tool) => (
+            {toolsByCategory.select.map((tool) => (
               <ToolButton
                 key={tool.id}
                 tool={tool}
@@ -600,219 +863,211 @@ export function Toolbar({
               />
             ))}
           </div>
-        </>
-      )}
+        )}
 
-      {/* Sketch Mode: Drawing tools */}
-      {toolsByCategory["sketch-draw"].length > 0 && (
-        <>
-          <div style={styles.divider} />
-          <div style={styles.toolGroup}>
-            {toolsByCategory["sketch-draw"].map((tool) => (
-              <ToolButton
-                key={tool.id}
-                tool={tool}
-                isActive={activeTool === tool.id}
-                onClick={() => handleToolClick(tool.id)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+        {/* Object Mode: Sketch creation */}
+        {toolsByCategory.sketch.length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory.sketch.map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
-      {/* Object Mode: Operation Tools */}
-      {toolsByCategory.operation.length > 0 && (
-        <>
-          <div style={styles.divider} />
-          <div style={styles.toolGroup}>
-            {toolsByCategory.operation.map((tool) => (
-              <ToolButton
-                key={tool.id}
-                tool={tool}
-                isActive={activeTool === tool.id}
-                onClick={() => handleToolClick(tool.id)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+        {/* Sketch Mode: Drawing tools */}
+        {toolsByCategory["sketch-draw"].length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory["sketch-draw"].map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
-      {/* Object Mode: Modify Tools */}
-      {toolsByCategory.modify.length > 0 && (
-        <>
-          <div style={styles.divider} />
-          <div style={styles.toolGroup}>
-            {toolsByCategory.modify.map((tool) => (
-              <ToolButton
-                key={tool.id}
-                tool={tool}
-                isActive={activeTool === tool.id}
-                onClick={() => handleToolClick(tool.id)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+        {/* Object Mode: Operation Tools */}
+        {toolsByCategory.operation.length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory.operation.map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
-      {/* Cancel Plane Selection button */}
-      {editorMode === "select-plane" && (
-        <>
-          <div style={styles.divider} />
-          <button
-            style={{
-              ...styles.iconButton,
-              backgroundColor: "#ff6b6b",
-              color: "#fff",
-              padding: "4px 12px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-              width: "auto",
-            }}
-            onClick={cancelPlaneSelection}
-            title="Cancel (ESC)"
-          >
-            Cancel
-          </button>
-        </>
-      )}
+        {/* Object Mode: Modify Tools */}
+        {toolsByCategory.modify.length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory.modify.map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
 
-      {/* Face Selection Mode controls */}
-      {editorMode === "select-face" && (
-        <>
-          <div style={styles.divider} />
-          <button
-            style={{
-              ...styles.iconButton,
-              backgroundColor: "#ff6b6b",
-              color: "#fff",
-              padding: "4px 12px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-              width: "auto",
-            }}
-            onClick={() => {
-              if (pendingExtrude) {
-                cancelExtrude();
-              } else if (pendingRevolve) {
-                cancelRevolve();
-              } else if (pendingFillet) {
-                cancelFillet();
-              } else if (pendingBoolean) {
-                cancelBoolean();
-              } else {
-                exitFaceSelectionMode();
-              }
-            }}
-            title="Cancel (ESC)"
-          >
-            Cancel
-          </button>
-        </>
-      )}
+        {/* Cancel Plane Selection button */}
+        {editorMode === "select-plane" && (
+          <>
+            <div style={styles.divider} />
+            <button
+              style={{
+                ...styles.iconButton,
+                backgroundColor: "#ff6b6b",
+                color: "#fff",
+                padding: "4px 12px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                width: "auto",
+              }}
+              onClick={cancelPlaneSelection}
+              title="Cancel (ESC)"
+            >
+              Cancel
+            </button>
+          </>
+        )}
 
-      {/* Sketch Mode controls */}
-      {editorMode === "sketch" && (
-        <>
-          <div style={styles.divider} />
-          {/* Grid Snap Toggle */}
-          <button
-            style={{
-              ...styles.iconButton,
-              backgroundColor: gridSnappingEnabled ? "#4dabf7" : "#333",
-              color: gridSnappingEnabled ? "#000" : "#888",
-              padding: "4px 12px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 500,
-              width: "auto",
-            }}
-            onClick={toggleGridSnapping}
-            title={`Grid Snapping: ${gridSnappingEnabled ? "ON" : "OFF"}`}
-          >
-            ⊞ Snap
-          </button>
-          <button
-            style={{
-              ...styles.iconButton,
-              backgroundColor: "#ff6b6b",
-              color: "#fff",
-              padding: "4px 12px",
-              borderRadius: 4,
-              fontSize: 12,
-              fontWeight: 600,
-              width: "auto",
-            }}
-            onClick={exitSketchMode}
-            title="Exit Sketch Mode (ESC)"
-          >
-            Exit Sketch
-          </button>
-        </>
-      )}
+        {/* Face Selection Mode controls */}
+        {editorMode === "select-face" && (
+          <>
+            <div style={styles.divider} />
+            <button
+              style={{
+                ...styles.iconButton,
+                backgroundColor: "#ff6b6b",
+                color: "#fff",
+                padding: "4px 12px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                width: "auto",
+              }}
+              onClick={() => {
+                if (pendingExtrude) {
+                  cancelExtrude();
+                } else if (pendingRevolve) {
+                  cancelRevolve();
+                } else if (pendingFillet) {
+                  cancelFillet();
+                } else if (pendingBoolean) {
+                  cancelBoolean();
+                } else {
+                  exitFaceSelectionMode();
+                }
+              }}
+              title="Cancel (ESC)"
+            >
+              Cancel
+            </button>
+          </>
+        )}
 
-      {/* Spacer */}
-      <div style={styles.spacer} />
+        {/* Sketch Mode controls */}
+        {editorMode === "sketch" && (
+          <>
+            <div style={styles.divider} />
+            {/* Grid Snap Toggle */}
+            <button
+              style={{
+                ...styles.iconButton,
+                backgroundColor: gridSnappingEnabled ? "#4dabf7" : "#333",
+                color: gridSnappingEnabled ? "#000" : "#888",
+                padding: "4px 12px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 500,
+                width: "auto",
+              }}
+              onClick={toggleGridSnapping}
+              title={`Grid Snapping: ${gridSnappingEnabled ? "ON" : "OFF"}`}
+            >
+              ⊞ Snap
+            </button>
+            <button
+              style={{
+                ...styles.iconButton,
+                backgroundColor: "#ff6b6b",
+                color: "#fff",
+                padding: "4px 12px",
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                width: "auto",
+              }}
+              onClick={exitSketchMode}
+              title="Exit Sketch Mode (ESC)"
+            >
+              Exit Sketch
+            </button>
+          </>
+        )}
 
-      {/* Status */}
-      {isRebuilding && (
-        <span style={styles.statusText}>⟳ Rebuilding...</span>
-      )}
+        {/* Spacer */}
+        <div style={styles.spacer} />
 
-      {/* Right side actions */}
-      <div style={styles.divider} />
+        {/* Status */}
+        {isRebuilding && (
+          <span style={styles.statusText}>⟳ Rebuilding...</span>
+        )}
+      </div>
 
-      {/* Export dropdown */}
-      <ExportDropdown
-        onExport={handleExport}
-        hasGeometry={exportMeshes.length > 0}
-        hasShapeHandles={exportShapeHandles.length > 0}
-      />
-
-      {/* Save */}
-      {onSaveProject && (
-        <button
-          style={styles.iconButton}
-          onClick={onSaveProject}
-          title="Save Project (Ctrl+S)"
-        >
-          &#x1F4BE;
-        </button>
-      )}
-
-      {/* Download */}
-      {onDownloadProject && (
-        <button
-          style={styles.iconButton}
-          onClick={onDownloadProject}
-          title="Download Project"
-        >
-          &#x2B73;
-        </button>
-      )}
-
-      {/* Library */}
-      {onOpenLibrary && (
-        <button
-          style={styles.iconButton}
-          onClick={onOpenLibrary}
-          title="My Library (Ctrl+O)"
-        >
-          &#x1F4C1;
-        </button>
-      )}
-
-      {/* Settings */}
-      {onOpenSettings && (
-        <button
-          style={styles.iconButton}
-          onClick={onOpenSettings}
-          title="Settings"
-        >
-          &#x2699;
-        </button>
-      )}
+      {/* Fixed right section with profile menu */}
+      <div style={styles.toolbarFixed}>
+        <ProfileMenu
+          onNew={onNewProject || (() => {
+            console.log("[Toolbar] New project not implemented");
+            alert("New project coming soon!");
+          })}
+          onOpen={onOpenLibrary || (() => {
+            console.log("[Toolbar] Open library not implemented");
+          })}
+          onSave={onSaveProject || (() => {
+            console.log("[Toolbar] Save project not implemented");
+          })}
+          onDownload={onDownloadProject || (() => {
+            console.log("[Toolbar] Download project not implemented");
+          })}
+          onImport={handleImport}
+          onExport={handleExport}
+          onSettings={onOpenSettings || (() => {
+            console.log("[Toolbar] Settings not implemented");
+          })}
+          onAbout={onOpenAbout || (() => {
+            console.log("[Toolbar] About not implemented");
+          })}
+          hasGeometry={exportMeshes.length > 0}
+          hasShapeHandles={exportShapeHandles.length > 0}
+        />
+      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import React, { useEffect, useState } from "react";
 import { EditorLayout } from "../layouts/EditorLayout";
 import { Toolbar, Viewport, OpTimeline, PropertiesPanel, SketchCanvas } from "../components";
 import { SettingsModal } from "../components/SettingsModal";
+import { AboutModal } from "../components/AboutModal";
 import { MyLibrary } from "../components/MyLibrary";
 import { useCadStore } from "../store";
 import { useProjectStore } from "../store/project-store";
@@ -65,9 +66,11 @@ function StatusBar() {
 export function Editor() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const document = useCadStore((s) => s.document);
   const saveProject = useProjectStore((s) => s.saveProject);
   const downloadProject = useProjectStore((s) => s.downloadProject);
+  const resetDocument = useCadStore((s) => s.resetDocument);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -106,14 +109,14 @@ export function Editor() {
       }
 
       // Escape to clear selection (unless a modal is open)
-      if (e.key === "Escape" && !settingsOpen && !libraryOpen) {
+      if (e.key === "Escape" && !settingsOpen && !libraryOpen && !aboutOpen) {
         useCadStore.getState().setSelection(new Set());
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [document, saveProject, settingsOpen, libraryOpen]);
+  }, [document, saveProject, settingsOpen, libraryOpen, aboutOpen]);
 
   return (
     <>
@@ -124,6 +127,12 @@ export function Editor() {
             onOpenLibrary={() => setLibraryOpen(true)}
             onSaveProject={() => saveProject(document)}
             onDownloadProject={() => downloadProject(document)}
+            onNewProject={() => {
+              if (confirm("Create a new project? Unsaved changes will be lost.")) {
+                resetDocument();
+              }
+            }}
+            onOpenAbout={() => setAboutOpen(true)}
           />
         }
         leftPanel={<OpTimeline />}
@@ -145,6 +154,10 @@ export function Editor() {
       <MyLibrary
         isOpen={libraryOpen}
         onClose={() => setLibraryOpen(false)}
+      />
+      <AboutModal
+        isOpen={aboutOpen}
+        onClose={() => setAboutOpen(false)}
       />
     </>
   );
