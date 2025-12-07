@@ -6,6 +6,7 @@ export {
   selectParams,
   selectSelection,
   selectIsRebuilding,
+  selectExportMeshes,
   type CadStore,
 } from "./cad-store";
 

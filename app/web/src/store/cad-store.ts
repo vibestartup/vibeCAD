@@ -25,6 +25,7 @@ import type {
   ArcPrimitive,
   Sketch,
 } from "@vibecad/core";
+import type { ExportableMesh } from "../utils/stl-export";
 import {
   createDocumentWithCube,
   getDefaultStudio,
@@ -138,6 +139,9 @@ interface CadState {
     opId: string;
     faceIndex: number;
   } | null;
+
+  // Export mesh data (populated by Viewport for export)
+  exportMeshes: ExportableMesh[];
 }
 
 interface CadActions {
@@ -250,6 +254,9 @@ interface CadActions {
 
   // Hover state for face selection
   setHoveredFace: (face: CadState["hoveredFace"]) => void;
+
+  // Export actions
+  setExportMeshes: (meshes: ExportableMesh[]) => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -285,6 +292,7 @@ function createInitialState(): CadState {
     pendingFillet: null,
     pendingBoolean: null,
     hoveredFace: null,
+    exportMeshes: [],
   };
 }
 
@@ -1674,6 +1682,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
   setHoveredFace: (face) => {
     set({ hoveredFace: face });
   },
+
+  setExportMeshes: (meshes) => {
+    set({ exportMeshes: meshes });
+  },
 }));
 
 // ============================================================================
@@ -1696,3 +1708,4 @@ export const selectParams = (state: CadStore) => state.document.params;
 export const selectSelection = (state: CadStore) => state.selection;
 export const selectIsRebuilding = (state: CadStore) => state.isRebuilding;
 export const selectTimelinePosition = (state: CadStore) => state.timelinePosition;
+export const selectExportMeshes = (state: CadStore) => state.exportMeshes;

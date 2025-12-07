@@ -3,7 +3,8 @@
  */
 
 import React from "react";
-import { useCadStore, selectIsRebuilding } from "../store";
+import { useCadStore, selectIsRebuilding, selectExportMeshes } from "../store";
+import { exportSTL } from "../utils/stl-export";
 
 // Tool categories
 type ToolCategory = "select" | "sketch" | "sketch-draw" | "primitive" | "operation" | "modify";
@@ -142,6 +143,70 @@ const styles = {
     fontSize: 12,
     color: "#888",
   } as React.CSSProperties,
+
+  dropdownContainer: {
+    position: "relative",
+    display: "inline-block",
+  } as React.CSSProperties,
+
+  dropdownButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    padding: "4px 10px",
+    border: "none",
+    borderRadius: 4,
+    backgroundColor: "transparent",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 13,
+    transition: "background-color 0.15s, color 0.15s",
+    minWidth: 70,
+  } as React.CSSProperties,
+
+  dropdownButtonHover: {
+    backgroundColor: "#333",
+    color: "#fff",
+  } as React.CSSProperties,
+
+  dropdownMenu: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    marginTop: 4,
+    backgroundColor: "#252530",
+    border: "1px solid #333",
+    borderRadius: 4,
+    minWidth: 140,
+    zIndex: 1000,
+    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+  } as React.CSSProperties,
+
+  dropdownItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    width: "100%",
+    padding: "8px 12px",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 12,
+    textAlign: "left",
+    transition: "background-color 0.15s",
+  } as React.CSSProperties,
+
+  dropdownItemHover: {
+    backgroundColor: "#333",
+    color: "#fff",
+  } as React.CSSProperties,
+
+  dropdownItemDisabled: {
+    opacity: 0.4,
+    cursor: "not-allowed",
+  } as React.CSSProperties,
 };
 
 interface ToolButtonProps {
@@ -171,6 +236,109 @@ function ToolButton({ tool, isActive, onClick }: ToolButtonProps) {
   );
 }
 
+// Export format options
+interface ExportFormat {
+  id: string;
+  label: string;
+  extension: string;
+  enabled: boolean;
+}
+
+const EXPORT_FORMATS: ExportFormat[] = [
+  { id: "stl", label: "STL", extension: ".stl", enabled: true },
+  { id: "step", label: "STEP", extension: ".step", enabled: false },
+  { id: "obj", label: "OBJ", extension: ".obj", enabled: false },
+  { id: "gltf", label: "glTF", extension: ".gltf", enabled: false },
+];
+
+interface ExportDropdownProps {
+  onExportSTL: () => void;
+  hasGeometry: boolean;
+}
+
+function ExportDropdown({ onExportSTL, hasGeometry }: ExportDropdownProps) {
+  const [isOpen, setIsOpen] = React.useState(false);
+  const [isHovered, setIsHovered] = React.useState(false);
+  const [hoveredItem, setHoveredItem] = React.useState<string | null>(null);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  React.useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [isOpen]);
+
+  const handleExport = (format: ExportFormat) => {
+    if (!format.enabled || !hasGeometry) return;
+
+    if (format.id === "stl") {
+      onExportSTL();
+    }
+    setIsOpen(false);
+  };
+
+  return (
+    <div style={styles.dropdownContainer} ref={dropdownRef}>
+      <button
+        style={{
+          ...styles.dropdownButton,
+          ...(isHovered || isOpen ? styles.dropdownButtonHover : {}),
+        }}
+        onClick={() => setIsOpen(!isOpen)}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        title="Export model to file"
+      >
+        <span>&#x2B73;</span>
+        <span>Export</span>
+        <span style={{ fontSize: 8, marginLeft: 2 }}>{isOpen ? "▲" : "▼"}</span>
+      </button>
+
+      {isOpen && (
+        <div style={styles.dropdownMenu}>
+          {EXPORT_FORMATS.map((format) => {
+            const isDisabled = !format.enabled || !hasGeometry;
+            const isItemHovered = hoveredItem === format.id && !isDisabled;
+
+            return (
+              <button
+                key={format.id}
+                style={{
+                  ...styles.dropdownItem,
+                  ...(isItemHovered ? styles.dropdownItemHover : {}),
+                  ...(isDisabled ? styles.dropdownItemDisabled : {}),
+                }}
+                onClick={() => handleExport(format)}
+                onMouseEnter={() => setHoveredItem(format.id)}
+                onMouseLeave={() => setHoveredItem(null)}
+                disabled={isDisabled}
+                title={
+                  !format.enabled
+                    ? `${format.label} export coming soon`
+                    : !hasGeometry
+                    ? "No geometry to export"
+                    : `Export as ${format.label}`
+                }
+              >
+                <span style={{ fontWeight: 500 }}>{format.label}</span>
+                <span style={{ color: "#666", fontSize: 11 }}>{format.extension}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ToolbarProps {
   onOpenSettings?: () => void;
   onOpenLibrary?: () => void;
@@ -193,6 +361,8 @@ export function Toolbar({
   const cancelPlaneSelection = useCadStore((s) => s.cancelPlaneSelection);
   const createExtrude = useCadStore((s) => s.createExtrude);
   const exitSketchMode = useCadStore((s) => s.exitSketchMode);
+  const exportMeshes = useCadStore(selectExportMeshes);
+  const documentName = useCadStore((s) => s.document.name);
 
   const canUndo = useCadStore((s) => s.canUndo());
   const canRedo = useCadStore((s) => s.canRedo());
@@ -250,6 +420,17 @@ export function Toolbar({
         break;
     }
   }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, setActiveTool]);
+
+  // Handle STL export
+  const handleExportSTL = React.useCallback(() => {
+    if (exportMeshes.length === 0) {
+      console.warn("[Toolbar] No meshes available for export");
+      return;
+    }
+    const filename = documentName.replace(/\s+/g, "_") || "model";
+    exportSTL(exportMeshes, filename, true);
+    console.log("[Toolbar] Exported STL:", filename);
+  }, [exportMeshes, documentName]);
 
   // Filter tools based on current mode
   const visibleTools = React.useMemo(() => {
@@ -529,6 +710,12 @@ export function Toolbar({
 
       {/* Right side actions */}
       <div style={styles.divider} />
+
+      {/* Export dropdown */}
+      <ExportDropdown
+        onExportSTL={handleExportSTL}
+        hasGeometry={exportMeshes.length > 0}
+      />
 
       {/* Save */}
       {onSaveProject && (

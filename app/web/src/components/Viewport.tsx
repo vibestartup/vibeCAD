@@ -9,6 +9,7 @@ import { useCadStore } from "../store";
 import { useSettingsStore } from "../store/settings-store";
 import { loadOcc, getOcc } from "@vibecad/kernel";
 import type { MeshData, OccApi } from "@vibecad/kernel";
+import type { ExportableMesh } from "../utils/stl-export";
 import {
   sketch as sketchUtils,
   getDatumPlanes,
@@ -643,6 +644,7 @@ export function Viewport() {
   const setPendingExtrudeBodyFace = useCadStore((s) => s.setPendingExtrudeBodyFace);
   const hoveredFace = useCadStore((s) => s.hoveredFace);
   const setHoveredFace = useCadStore((s) => s.setHoveredFace);
+  const setExportMeshes = useCadStore((s) => s.setExportMeshes);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -878,7 +880,11 @@ export function Viewport() {
 
   // Build and render geometry from the part studio operations
   useEffect(() => {
-    if (!occApi || !meshGroupRef.current || !studio) return;
+    if (!occApi || !meshGroupRef.current || !studio) {
+      // Clear export meshes if no geometry available
+      setExportMeshes([]);
+      return;
+    }
 
     // Clear existing meshes
     const meshGroup = meshGroupRef.current;
@@ -894,6 +900,9 @@ export function Viewport() {
         (child.material as THREE.Material).dispose();
       }
     }
+
+    // Collect mesh data for export
+    const exportableMeshes: ExportableMesh[] = [];
 
     try {
       // Determine how many operations to process based on timeline position
@@ -978,6 +987,14 @@ export function Viewport() {
           // Mesh the shape
           const meshData = occApi.mesh(solid, 0.5);
 
+          // Store mesh data for export
+          exportableMeshes.push({
+            positions: new Float32Array(meshData.positions),
+            normals: new Float32Array(meshData.normals),
+            indices: new Uint32Array(meshData.indices),
+            name: op.name,
+          });
+
           // Create Three.js mesh
           const mesh = createMeshFromData(meshData);
           // Add userData to identify this mesh's operation
@@ -998,10 +1015,14 @@ export function Viewport() {
           occApi.freeShape(solid);
         }
       }
+
+      // Update export meshes in store
+      setExportMeshes(exportableMeshes);
     } catch (err) {
       console.error("Failed to create geometry:", err);
+      setExportMeshes([]);
     }
-  }, [occApi, studio, timelinePosition]);
+  }, [occApi, studio, timelinePosition, setExportMeshes]);
 
   // Render sketches in 3D space
   useEffect(() => {
