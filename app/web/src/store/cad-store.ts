@@ -15,6 +15,9 @@ import type {
   Parameter,
   SketchOp,
   ExtrudeOp,
+  RevolveOp,
+  BooleanOp,
+  FilletOp,
   PrimitiveId,
   PointPrimitive,
   LinePrimitive,
@@ -103,6 +106,27 @@ interface CadState {
     bodyFace: { opId: string; faceIndex: number } | null;
     depth: number;
     direction: "normal" | "reverse" | "symmetric";
+  } | null;
+
+  // Pending revolve
+  pendingRevolve: {
+    sketchId: string | null;
+    angle: number; // in degrees
+    axis: "x" | "y" | "sketch-x" | "sketch-y";
+  } | null;
+
+  // Pending fillet
+  pendingFillet: {
+    targetOpId: string | null;
+    edgeIndices: number[];
+    radius: number;
+  } | null;
+
+  // Pending boolean
+  pendingBoolean: {
+    operation: "union" | "subtract" | "intersect";
+    targetOpId: string | null;
+    toolOpId: string | null;
   } | null;
 
   // Hovered face for face selection mode
@@ -198,6 +222,32 @@ interface CadActions {
   confirmExtrude: () => void;
   cancelExtrude: () => void;
 
+  // Revolve workflow
+  startRevolve: () => void;
+  setPendingRevolveSketch: (sketchId: string | null) => void;
+  setPendingRevolveAngle: (angle: number) => void;
+  setPendingRevolveAxis: (axis: "x" | "y" | "sketch-x" | "sketch-y") => void;
+  confirmRevolve: () => void;
+  cancelRevolve: () => void;
+  createRevolve: (sketchId: SketchId, angle?: number, axis?: "x" | "y" | "sketch-x" | "sketch-y") => OpId | null;
+
+  // Fillet workflow
+  startFillet: () => void;
+  setPendingFilletTarget: (opId: string | null) => void;
+  setPendingFilletRadius: (radius: number) => void;
+  toggleFilletEdge: (edgeIndex: number) => void;
+  confirmFillet: () => void;
+  cancelFillet: () => void;
+  createFillet: (targetOpId: OpId, edgeIndices: number[], radius: number) => OpId | null;
+
+  // Boolean workflow
+  startBoolean: (operation: "union" | "subtract" | "intersect") => void;
+  setPendingBooleanTarget: (opId: string | null) => void;
+  setPendingBooleanTool: (opId: string | null) => void;
+  confirmBoolean: () => void;
+  cancelBoolean: () => void;
+  createBoolean: (operation: "union" | "subtract" | "intersect", targetOpId: OpId, toolOpId: OpId) => OpId | null;
+
   // Hover state for face selection
   setHoveredFace: (face: CadState["hoveredFace"]) => void;
 }
@@ -231,6 +281,9 @@ function createInitialState(): CadState {
     faceSelectionTarget: null,
     selectedFace: null,
     pendingExtrude: null,
+    pendingRevolve: null,
+    pendingFillet: null,
+    pendingBoolean: null,
     hoveredFace: null,
   };
 }
@@ -1271,6 +1324,351 @@ export const useCadStore = create<CadStore>((set, get) => ({
       selectedFace: null,
       hoveredFace: null,
     });
+  },
+
+  // Revolve workflow
+  startRevolve: () => {
+    const { activeSketchId } = get();
+    if (activeSketchId) {
+      set({
+        pendingRevolve: { sketchId: activeSketchId, angle: 360, axis: "sketch-x" },
+        activeTool: "revolve",
+      });
+    } else {
+      set({
+        pendingRevolve: { sketchId: null, angle: 360, axis: "sketch-x" },
+        activeTool: "revolve",
+        editorMode: "select-face",
+        faceSelectionTarget: { type: "extrude-profile" },
+      });
+    }
+  },
+
+  setPendingRevolveSketch: (sketchId) => {
+    const { pendingRevolve } = get();
+    if (pendingRevolve) {
+      set({ pendingRevolve: { ...pendingRevolve, sketchId } });
+    }
+  },
+
+  setPendingRevolveAngle: (angle) => {
+    const { pendingRevolve } = get();
+    if (pendingRevolve) {
+      set({ pendingRevolve: { ...pendingRevolve, angle } });
+    }
+  },
+
+  setPendingRevolveAxis: (axis) => {
+    const { pendingRevolve } = get();
+    if (pendingRevolve) {
+      set({ pendingRevolve: { ...pendingRevolve, axis } });
+    }
+  },
+
+  confirmRevolve: () => {
+    const { pendingRevolve, createRevolve } = get();
+    if (pendingRevolve?.sketchId) {
+      createRevolve(pendingRevolve.sketchId as any, pendingRevolve.angle, pendingRevolve.axis);
+    }
+    set({
+      pendingRevolve: null,
+      activeTool: "select",
+      selectedFace: null,
+      hoveredFace: null,
+    });
+  },
+
+  cancelRevolve: () => {
+    set({
+      pendingRevolve: null,
+      activeTool: "select",
+      editorMode: "object",
+      faceSelectionTarget: null,
+      selectedFace: null,
+      hoveredFace: null,
+    });
+  },
+
+  createRevolve: (sketchId, angle = 360, axis = "sketch-x") => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const sketch = studio.sketches.get(sketchId);
+    if (!sketch) return null;
+
+    // Find the sketch operation
+    let sketchOpId: OpId | null = null;
+    for (const [opId, node] of studio.opGraph) {
+      if (node.op.type === "sketch" && node.op.sketchId === sketchId) {
+        sketchOpId = opId;
+        break;
+      }
+    }
+
+    // Get the plane for axis calculation
+    const plane = studio.planes.get(sketch.planeId);
+    if (!plane) return null;
+
+    // Calculate axis based on option
+    let axisOrigin: [number, number, number] = [0, 0, 0];
+    let axisDir: [number, number, number];
+    switch (axis) {
+      case "x":
+        axisDir = [1, 0, 0];
+        break;
+      case "y":
+        axisDir = [0, 1, 0];
+        break;
+      case "sketch-x":
+        axisDir = plane.axisX as [number, number, number];
+        axisOrigin = plane.origin as [number, number, number];
+        break;
+      case "sketch-y":
+        axisDir = plane.axisY as [number, number, number];
+        axisOrigin = plane.origin as [number, number, number];
+        break;
+    }
+
+    const revolveOpId = newId("Op") as OpId;
+    const revolveOp: RevolveOp = {
+      id: revolveOpId,
+      type: "revolve",
+      name: `Revolve ${sketch.name}`,
+      suppressed: false,
+      profile: {
+        type: "sketch",
+        sketchId: sketchId,
+      },
+      axis: { origin: axisOrigin, direction: axisDir },
+      angle: dimLiteral(angle * Math.PI / 180), // Convert to radians
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(revolveOpId, {
+      op: revolveOp,
+      deps: sketchOpId ? [sketchOpId] : [],
+    });
+
+    const newOpOrder = [...studio.opOrder, revolveOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return revolveOpId;
+  },
+
+  // Fillet workflow
+  startFillet: () => {
+    set({
+      pendingFillet: { targetOpId: null, edgeIndices: [], radius: 5 },
+      activeTool: "fillet",
+    });
+  },
+
+  setPendingFilletTarget: (opId) => {
+    const { pendingFillet } = get();
+    if (pendingFillet) {
+      set({ pendingFillet: { ...pendingFillet, targetOpId: opId, edgeIndices: [] } });
+    }
+  },
+
+  setPendingFilletRadius: (radius) => {
+    const { pendingFillet } = get();
+    if (pendingFillet) {
+      set({ pendingFillet: { ...pendingFillet, radius } });
+    }
+  },
+
+  toggleFilletEdge: (edgeIndex) => {
+    const { pendingFillet } = get();
+    if (pendingFillet) {
+      const edges = pendingFillet.edgeIndices.includes(edgeIndex)
+        ? pendingFillet.edgeIndices.filter((e) => e !== edgeIndex)
+        : [...pendingFillet.edgeIndices, edgeIndex];
+      set({ pendingFillet: { ...pendingFillet, edgeIndices: edges } });
+    }
+  },
+
+  confirmFillet: () => {
+    const { pendingFillet, createFillet } = get();
+    if (pendingFillet?.targetOpId && pendingFillet.edgeIndices.length > 0) {
+      createFillet(pendingFillet.targetOpId as OpId, pendingFillet.edgeIndices, pendingFillet.radius);
+    }
+    set({
+      pendingFillet: null,
+      activeTool: "select",
+    });
+  },
+
+  cancelFillet: () => {
+    set({
+      pendingFillet: null,
+      activeTool: "select",
+    });
+  },
+
+  createFillet: (targetOpId, edgeIndices, radius) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const targetOp = studio.opGraph.get(targetOpId);
+    if (!targetOp) return null;
+
+    const filletOpId = newId("Op") as OpId;
+    const filletOp: FilletOp = {
+      id: filletOpId,
+      type: "fillet",
+      name: `Fillet on ${targetOp.op.name}`,
+      suppressed: false,
+      targetOp: targetOpId,
+      edges: edgeIndices.map((index) => ({
+        opId: targetOpId,
+        subType: "edge" as const,
+        index,
+      })),
+      radius: dimLiteral(radius),
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(filletOpId, {
+      op: filletOp,
+      deps: [targetOpId],
+    });
+
+    const newOpOrder = [...studio.opOrder, filletOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return filletOpId;
+  },
+
+  // Boolean workflow
+  startBoolean: (operation) => {
+    set({
+      pendingBoolean: { operation, targetOpId: null, toolOpId: null },
+      activeTool: operation,
+    });
+  },
+
+  setPendingBooleanTarget: (opId) => {
+    const { pendingBoolean } = get();
+    if (pendingBoolean) {
+      set({ pendingBoolean: { ...pendingBoolean, targetOpId: opId } });
+    }
+  },
+
+  setPendingBooleanTool: (opId) => {
+    const { pendingBoolean } = get();
+    if (pendingBoolean) {
+      set({ pendingBoolean: { ...pendingBoolean, toolOpId: opId } });
+    }
+  },
+
+  confirmBoolean: () => {
+    const { pendingBoolean, createBoolean } = get();
+    if (pendingBoolean?.targetOpId && pendingBoolean?.toolOpId) {
+      createBoolean(
+        pendingBoolean.operation,
+        pendingBoolean.targetOpId as OpId,
+        pendingBoolean.toolOpId as OpId
+      );
+    }
+    set({
+      pendingBoolean: null,
+      activeTool: "select",
+    });
+  },
+
+  cancelBoolean: () => {
+    set({
+      pendingBoolean: null,
+      activeTool: "select",
+    });
+  },
+
+  createBoolean: (operation, targetOpId, toolOpId) => {
+    const { document, activeStudioId, historyState } = get();
+    if (!activeStudioId) return null;
+
+    const studio = document.partStudios.get(activeStudioId);
+    if (!studio) return null;
+
+    const targetOp = studio.opGraph.get(targetOpId);
+    const toolOp = studio.opGraph.get(toolOpId);
+    if (!targetOp || !toolOp) return null;
+
+    const booleanOpId = newId("Op") as OpId;
+    const booleanOp: BooleanOp = {
+      id: booleanOpId,
+      type: "boolean",
+      name: `${operation.charAt(0).toUpperCase() + operation.slice(1)}: ${targetOp.op.name} & ${toolOp.op.name}`,
+      suppressed: false,
+      operation: operation,
+      targetOp: targetOpId,
+      toolOp: toolOpId,
+    };
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(booleanOpId, {
+      op: booleanOp,
+      deps: [targetOpId, toolOpId],
+    });
+
+    const newOpOrder = [...studio.opOrder, booleanOpId];
+
+    const newStudio = {
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    };
+
+    const newPartStudios = new Map(document.partStudios);
+    newPartStudios.set(activeStudioId, newStudio);
+
+    const newDoc = { ...document, partStudios: newPartStudios };
+
+    set({
+      document: newDoc,
+      historyState: pushState(historyState, newDoc),
+      timelinePosition: null,
+    });
+
+    return booleanOpId;
   },
 
   setHoveredFace: (face) => {

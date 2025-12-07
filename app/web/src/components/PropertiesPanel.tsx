@@ -518,6 +518,346 @@ function PendingExtrudePanel() {
 }
 
 // ============================================================================
+// Pending Revolve Panel
+// ============================================================================
+
+function PendingRevolvePanel() {
+  const pendingRevolve = useCadStore((s) => s.pendingRevolve);
+  const setPendingRevolveSketch = useCadStore((s) => s.setPendingRevolveSketch);
+  const setPendingRevolveAngle = useCadStore((s) => s.setPendingRevolveAngle);
+  const setPendingRevolveAxis = useCadStore((s) => s.setPendingRevolveAxis);
+  const confirmRevolve = useCadStore((s) => s.confirmRevolve);
+  const cancelRevolve = useCadStore((s) => s.cancelRevolve);
+
+  const [angleValue, setAngleValue] = React.useState(
+    pendingRevolve?.angle?.toString() ?? "360"
+  );
+
+  React.useEffect(() => {
+    if (pendingRevolve?.angle !== undefined) {
+      setAngleValue(pendingRevolve.angle.toString());
+    }
+  }, [pendingRevolve?.angle]);
+
+  if (!pendingRevolve) return null;
+
+  const handleAngleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setAngleValue(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0 && num <= 360) {
+      setPendingRevolveAngle(num);
+    }
+  };
+
+  const handleAxisChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPendingRevolveAxis(e.target.value as "x" | "y" | "sketch-x" | "sketch-y");
+  };
+
+  const handleConfirm = () => {
+    const num = parseFloat(angleValue);
+    if (!isNaN(num) && num > 0) {
+      setPendingRevolveAngle(num);
+    }
+    confirmRevolve();
+  };
+
+  const handleClearSketch = () => {
+    setPendingRevolveSketch(null);
+  };
+
+  const canConfirm = pendingRevolve.sketchId && parseFloat(angleValue) > 0;
+
+  return (
+    <div style={styles.pendingPanel}>
+      <div style={styles.pendingPanelTitle}>
+        <span>⟳</span>
+        <span>New Revolve</span>
+      </div>
+
+      <FaceSelector
+        label="Profile (Sketch)"
+        value={pendingRevolve.sketchId}
+        targetType="extrude-profile"
+        onClear={handleClearSketch}
+      />
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Axis</label>
+        <select
+          style={styles.select}
+          value={pendingRevolve.axis}
+          onChange={handleAxisChange}
+        >
+          <option value="sketch-x">Sketch X Axis</option>
+          <option value="sketch-y">Sketch Y Axis</option>
+          <option value="x">World X Axis</option>
+          <option value="y">World Y Axis</option>
+        </select>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Angle (degrees)</label>
+        <input
+          type="number"
+          value={angleValue}
+          onChange={handleAngleChange}
+          style={styles.input}
+          placeholder="e.g., 360"
+          min={0}
+          max={360}
+          step={15}
+        />
+      </div>
+
+      <div style={styles.buttonRow}>
+        <button style={styles.secondaryButton} onClick={cancelRevolve}>
+          Cancel
+        </button>
+        <button
+          style={{
+            ...styles.primaryButton,
+            ...(canConfirm ? {} : styles.primaryButtonDisabled),
+          }}
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+        >
+          Create Revolve
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Pending Fillet Panel
+// ============================================================================
+
+function PendingFilletPanel() {
+  const pendingFillet = useCadStore((s) => s.pendingFillet);
+  const setPendingFilletTarget = useCadStore((s) => s.setPendingFilletTarget);
+  const setPendingFilletRadius = useCadStore((s) => s.setPendingFilletRadius);
+  const confirmFillet = useCadStore((s) => s.confirmFillet);
+  const cancelFillet = useCadStore((s) => s.cancelFillet);
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+
+  const [radiusValue, setRadiusValue] = React.useState(
+    pendingFillet?.radius?.toString() ?? "5"
+  );
+
+  React.useEffect(() => {
+    if (pendingFillet?.radius !== undefined) {
+      setRadiusValue(pendingFillet.radius.toString());
+    }
+  }, [pendingFillet?.radius]);
+
+  if (!pendingFillet) return null;
+
+  // Get available operations that produce geometry
+  const availableOps = React.useMemo(() => {
+    if (!studio) return [];
+    return Array.from(studio.opGraph.entries())
+      .filter(([, node]) => node.op.type === "extrude" || node.op.type === "revolve")
+      .map(([id, node]) => ({ id, name: node.op.name }));
+  }, [studio]);
+
+  const handleRadiusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setRadiusValue(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0) {
+      setPendingFilletRadius(num);
+    }
+  };
+
+  const handleTargetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPendingFilletTarget(e.target.value || null);
+  };
+
+  const handleConfirm = () => {
+    const num = parseFloat(radiusValue);
+    if (!isNaN(num) && num > 0) {
+      setPendingFilletRadius(num);
+    }
+    confirmFillet();
+  };
+
+  // Note: Edge selection would require more complex UI - for now we'll apply to all edges
+  const canConfirm = pendingFillet.targetOpId && parseFloat(radiusValue) > 0;
+
+  return (
+    <div style={styles.pendingPanel}>
+      <div style={styles.pendingPanelTitle}>
+        <span>⌓</span>
+        <span>New Fillet</span>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Target Body</label>
+        <select
+          style={styles.select}
+          value={pendingFillet.targetOpId || ""}
+          onChange={handleTargetChange}
+        >
+          <option value="">Select a body...</option>
+          {availableOps.map((op) => (
+            <option key={op.id} value={op.id}>
+              {op.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Radius (mm)</label>
+        <input
+          type="number"
+          value={radiusValue}
+          onChange={handleRadiusChange}
+          style={styles.input}
+          placeholder="e.g., 5"
+          min={0}
+          step={1}
+        />
+      </div>
+
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+        Note: Fillet will be applied to all edges of the selected body.
+      </div>
+
+      <div style={styles.buttonRow}>
+        <button style={styles.secondaryButton} onClick={cancelFillet}>
+          Cancel
+        </button>
+        <button
+          style={{
+            ...styles.primaryButton,
+            ...(canConfirm ? {} : styles.primaryButtonDisabled),
+          }}
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+        >
+          Create Fillet
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Pending Boolean Panel
+// ============================================================================
+
+function PendingBooleanPanel() {
+  const pendingBoolean = useCadStore((s) => s.pendingBoolean);
+  const setPendingBooleanTarget = useCadStore((s) => s.setPendingBooleanTarget);
+  const setPendingBooleanTool = useCadStore((s) => s.setPendingBooleanTool);
+  const confirmBoolean = useCadStore((s) => s.confirmBoolean);
+  const cancelBoolean = useCadStore((s) => s.cancelBoolean);
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+
+  if (!pendingBoolean) return null;
+
+  // Get available operations that produce geometry
+  const availableOps = React.useMemo(() => {
+    if (!studio) return [];
+    return Array.from(studio.opGraph.entries())
+      .filter(([, node]) => node.op.type === "extrude" || node.op.type === "revolve")
+      .map(([id, node]) => ({ id, name: node.op.name }));
+  }, [studio]);
+
+  const handleTargetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPendingBooleanTarget(e.target.value || null);
+  };
+
+  const handleToolChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setPendingBooleanTool(e.target.value || null);
+  };
+
+  const handleConfirm = () => {
+    confirmBoolean();
+  };
+
+  const opLabel =
+    pendingBoolean.operation === "union"
+      ? "Union"
+      : pendingBoolean.operation === "subtract"
+      ? "Subtract"
+      : "Intersect";
+
+  const canConfirm = pendingBoolean.targetOpId && pendingBoolean.toolOpId;
+
+  return (
+    <div style={styles.pendingPanel}>
+      <div style={styles.pendingPanelTitle}>
+        <span>
+          {pendingBoolean.operation === "union"
+            ? "⊕"
+            : pendingBoolean.operation === "subtract"
+            ? "⊖"
+            : "⊗"}
+        </span>
+        <span>New {opLabel}</span>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Target Body</label>
+        <select
+          style={styles.select}
+          value={pendingBoolean.targetOpId || ""}
+          onChange={handleTargetChange}
+        >
+          <option value="">Select target body...</option>
+          {availableOps.map((op) => (
+            <option key={op.id} value={op.id}>
+              {op.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Tool Body</label>
+        <select
+          style={styles.select}
+          value={pendingBoolean.toolOpId || ""}
+          onChange={handleToolChange}
+        >
+          <option value="">Select tool body...</option>
+          {availableOps
+            .filter((op) => op.id !== pendingBoolean.targetOpId)
+            .map((op) => (
+              <option key={op.id} value={op.id}>
+                {op.name}
+              </option>
+            ))}
+        </select>
+      </div>
+
+      <div style={styles.buttonRow}>
+        <button style={styles.secondaryButton} onClick={cancelBoolean}>
+          Cancel
+        </button>
+        <button
+          style={{
+            ...styles.primaryButton,
+            ...(canConfirm ? {} : styles.primaryButtonDisabled),
+          }}
+          onClick={handleConfirm}
+          disabled={!canConfirm}
+        >
+          Create {opLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Operation Properties Tab
 // ============================================================================
 
@@ -747,6 +1087,9 @@ export function PropertiesPanel() {
   const [activeTab, setActiveTab] = React.useState<TabId>("properties");
   const selection = useCadStore((s) => s.selection);
   const pendingExtrude = useCadStore((s) => s.pendingExtrude);
+  const pendingRevolve = useCadStore((s) => s.pendingRevolve);
+  const pendingFillet = useCadStore((s) => s.pendingFillet);
+  const pendingBoolean = useCadStore((s) => s.pendingBoolean);
   const studio = useCadStore((s) =>
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
@@ -782,13 +1125,16 @@ export function PropertiesPanel() {
       </div>
 
       <div style={styles.content}>
-        {/* Show pending extrude panel at top when active */}
+        {/* Show pending operation panels at top when active */}
         {pendingExtrude && <PendingExtrudePanel />}
+        {pendingRevolve && <PendingRevolvePanel />}
+        {pendingFillet && <PendingFilletPanel />}
+        {pendingBoolean && <PendingBooleanPanel />}
 
         {activeTab === "properties" ? (
           selectedOp ? (
             <OpProperties op={selectedOp} />
-          ) : pendingExtrude ? null : (
+          ) : (pendingExtrude || pendingRevolve || pendingFillet || pendingBoolean) ? null : (
             <div style={styles.emptyState}>
               Select an operation to view its properties.
             </div>

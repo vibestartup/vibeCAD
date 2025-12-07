@@ -207,6 +207,17 @@ export function Toolbar({
   const faceSelectionTarget = useCadStore((s) => s.faceSelectionTarget);
   const exitFaceSelectionMode = useCadStore((s) => s.exitFaceSelectionMode);
 
+  // New operation workflows
+  const startRevolve = useCadStore((s) => s.startRevolve);
+  const cancelRevolve = useCadStore((s) => s.cancelRevolve);
+  const pendingRevolve = useCadStore((s) => s.pendingRevolve);
+  const startFillet = useCadStore((s) => s.startFillet);
+  const cancelFillet = useCadStore((s) => s.cancelFillet);
+  const pendingFillet = useCadStore((s) => s.pendingFillet);
+  const startBoolean = useCadStore((s) => s.startBoolean);
+  const cancelBoolean = useCadStore((s) => s.cancelBoolean);
+  const pendingBoolean = useCadStore((s) => s.pendingBoolean);
+
   // Handle tool click - some tools trigger immediate actions
   const handleToolClick = React.useCallback((toolId: string) => {
     console.log("[Toolbar] handleToolClick:", toolId);
@@ -219,11 +230,26 @@ export function Toolbar({
         // Start the extrude workflow
         startExtrude();
         break;
+      case "revolve":
+        startRevolve();
+        break;
+      case "fillet":
+        startFillet();
+        break;
+      case "union":
+        startBoolean("union");
+        break;
+      case "subtract":
+        startBoolean("subtract");
+        break;
+      case "intersect":
+        startBoolean("intersect");
+        break;
       default:
         setActiveTool(toolId);
         break;
     }
-  }, [enterPlaneSelectionMode, startExtrude, setActiveTool]);
+  }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, setActiveTool]);
 
   // Filter tools based on current mode
   const visibleTools = React.useMemo(() => {
@@ -440,6 +466,8 @@ export function Toolbar({
             onClick={() => {
               if (pendingExtrude) {
                 cancelExtrude();
+              } else if (pendingRevolve) {
+                cancelRevolve();
               } else {
                 exitFaceSelectionMode();
               }
