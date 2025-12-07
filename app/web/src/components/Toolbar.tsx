@@ -86,16 +86,7 @@ const styles = {
     alignItems: "center",
     height: "100%",
     padding: "0 12px",
-    borderLeft: "1px solid #333",
-    flexShrink: 0,
-  } as React.CSSProperties,
-
-  logo: {
-    fontWeight: 700,
-    fontSize: 16,
-    color: "#646cff",
-    marginRight: 16,
-    userSelect: "none",
+    borderRight: "1px solid #333",
     flexShrink: 0,
   } as React.CSSProperties,
 
@@ -183,19 +174,19 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    width: 36,
-    height: 36,
+    width: 28,
+    height: 28,
     border: "none",
-    borderRadius: "50%",
-    backgroundColor: "#333",
+    borderRadius: 4,
+    backgroundColor: "transparent",
     color: "#aaa",
     cursor: "pointer",
-    fontSize: 18,
+    fontSize: 16,
     transition: "background-color 0.15s, color 0.15s",
   } as React.CSSProperties,
 
   profileButtonHover: {
-    backgroundColor: "#646cff",
+    backgroundColor: "#333",
     color: "#fff",
   } as React.CSSProperties,
 
@@ -207,28 +198,28 @@ const styles = {
   menu: {
     position: "absolute",
     top: "100%",
-    right: 0,
-    marginTop: 8,
+    left: 0,
+    marginTop: 4,
     backgroundColor: "#252530",
     border: "1px solid #333",
-    borderRadius: 6,
-    minWidth: 200,
+    borderRadius: 4,
+    minWidth: 160,
     zIndex: 1000,
-    boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
     overflow: "visible",
   } as React.CSSProperties,
 
   menuItem: {
     display: "flex",
     alignItems: "center",
-    gap: 12,
+    gap: 8,
     width: "100%",
-    padding: "10px 14px",
+    padding: "6px 10px",
     border: "none",
     backgroundColor: "transparent",
     color: "#ccc",
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: 12,
     textAlign: "left",
     transition: "background-color 0.15s",
     position: "relative",
@@ -817,11 +808,37 @@ export function Toolbar({
 
   return (
     <div style={styles.toolbarContainer}>
+      {/* Fixed left section with profile menu */}
+      <div style={styles.toolbarFixed}>
+        <ProfileMenu
+          onNew={onNewProject || (() => {
+            console.log("[Toolbar] New project not implemented");
+            alert("New project coming soon!");
+          })}
+          onOpen={onOpenLibrary || (() => {
+            console.log("[Toolbar] Open library not implemented");
+          })}
+          onSave={onSaveProject || (() => {
+            console.log("[Toolbar] Save project not implemented");
+          })}
+          onDownload={onDownloadProject || (() => {
+            console.log("[Toolbar] Download project not implemented");
+          })}
+          onImport={handleImport}
+          onExport={handleExport}
+          onSettings={onOpenSettings || (() => {
+            console.log("[Toolbar] Settings not implemented");
+          })}
+          onAbout={onOpenAbout || (() => {
+            console.log("[Toolbar] About not implemented");
+          })}
+          hasGeometry={exportMeshes.length > 0}
+          hasShapeHandles={exportShapeHandles.length > 0}
+        />
+      </div>
+
       {/* Scrollable toolbar content */}
       <div style={styles.toolbarScrollable}>
-        {/* Logo */}
-        <div style={styles.logo}>vibeCAD</div>
-
         {/* Undo/Redo */}
         <button
           style={{
@@ -1073,35 +1090,6 @@ export function Toolbar({
         {isRebuilding && (
           <span style={styles.statusText}>⟳ Rebuilding...</span>
         )}
-      </div>
-
-      {/* Fixed right section with profile menu */}
-      <div style={styles.toolbarFixed}>
-        <ProfileMenu
-          onNew={onNewProject || (() => {
-            console.log("[Toolbar] New project not implemented");
-            alert("New project coming soon!");
-          })}
-          onOpen={onOpenLibrary || (() => {
-            console.log("[Toolbar] Open library not implemented");
-          })}
-          onSave={onSaveProject || (() => {
-            console.log("[Toolbar] Save project not implemented");
-          })}
-          onDownload={onDownloadProject || (() => {
-            console.log("[Toolbar] Download project not implemented");
-          })}
-          onImport={handleImport}
-          onExport={handleExport}
-          onSettings={onOpenSettings || (() => {
-            console.log("[Toolbar] Settings not implemented");
-          })}
-          onAbout={onOpenAbout || (() => {
-            console.log("[Toolbar] About not implemented");
-          })}
-          hasGeometry={exportMeshes.length > 0}
-          hasShapeHandles={exportShapeHandles.length > 0}
-        />
       </div>
     </div>
   );
