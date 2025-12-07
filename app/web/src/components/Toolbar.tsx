@@ -649,6 +649,10 @@ export function Toolbar({
                 cancelExtrude();
               } else if (pendingRevolve) {
                 cancelRevolve();
+              } else if (pendingFillet) {
+                cancelFillet();
+              } else if (pendingBoolean) {
+                cancelBoolean();
               } else {
                 exitFaceSelectionMode();
               }
