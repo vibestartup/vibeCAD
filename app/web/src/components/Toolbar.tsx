@@ -3,8 +3,12 @@
  */
 
 import React from "react";
-import { useCadStore, selectIsRebuilding, selectExportMeshes } from "../store";
+import { useCadStore, selectIsRebuilding, selectExportMeshes, selectExportShapeHandles } from "../store";
 import { exportSTL } from "../utils/stl-export";
+import { exportOBJ } from "../utils/obj-export";
+import { exportGLTF } from "../utils/gltf-export";
+import { exportSTEP } from "../utils/step-export";
+import { getOcc } from "@vibecad/kernel";
 
 // Tool categories
 type ToolCategory = "select" | "sketch" | "sketch-draw" | "primitive" | "operation" | "modify";
@@ -246,17 +250,18 @@ interface ExportFormat {
 
 const EXPORT_FORMATS: ExportFormat[] = [
   { id: "stl", label: "STL", extension: ".stl", enabled: true },
-  { id: "step", label: "STEP", extension: ".step", enabled: false },
-  { id: "obj", label: "OBJ", extension: ".obj", enabled: false },
-  { id: "gltf", label: "glTF", extension: ".gltf", enabled: false },
+  { id: "step", label: "STEP", extension: ".step", enabled: true },
+  { id: "obj", label: "OBJ", extension: ".obj", enabled: true },
+  { id: "gltf", label: "glTF", extension: ".gltf", enabled: true },
 ];
 
 interface ExportDropdownProps {
-  onExportSTL: () => void;
+  onExport: (formatId: string) => void;
   hasGeometry: boolean;
+  hasShapeHandles: boolean;
 }
 
-function ExportDropdown({ onExportSTL, hasGeometry }: ExportDropdownProps) {
+function ExportDropdown({ onExport, hasGeometry, hasShapeHandles }: ExportDropdownProps) {
   const [isOpen, setIsOpen] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
   const [hoveredItem, setHoveredItem] = React.useState<string | null>(null);
@@ -277,11 +282,11 @@ function ExportDropdown({ onExportSTL, hasGeometry }: ExportDropdownProps) {
   }, [isOpen]);
 
   const handleExport = (format: ExportFormat) => {
-    if (!format.enabled || !hasGeometry) return;
+    // STEP requires shape handles, others require mesh data
+    const hasData = format.id === "step" ? hasShapeHandles : hasGeometry;
+    if (!format.enabled || !hasData) return;
 
-    if (format.id === "stl") {
-      onExportSTL();
-    }
+    onExport(format.id);
     setIsOpen(false);
   };
 
@@ -305,7 +310,9 @@ function ExportDropdown({ onExportSTL, hasGeometry }: ExportDropdownProps) {
       {isOpen && (
         <div style={styles.dropdownMenu}>
           {EXPORT_FORMATS.map((format) => {
-            const isDisabled = !format.enabled || !hasGeometry;
+            // STEP requires shape handles, others require mesh data
+            const hasData = format.id === "step" ? hasShapeHandles : hasGeometry;
+            const isDisabled = !format.enabled || !hasData;
             const isItemHovered = hoveredItem === format.id && !isDisabled;
 
             return (
@@ -323,7 +330,7 @@ function ExportDropdown({ onExportSTL, hasGeometry }: ExportDropdownProps) {
                 title={
                   !format.enabled
                     ? `${format.label} export coming soon`
-                    : !hasGeometry
+                    : !hasData
                     ? "No geometry to export"
                     : `Export as ${format.label}`
                 }
@@ -362,6 +369,7 @@ export function Toolbar({
   const createExtrude = useCadStore((s) => s.createExtrude);
   const exitSketchMode = useCadStore((s) => s.exitSketchMode);
   const exportMeshes = useCadStore(selectExportMeshes);
+  const exportShapeHandles = useCadStore(selectExportShapeHandles);
   const documentName = useCadStore((s) => s.document.name);
 
   const canUndo = useCadStore((s) => s.canUndo());
@@ -421,16 +429,56 @@ export function Toolbar({
     }
   }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, setActiveTool]);
 
-  // Handle STL export
-  const handleExportSTL = React.useCallback(() => {
-    if (exportMeshes.length === 0) {
-      console.warn("[Toolbar] No meshes available for export");
-      return;
-    }
+  // Handle export for all formats
+  const handleExport = React.useCallback((formatId: string) => {
     const filename = documentName.replace(/\s+/g, "_") || "model";
-    exportSTL(exportMeshes, filename, true);
-    console.log("[Toolbar] Exported STL:", filename);
-  }, [exportMeshes, documentName]);
+
+    switch (formatId) {
+      case "stl":
+        if (exportMeshes.length === 0) {
+          console.warn("[Toolbar] No meshes available for STL export");
+          return;
+        }
+        exportSTL(exportMeshes, filename, true);
+        console.log("[Toolbar] Exported STL:", filename);
+        break;
+
+      case "obj":
+        if (exportMeshes.length === 0) {
+          console.warn("[Toolbar] No meshes available for OBJ export");
+          return;
+        }
+        exportOBJ(exportMeshes, filename);
+        console.log("[Toolbar] Exported OBJ:", filename);
+        break;
+
+      case "gltf":
+        if (exportMeshes.length === 0) {
+          console.warn("[Toolbar] No meshes available for glTF export");
+          return;
+        }
+        exportGLTF(exportMeshes, filename);
+        console.log("[Toolbar] Exported glTF:", filename);
+        break;
+
+      case "step":
+        if (exportShapeHandles.length === 0) {
+          console.warn("[Toolbar] No shapes available for STEP export");
+          return;
+        }
+        const occApi = getOcc();
+        if (!occApi) {
+          console.error("[Toolbar] OCC API not available for STEP export");
+          return;
+        }
+        exportSTEP(occApi, exportShapeHandles, filename);
+        console.log("[Toolbar] Exported STEP:", filename);
+        break;
+
+      default:
+        console.warn("[Toolbar] Unknown export format:", formatId);
+    }
+  }, [exportMeshes, exportShapeHandles, documentName]);
 
   // Filter tools based on current mode
   const visibleTools = React.useMemo(() => {
@@ -717,8 +765,9 @@ export function Toolbar({
 
       {/* Export dropdown */}
       <ExportDropdown
-        onExportSTL={handleExportSTL}
+        onExport={handleExport}
         hasGeometry={exportMeshes.length > 0}
+        hasShapeHandles={exportShapeHandles.length > 0}
       />
 
       {/* Save */}
