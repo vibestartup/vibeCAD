@@ -378,196 +378,92 @@ function FaceSelector({ label, value, targetType, onClear }: FaceSelectorProps) 
 }
 
 // ============================================================================
-// Pending Extrude Panel
+// Revolve Properties (unified for both pending and existing ops)
 // ============================================================================
 
-function PendingExtrudePanel() {
-  const pendingExtrude = useCadStore((s) => s.pendingExtrude);
-  const setPendingExtrudeSketch = useCadStore((s) => s.setPendingExtrudeSketch);
-  const setPendingExtrudeBodyFace = useCadStore((s) => s.setPendingExtrudeBodyFace);
-  const setPendingExtrudeDepth = useCadStore((s) => s.setPendingExtrudeDepth);
-  const setPendingExtrudeDirection = useCadStore((s) => s.setPendingExtrudeDirection);
-  const confirmExtrude = useCadStore((s) => s.confirmExtrude);
-  const cancelExtrude = useCadStore((s) => s.cancelExtrude);
-  const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
-  );
-  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
-  const unitLabel = getLengthUnitLabel(lengthUnit);
-
-  const [depthValue, setDepthValue] = React.useState(
-    pendingExtrude?.depth?.toString() ?? "10"
-  );
-
-  // Sync depth value when pending extrude changes
-  React.useEffect(() => {
-    if (pendingExtrude?.depth !== undefined) {
-      setDepthValue(pendingExtrude.depth.toString());
-    }
-  }, [pendingExtrude?.depth]);
-
-  // Get display name for body face
-  const bodyFaceDisplayName = React.useMemo(() => {
-    if (!pendingExtrude?.bodyFace || !studio) return null;
-    const op = studio.opGraph.get(pendingExtrude.bodyFace.opId as any);
-    if (op) {
-      return `${op.op.name} - Face ${pendingExtrude.bodyFace.faceIndex + 1}`;
-    }
-    return `Face ${pendingExtrude.bodyFace.faceIndex + 1}`;
-  }, [pendingExtrude?.bodyFace, studio]);
-
-  if (!pendingExtrude) return null;
-
-  const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setDepthValue(val);
-    const num = parseFloat(val);
-    if (!isNaN(num) && num > 0) {
-      setPendingExtrudeDepth(num);
-    }
-  };
-
-  const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPendingExtrudeDirection(e.target.value as "normal" | "reverse" | "symmetric");
-  };
-
-  const handleConfirm = () => {
-    const num = parseFloat(depthValue);
-    if (!isNaN(num) && num > 0) {
-      setPendingExtrudeDepth(num);
-    }
-    confirmExtrude();
-  };
-
-  const handleClearSketch = () => {
-    setPendingExtrudeSketch(null);
-  };
-
-  const handleClearBodyFace = () => {
-    setPendingExtrudeBodyFace(null);
-  };
-
-  // Can confirm if we have either a sketch or a body face selected
-  const hasSource = pendingExtrude.sketchId || pendingExtrude.bodyFace;
-  const canConfirm = hasSource && parseFloat(depthValue) > 0;
-
-  return (
-    <div style={styles.pendingPanel}>
-      <div style={styles.pendingPanelTitle}>
-        <span>⏶</span>
-        <span>New Extrude</span>
-      </div>
-
-      {/* Show sketch selector if no body face selected */}
-      {!pendingExtrude.bodyFace && (
-        <FaceSelector
-          label="Profile (Sketch or Face)"
-          value={pendingExtrude.sketchId}
-          targetType="extrude-profile"
-          onClear={handleClearSketch}
-        />
-      )}
-
-      {/* Show body face info if selected */}
-      {pendingExtrude.bodyFace && (
-        <div style={styles.field}>
-          <label style={styles.fieldLabel}>Selected Face</label>
-          <div style={{
-            ...styles.faceSelectorButton,
-            ...styles.faceSelectorButtonSelected,
-          }}>
-            <span style={styles.faceSelectorIcon}>✓</span>
-            <span style={{ flex: 1 }}>{bodyFaceDisplayName}</span>
-            <span
-              onClick={handleClearBodyFace}
-              style={{ opacity: 0.6, cursor: "pointer" }}
-            >
-              ×
-            </span>
-          </div>
-        </div>
-      )}
-
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Direction</label>
-        <select
-          style={styles.select}
-          value={pendingExtrude.direction}
-          onChange={handleDirectionChange}
-        >
-          <option value="normal">Normal (Up)</option>
-          <option value="reverse">Reverse (Down)</option>
-          <option value="symmetric">Symmetric (Both)</option>
-        </select>
-      </div>
-
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Depth ({unitLabel})</label>
-        <input
-          type="number"
-          value={depthValue}
-          onChange={handleDepthChange}
-          style={styles.input}
-          placeholder="e.g., 10"
-          min={0}
-          step={1}
-        />
-      </div>
-
-      <div style={styles.buttonRow}>
-        <button style={styles.secondaryButton} onClick={cancelExtrude}>
-          Cancel
-        </button>
-        <button
-          style={{
-            ...styles.primaryButton,
-            ...(canConfirm ? {} : styles.primaryButtonDisabled),
-          }}
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-        >
-          Create Extrude
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
-// Pending Revolve Panel
-// ============================================================================
-
-function PendingRevolvePanel() {
+function RevolveProperties({ op, isPending = false }: { op?: any; isPending?: boolean }) {
+  const updateOp = useCadStore((s) => s.updateOp);
   const pendingRevolve = useCadStore((s) => s.pendingRevolve);
   const setPendingRevolveSketch = useCadStore((s) => s.setPendingRevolveSketch);
   const setPendingRevolveAngle = useCadStore((s) => s.setPendingRevolveAngle);
   const setPendingRevolveAxis = useCadStore((s) => s.setPendingRevolveAxis);
   const confirmRevolve = useCadStore((s) => s.confirmRevolve);
   const cancelRevolve = useCadStore((s) => s.cancelRevolve);
-
-  const [angleValue, setAngleValue] = React.useState(
-    pendingRevolve?.angle?.toString() ?? "360"
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
 
-  React.useEffect(() => {
-    if (pendingRevolve?.angle !== undefined) {
-      setAngleValue(pendingRevolve.angle.toString());
-    }
-  }, [pendingRevolve?.angle]);
+  // Determine if we're in pending mode or editing an existing op
+  const isCreating = isPending && pendingRevolve;
 
-  if (!pendingRevolve) return null;
+  // Get current values from either pending state or existing op
+  const currentSketchId = isCreating ? pendingRevolve?.sketchId : op?.profile?.sketchId;
+  const currentAxis = isCreating ? (pendingRevolve?.axis ?? "sketch-y") : (op?.axis ?? "sketch-y");
+  const currentAngle = isCreating ? (pendingRevolve?.angle ?? 360) : (op?.angle?.value ?? 360);
+
+  // Track if we're editing the profile on an existing op
+  const [isEditingProfile, setIsEditingProfile] = React.useState(false);
+
+  const [angleValue, setAngleValue] = React.useState(currentAngle.toString());
+
+  // Sync angle value when values change
+  React.useEffect(() => {
+    setAngleValue(currentAngle.toString());
+  }, [currentAngle]);
+
+  // Get profile display name
+  const profileDisplayName = React.useMemo(() => {
+    if (!studio || !currentSketchId) return null;
+    const sketch = studio.sketches.get(currentSketchId as SketchId);
+    if (sketch) {
+      for (const [, node] of studio.opGraph) {
+        if (node.op.type === "sketch" && (node.op as any).sketchId === currentSketchId) {
+          return node.op.name;
+        }
+      }
+      return `Sketch ${currentSketchId.slice(0, 8)}`;
+    }
+    return null;
+  }, [currentSketchId, studio]);
+
+  const handleAxisChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newAxis = e.target.value as "x" | "y" | "sketch-x" | "sketch-y";
+    if (isCreating) {
+      setPendingRevolveAxis(newAxis);
+    } else if (op) {
+      updateOp(op.id, { axis: newAxis });
+    }
+  };
 
   const handleAngleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setAngleValue(val);
     const num = parseFloat(val);
     if (!isNaN(num) && num > 0 && num <= 360) {
-      setPendingRevolveAngle(num);
+      if (isCreating) {
+        setPendingRevolveAngle(num);
+      }
     }
   };
 
-  const handleAxisChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPendingRevolveAxis(e.target.value as "x" | "y" | "sketch-x" | "sketch-y");
+  const handleAngleBlur = () => {
+    const num = parseFloat(angleValue);
+    if (!isNaN(num) && num > 0 && num <= 360) {
+      if (isCreating) {
+        setPendingRevolveAngle(num);
+      } else if (op) {
+        updateOp(op.id, { angle: { value: num, expression: angleValue } });
+      }
+    }
+  };
+
+  const handleClearProfile = () => {
+    if (isCreating) {
+      setPendingRevolveSketch(null);
+    } else if (op) {
+      // For existing op, enter "editing profile" mode
+      setIsEditingProfile(true);
+    }
   };
 
   const handleConfirm = () => {
@@ -578,31 +474,51 @@ function PendingRevolvePanel() {
     confirmRevolve();
   };
 
-  const handleClearSketch = () => {
-    setPendingRevolveSketch(null);
-  };
+  // Determine if we need to show the profile selector
+  const hasProfile = !!currentSketchId;
+  const showProfileSelector = isCreating ? !hasProfile : (isEditingProfile || !hasProfile);
 
-  const canConfirm = pendingRevolve.sketchId && parseFloat(angleValue) > 0;
+  // Can confirm if we have a sketch selected
+  const canConfirm = hasProfile && parseFloat(angleValue) > 0;
 
   return (
-    <div style={styles.pendingPanel}>
-      <div style={styles.pendingPanelTitle}>
-        <span>⟳</span>
-        <span>New Revolve</span>
-      </div>
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>Revolve</div>
 
-      <FaceSelector
-        label="Profile (Sketch)"
-        value={pendingRevolve.sketchId}
-        targetType="extrude-profile"
-        onClear={handleClearSketch}
-      />
+      {/* Profile selector - show when no profile or editing profile */}
+      {showProfileSelector ? (
+        <FaceSelector
+          label="Profile (Sketch)"
+          value={currentSketchId}
+          targetType="extrude-profile"
+          onClear={handleClearProfile}
+        />
+      ) : (
+        /* Show selected profile with X to clear */
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Profile</label>
+          <div style={{
+            ...styles.faceSelectorButton,
+            ...styles.faceSelectorButtonSelected,
+          }}>
+            <span style={styles.faceSelectorIcon}>✓</span>
+            <span style={{ flex: 1 }}>{profileDisplayName}</span>
+            <span
+              onClick={handleClearProfile}
+              style={{ opacity: 0.6, cursor: "pointer", padding: "0 4px" }}
+              title="Change profile"
+            >
+              ×
+            </span>
+          </div>
+        </div>
+      )}
 
       <div style={styles.field}>
         <label style={styles.fieldLabel}>Axis</label>
         <select
           style={styles.select}
-          value={pendingRevolve.axis}
+          value={currentAxis}
           onChange={handleAxisChange}
         >
           <option value="sketch-x">Sketch X Axis</option>
@@ -618,6 +534,7 @@ function PendingRevolvePanel() {
           type="number"
           value={angleValue}
           onChange={handleAngleChange}
+          onBlur={handleAngleBlur}
           style={styles.input}
           placeholder="e.g., 360"
           min={0}
@@ -626,30 +543,34 @@ function PendingRevolvePanel() {
         />
       </div>
 
-      <div style={styles.buttonRow}>
-        <button style={styles.secondaryButton} onClick={cancelRevolve}>
-          Cancel
-        </button>
-        <button
-          style={{
-            ...styles.primaryButton,
-            ...(canConfirm ? {} : styles.primaryButtonDisabled),
-          }}
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-        >
-          Create Revolve
-        </button>
-      </div>
+      {/* Create/Cancel buttons only in creation mode */}
+      {isCreating && (
+        <div style={styles.buttonRow}>
+          <button style={styles.secondaryButton} onClick={cancelRevolve}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...styles.primaryButton,
+              ...(canConfirm ? {} : styles.primaryButtonDisabled),
+            }}
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+          >
+            Create Revolve
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ============================================================================
-// Pending Fillet Panel
+// Fillet Properties (unified for both pending and existing ops)
 // ============================================================================
 
-function PendingFilletPanel() {
+function FilletProperties({ op, isPending = false }: { op?: any; isPending?: boolean }) {
+  const updateOp = useCadStore((s) => s.updateOp);
   const pendingFillet = useCadStore((s) => s.pendingFillet);
   const setPendingFilletTarget = useCadStore((s) => s.setPendingFilletTarget);
   const setPendingFilletRadius = useCadStore((s) => s.setPendingFilletRadius);
@@ -661,17 +582,19 @@ function PendingFilletPanel() {
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
   const unitLabel = getLengthUnitLabel(lengthUnit);
 
-  const [radiusValue, setRadiusValue] = React.useState(
-    pendingFillet?.radius?.toString() ?? "5"
-  );
+  // Determine if we're in pending mode or editing an existing op
+  const isCreating = isPending && pendingFillet;
 
+  // Get current values from either pending state or existing op
+  const currentTargetOpId = isCreating ? pendingFillet?.targetOpId : op?.targetOpId;
+  const currentRadius = isCreating ? (pendingFillet?.radius ?? 5) : (op?.radius?.value ?? 5);
+
+  const [radiusValue, setRadiusValue] = React.useState(currentRadius.toString());
+
+  // Sync radius value when values change
   React.useEffect(() => {
-    if (pendingFillet?.radius !== undefined) {
-      setRadiusValue(pendingFillet.radius.toString());
-    }
-  }, [pendingFillet?.radius]);
-
-  if (!pendingFillet) return null;
+    setRadiusValue(currentRadius.toString());
+  }, [currentRadius]);
 
   // Get available operations that produce geometry
   const availableOps = React.useMemo(() => {
@@ -681,17 +604,42 @@ function PendingFilletPanel() {
       .map(([id, node]) => ({ id, name: node.op.name }));
   }, [studio]);
 
+  // Get current target display name
+  const targetDisplayName = React.useMemo(() => {
+    if (!currentTargetOpId || !studio) return null;
+    const targetOp = studio.opGraph.get(currentTargetOpId as any);
+    return targetOp?.op.name ?? null;
+  }, [currentTargetOpId, studio]);
+
   const handleRadiusChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setRadiusValue(val);
     const num = parseFloat(val);
     if (!isNaN(num) && num > 0) {
-      setPendingFilletRadius(num);
+      if (isCreating) {
+        setPendingFilletRadius(num);
+      }
+    }
+  };
+
+  const handleRadiusBlur = () => {
+    const num = parseFloat(radiusValue);
+    if (!isNaN(num) && num > 0) {
+      if (isCreating) {
+        setPendingFilletRadius(num);
+      } else if (op) {
+        updateOp(op.id, { radius: { value: num, expression: radiusValue } });
+      }
     }
   };
 
   const handleTargetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPendingFilletTarget(e.target.value || null);
+    const newTarget = e.target.value || null;
+    if (isCreating) {
+      setPendingFilletTarget(newTarget);
+    } else if (op) {
+      updateOp(op.id, { targetOpId: newTarget });
+    }
   };
 
   const handleConfirm = () => {
@@ -702,27 +650,24 @@ function PendingFilletPanel() {
     confirmFillet();
   };
 
-  // Note: Edge selection would require more complex UI - for now we'll apply to all edges
-  const canConfirm = pendingFillet.targetOpId && parseFloat(radiusValue) > 0;
+  // Can confirm if we have a target body selected and valid radius
+  const canConfirm = currentTargetOpId && parseFloat(radiusValue) > 0;
 
   return (
-    <div style={styles.pendingPanel}>
-      <div style={styles.pendingPanelTitle}>
-        <span>⌓</span>
-        <span>New Fillet</span>
-      </div>
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>Fillet</div>
 
       <div style={styles.field}>
         <label style={styles.fieldLabel}>Target Body</label>
         <select
           style={styles.select}
-          value={pendingFillet.targetOpId || ""}
+          value={currentTargetOpId || ""}
           onChange={handleTargetChange}
         >
           <option value="">Select a body...</option>
-          {availableOps.map((op) => (
-            <option key={op.id} value={op.id}>
-              {op.name}
+          {availableOps.map((opItem) => (
+            <option key={opItem.id} value={opItem.id}>
+              {opItem.name}
             </option>
           ))}
         </select>
@@ -734,6 +679,7 @@ function PendingFilletPanel() {
           type="number"
           value={radiusValue}
           onChange={handleRadiusChange}
+          onBlur={handleRadiusBlur}
           style={styles.input}
           placeholder="e.g., 5"
           min={0}
@@ -745,30 +691,34 @@ function PendingFilletPanel() {
         Note: Fillet will be applied to all edges of the selected body.
       </div>
 
-      <div style={styles.buttonRow}>
-        <button style={styles.secondaryButton} onClick={cancelFillet}>
-          Cancel
-        </button>
-        <button
-          style={{
-            ...styles.primaryButton,
-            ...(canConfirm ? {} : styles.primaryButtonDisabled),
-          }}
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-        >
-          Create Fillet
-        </button>
-      </div>
+      {/* Create/Cancel buttons only in creation mode */}
+      {isCreating && (
+        <div style={styles.buttonRow}>
+          <button style={styles.secondaryButton} onClick={cancelFillet}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...styles.primaryButton,
+              ...(canConfirm ? {} : styles.primaryButtonDisabled),
+            }}
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+          >
+            Create Fillet
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ============================================================================
-// Pending Boolean Panel
+// Boolean Properties (unified for both pending and existing ops)
 // ============================================================================
 
-function PendingBooleanPanel() {
+function BooleanProperties({ op, isPending = false }: { op?: any; isPending?: boolean }) {
+  const updateOp = useCadStore((s) => s.updateOp);
   const pendingBoolean = useCadStore((s) => s.pendingBoolean);
   const setPendingBooleanTarget = useCadStore((s) => s.setPendingBooleanTarget);
   const setPendingBooleanTool = useCadStore((s) => s.setPendingBooleanTool);
@@ -778,7 +728,13 @@ function PendingBooleanPanel() {
     s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
   );
 
-  if (!pendingBoolean) return null;
+  // Determine if we're in pending mode or editing an existing op
+  const isCreating = isPending && pendingBoolean;
+
+  // Get current values from either pending state or existing op
+  const currentTargetOpId = isCreating ? pendingBoolean?.targetOpId : op?.targetOpId;
+  const currentToolOpId = isCreating ? pendingBoolean?.toolOpId : op?.toolOpId;
+  const currentOperation = isCreating ? (pendingBoolean?.operation ?? "union") : (op?.operation ?? "union");
 
   // Get available operations that produce geometry
   const availableOps = React.useMemo(() => {
@@ -789,11 +745,29 @@ function PendingBooleanPanel() {
   }, [studio]);
 
   const handleTargetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPendingBooleanTarget(e.target.value || null);
+    const newTarget = e.target.value || null;
+    if (isCreating) {
+      setPendingBooleanTarget(newTarget);
+    } else if (op) {
+      updateOp(op.id, { targetOpId: newTarget });
+    }
   };
 
   const handleToolChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setPendingBooleanTool(e.target.value || null);
+    const newTool = e.target.value || null;
+    if (isCreating) {
+      setPendingBooleanTool(newTool);
+    } else if (op) {
+      updateOp(op.id, { toolOpId: newTool });
+    }
+  };
+
+  const handleOperationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newOperation = e.target.value as "union" | "subtract" | "intersect";
+    if (op && !isCreating) {
+      updateOp(op.id, { operation: newOperation });
+    }
+    // Note: For pending, operation is fixed at creation time from toolbar
   };
 
   const handleConfirm = () => {
@@ -801,38 +775,50 @@ function PendingBooleanPanel() {
   };
 
   const opLabel =
-    pendingBoolean.operation === "union"
+    currentOperation === "union"
       ? "Union"
-      : pendingBoolean.operation === "subtract"
+      : currentOperation === "subtract"
       ? "Subtract"
       : "Intersect";
 
-  const canConfirm = pendingBoolean.targetOpId && pendingBoolean.toolOpId;
+  const opIcon =
+    currentOperation === "union"
+      ? "⊕"
+      : currentOperation === "subtract"
+      ? "⊖"
+      : "⊗";
+
+  const canConfirm = currentTargetOpId && currentToolOpId;
 
   return (
-    <div style={styles.pendingPanel}>
-      <div style={styles.pendingPanelTitle}>
-        <span>
-          {pendingBoolean.operation === "union"
-            ? "⊕"
-            : pendingBoolean.operation === "subtract"
-            ? "⊖"
-            : "⊗"}
-        </span>
-        <span>New {opLabel}</span>
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>{opLabel}</div>
+
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>Operation</label>
+        <select
+          style={styles.select}
+          value={currentOperation}
+          onChange={handleOperationChange}
+          disabled={isCreating} // Can't change operation type for pending
+        >
+          <option value="union">Union</option>
+          <option value="subtract">Subtract</option>
+          <option value="intersect">Intersect</option>
+        </select>
       </div>
 
       <div style={styles.field}>
         <label style={styles.fieldLabel}>Target Body</label>
         <select
           style={styles.select}
-          value={pendingBoolean.targetOpId || ""}
+          value={currentTargetOpId || ""}
           onChange={handleTargetChange}
         >
           <option value="">Select target body...</option>
-          {availableOps.map((op) => (
-            <option key={op.id} value={op.id}>
-              {op.name}
+          {availableOps.map((opItem) => (
+            <option key={opItem.id} value={opItem.id}>
+              {opItem.name}
             </option>
           ))}
         </select>
@@ -842,35 +828,38 @@ function PendingBooleanPanel() {
         <label style={styles.fieldLabel}>Tool Body</label>
         <select
           style={styles.select}
-          value={pendingBoolean.toolOpId || ""}
+          value={currentToolOpId || ""}
           onChange={handleToolChange}
         >
           <option value="">Select tool body...</option>
           {availableOps
-            .filter((op) => op.id !== pendingBoolean.targetOpId)
-            .map((op) => (
-              <option key={op.id} value={op.id}>
-                {op.name}
+            .filter((opItem) => opItem.id !== currentTargetOpId)
+            .map((opItem) => (
+              <option key={opItem.id} value={opItem.id}>
+                {opItem.name}
               </option>
             ))}
         </select>
       </div>
 
-      <div style={styles.buttonRow}>
-        <button style={styles.secondaryButton} onClick={cancelBoolean}>
-          Cancel
-        </button>
-        <button
-          style={{
-            ...styles.primaryButton,
-            ...(canConfirm ? {} : styles.primaryButtonDisabled),
-          }}
-          onClick={handleConfirm}
-          disabled={!canConfirm}
-        >
-          Create {opLabel}
-        </button>
-      </div>
+      {/* Create/Cancel buttons only in creation mode */}
+      {isCreating && (
+        <div style={styles.buttonRow}>
+          <button style={styles.secondaryButton} onClick={cancelBoolean}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...styles.primaryButton,
+              ...(canConfirm ? {} : styles.primaryButtonDisabled),
+            }}
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+          >
+            Create {opLabel}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -922,6 +911,7 @@ function OpProperties({ op }: OpPropertiesProps) {
 
       {/* Type-specific properties */}
       {op.type === "extrude" && <ExtrudeProperties op={op} />}
+      {op.type === "revolve" && <RevolveProperties op={op} />}
       {op.type === "fillet" && <FilletProperties op={op} />}
       {op.type === "boolean" && <BooleanProperties op={op} />}
 
@@ -932,74 +922,205 @@ function OpProperties({ op }: OpPropertiesProps) {
   );
 }
 
-function ExtrudeProperties({ op }: { op: any }) {
+function ExtrudeProperties({ op, isPending = false }: { op?: any; isPending?: boolean }) {
+  const updateOp = useCadStore((s) => s.updateOp);
+  const pendingExtrude = useCadStore((s) => s.pendingExtrude);
+  const setPendingExtrudeSketch = useCadStore((s) => s.setPendingExtrudeSketch);
+  const setPendingExtrudeBodyFace = useCadStore((s) => s.setPendingExtrudeBodyFace);
+  const setPendingExtrudeDepth = useCadStore((s) => s.setPendingExtrudeDepth);
+  const setPendingExtrudeDirection = useCadStore((s) => s.setPendingExtrudeDirection);
+  const confirmExtrude = useCadStore((s) => s.confirmExtrude);
+  const cancelExtrude = useCadStore((s) => s.cancelExtrude);
+  const studio = useCadStore((s) =>
+    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+  );
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const unitLabel = getLengthUnitLabel(lengthUnit);
+
+  // Determine if we're in pending mode or editing an existing op
+  const isCreating = isPending && pendingExtrude;
+
+  // Get current values from either pending state or existing op
+  const currentSketchId = isCreating ? pendingExtrude?.sketchId : op?.profile?.sketchId;
+  const currentBodyFace = isCreating ? pendingExtrude?.bodyFace : (op?.profile?.type === "face" ? op.profile.faceRef : null);
+  const currentDirection = isCreating ? (pendingExtrude?.direction ?? "normal") : (op?.direction ?? "normal");
+  const currentDepth = isCreating ? (pendingExtrude?.depth ?? 10) : (op?.depth?.value ?? 10);
+
+  // Track if we're editing the profile on an existing op
+  const [isEditingProfile, setIsEditingProfile] = React.useState(false);
+
+  const [depthValue, setDepthValue] = React.useState(currentDepth.toString());
+
+  // Sync depth value when values change
+  React.useEffect(() => {
+    setDepthValue(currentDepth.toString());
+  }, [currentDepth]);
+
+  // Get profile display name
+  const profileDisplayName = React.useMemo(() => {
+    if (!studio) return null;
+
+    if (currentSketchId) {
+      const sketch = studio.sketches.get(currentSketchId as SketchId);
+      if (sketch) {
+        for (const [, node] of studio.opGraph) {
+          if (node.op.type === "sketch" && (node.op as any).sketchId === currentSketchId) {
+            return node.op.name;
+          }
+        }
+        return `Sketch ${currentSketchId.slice(0, 8)}`;
+      }
+    }
+
+    if (currentBodyFace) {
+      const sourceOp = studio.opGraph.get(currentBodyFace.opId);
+      if (sourceOp) {
+        return `${sourceOp.op.name} - Face ${(currentBodyFace.faceIndex ?? currentBodyFace.index ?? 0) + 1}`;
+      }
+      return `Face ${(currentBodyFace.faceIndex ?? currentBodyFace.index ?? 0) + 1}`;
+    }
+
+    return null;
+  }, [currentSketchId, currentBodyFace, studio]);
+
+  const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newDirection = e.target.value as "normal" | "reverse" | "symmetric";
+    if (isCreating) {
+      setPendingExtrudeDirection(newDirection);
+    } else if (op) {
+      updateOp(op.id, { direction: newDirection });
+    }
+  };
+
+  const handleDepthChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setDepthValue(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0) {
+      if (isCreating) {
+        setPendingExtrudeDepth(num);
+      }
+    }
+  };
+
+  const handleDepthBlur = () => {
+    const num = parseFloat(depthValue);
+    if (!isNaN(num) && num > 0) {
+      if (isCreating) {
+        setPendingExtrudeDepth(num);
+      } else if (op) {
+        updateOp(op.id, { depth: { value: num, expression: depthValue } });
+      }
+    }
+  };
+
+  const handleClearProfile = () => {
+    if (isCreating) {
+      setPendingExtrudeSketch(null);
+      setPendingExtrudeBodyFace(null);
+    } else if (op) {
+      // For existing op, enter "editing profile" mode
+      setIsEditingProfile(true);
+    }
+  };
+
+  const handleConfirm = () => {
+    const num = parseFloat(depthValue);
+    if (!isNaN(num) && num > 0) {
+      setPendingExtrudeDepth(num);
+    }
+    confirmExtrude();
+  };
+
+  // Determine if we need to show the profile selector (no profile selected yet, or editing)
+  const hasProfile = currentSketchId || currentBodyFace;
+  const showProfileSelector = isCreating ? !hasProfile : (isEditingProfile || !hasProfile);
+
+  // Can confirm if we have either a sketch or a body face selected
+  const canConfirm = hasProfile && parseFloat(depthValue) > 0;
+
   return (
     <div style={styles.section}>
-      <div style={styles.sectionTitle}>Extrude Settings</div>
+      <div style={styles.sectionTitle}>Extrude</div>
+
+      {/* Profile selector - show when no profile or editing profile */}
+      {showProfileSelector ? (
+        <FaceSelector
+          label="Profile (Sketch or Face)"
+          value={currentSketchId}
+          targetType="extrude-profile"
+          onClear={handleClearProfile}
+        />
+      ) : (
+        /* Show selected profile with X to clear */
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Profile</label>
+          <div style={{
+            ...styles.faceSelectorButton,
+            ...styles.faceSelectorButtonSelected,
+          }}>
+            <span style={styles.faceSelectorIcon}>✓</span>
+            <span style={{ flex: 1 }}>{profileDisplayName}</span>
+            <span
+              onClick={handleClearProfile}
+              style={{ opacity: 0.6, cursor: "pointer", padding: "0 4px" }}
+              title="Change profile"
+            >
+              ×
+            </span>
+          </div>
+        </div>
+      )}
 
       <div style={styles.field}>
         <label style={styles.fieldLabel}>Direction</label>
-        <select style={styles.select} value={op.direction}>
-          <option value="normal">Normal</option>
-          <option value="reverse">Reverse</option>
-          <option value="symmetric">Symmetric</option>
+        <select
+          style={styles.select}
+          value={currentDirection}
+          onChange={handleDirectionChange}
+        >
+          <option value="normal">Normal (Up)</option>
+          <option value="reverse">Reverse (Down)</option>
+          <option value="symmetric">Symmetric (Both)</option>
         </select>
       </div>
 
       <div style={styles.field}>
-        <label style={styles.fieldLabel}>Depth</label>
+        <label style={styles.fieldLabel}>Depth ({unitLabel})</label>
         <input
-          type="text"
-          value={op.depth?.expression || op.depth?.value || ""}
+          type="number"
+          value={depthValue}
+          onChange={handleDepthChange}
+          onBlur={handleDepthBlur}
           style={styles.input}
-          placeholder="e.g., 10 or Height * 2"
-        />
-      </div>
-    </div>
-  );
-}
-
-function FilletProperties({ op }: { op: any }) {
-  return (
-    <div style={styles.section}>
-      <div style={styles.sectionTitle}>Fillet Settings</div>
-
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Radius</label>
-        <input
-          type="text"
-          value={op.radius?.expression || op.radius?.value || ""}
-          style={styles.input}
-          placeholder="e.g., 2"
+          placeholder="e.g., 10"
+          min={0}
+          step={1}
         />
       </div>
 
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Edges</label>
-        <div style={{ color: "#888", fontSize: 12 }}>
-          {op.edges?.length || 0} edges selected
+      {/* Create/Cancel buttons only in creation mode */}
+      {isCreating && (
+        <div style={styles.buttonRow}>
+          <button style={styles.secondaryButton} onClick={cancelExtrude}>
+            Cancel
+          </button>
+          <button
+            style={{
+              ...styles.primaryButton,
+              ...(canConfirm ? {} : styles.primaryButtonDisabled),
+            }}
+            onClick={handleConfirm}
+            disabled={!canConfirm}
+          >
+            Create Extrude
+          </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function BooleanProperties({ op }: { op: any }) {
-  return (
-    <div style={styles.section}>
-      <div style={styles.sectionTitle}>Boolean Settings</div>
-
-      <div style={styles.field}>
-        <label style={styles.fieldLabel}>Operation</label>
-        <select style={styles.select} value={op.operation}>
-          <option value="union">Union</option>
-          <option value="subtract">Subtract</option>
-          <option value="intersect">Intersect</option>
-        </select>
-      </div>
-    </div>
-  );
-}
 
 // ============================================================================
 // Parameters Tab
@@ -1383,16 +1504,19 @@ export function PropertiesPanel() {
       </div>
 
       <div style={styles.content}>
-        {/* Show pending operation panels at top when active */}
-        {pendingExtrude && <PendingExtrudePanel />}
-        {pendingRevolve && <PendingRevolvePanel />}
-        {pendingFillet && <PendingFilletPanel />}
-        {pendingBoolean && <PendingBooleanPanel />}
-
         {activeTab === "properties" ? (
-          selectedOp ? (
+          // Pending operations take priority and show in the same place as regular properties
+          pendingExtrude ? (
+            <ExtrudeProperties isPending />
+          ) : pendingRevolve ? (
+            <RevolveProperties isPending />
+          ) : pendingFillet ? (
+            <FilletProperties isPending />
+          ) : pendingBoolean ? (
+            <BooleanProperties isPending />
+          ) : selectedOp ? (
             <OpProperties op={selectedOp} />
-          ) : (pendingExtrude || pendingRevolve || pendingFillet || pendingBoolean) ? null : (
+          ) : (
             <div style={styles.emptyState}>
               Select an operation to view its properties.
             </div>

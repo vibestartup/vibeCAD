@@ -1276,10 +1276,38 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   setPendingExtrudeSketch: (sketchId) => {
-    const { pendingExtrude } = get();
+    const { pendingExtrude, selection, document, activeStudioId } = get();
     if (pendingExtrude) {
-      // Clear body face when setting sketch
-      set({ pendingExtrude: { ...pendingExtrude, sketchId, bodyFace: null } });
+      // Clear body face when setting sketch, exit face selection mode
+      set({
+        pendingExtrude: { ...pendingExtrude, sketchId, bodyFace: null },
+        editorMode: "object",
+        faceSelectionTarget: null,
+        selectedFace: sketchId ? { type: "sketch-profile", sketchId } : null,
+      });
+    } else if (selection.size === 1 && activeStudioId && sketchId) {
+      // If no pending extrude but an op is selected, update that op's profile
+      const selectedOpId = Array.from(selection)[0];
+      const studio = document.partStudios.get(activeStudioId);
+      const opNode = studio?.opGraph.get(selectedOpId as OpId);
+      if (opNode && opNode.op.type === "extrude") {
+        // Update the op with new sketch profile
+        const updatedOp = {
+          ...opNode.op,
+          profile: { type: "sketch" as const, sketchId: sketchId as SketchId },
+        };
+        const newOpGraph = new Map(studio!.opGraph);
+        newOpGraph.set(selectedOpId as OpId, { ...opNode, op: updatedOp });
+        const newStudio = { ...studio!, opGraph: newOpGraph };
+        const newPartStudios = new Map(document.partStudios);
+        newPartStudios.set(activeStudioId, newStudio);
+        set({
+          document: { ...document, partStudios: newPartStudios },
+          editorMode: "object",
+          faceSelectionTarget: null,
+          selectedFace: { type: "sketch-profile", sketchId },
+        });
+      }
     }
   },
 
@@ -1361,7 +1389,13 @@ export const useCadStore = create<CadStore>((set, get) => ({
   setPendingRevolveSketch: (sketchId) => {
     const { pendingRevolve } = get();
     if (pendingRevolve) {
-      set({ pendingRevolve: { ...pendingRevolve, sketchId } });
+      // Exit face selection mode when sketch is selected
+      set({
+        pendingRevolve: { ...pendingRevolve, sketchId },
+        editorMode: "object",
+        faceSelectionTarget: null,
+        selectedFace: sketchId ? { type: "sketch-profile", sketchId } : null,
+      });
     }
   },
 

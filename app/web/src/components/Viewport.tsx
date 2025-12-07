@@ -618,6 +618,7 @@ export function Viewport() {
   const previewGroupRef = useRef<THREE.Group | null>(null);
   const cursorPointRef = useRef<THREE.Mesh | null>(null);
   const faceHighlightRef = useRef<THREE.Mesh | null>(null);
+  const extrudePreviewRef = useRef<THREE.Group | null>(null);
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
@@ -642,8 +643,12 @@ export function Viewport() {
   const faceSelectionTarget = useCadStore((s) => s.faceSelectionTarget);
   const setPendingExtrudeSketch = useCadStore((s) => s.setPendingExtrudeSketch);
   const setPendingExtrudeBodyFace = useCadStore((s) => s.setPendingExtrudeBodyFace);
+  const setPendingRevolveSketch = useCadStore((s) => s.setPendingRevolveSketch);
+  const pendingRevolve = useCadStore((s) => s.pendingRevolve);
+  const pendingExtrude = useCadStore((s) => s.pendingExtrude);
   const hoveredFace = useCadStore((s) => s.hoveredFace);
   const setHoveredFace = useCadStore((s) => s.setHoveredFace);
+  const selectedFace = useCadStore((s) => s.selectedFace);
   const setExportMeshes = useCadStore((s) => s.setExportMeshes);
   const setExportShapeHandles = useCadStore((s) => s.setExportShapeHandles);
 
@@ -743,6 +748,11 @@ export function Viewport() {
     const previewGroup = new THREE.Group();
     scene.add(previewGroup);
     previewGroupRef.current = previewGroup;
+
+    // Extrude preview group for pending extrude operations
+    const extrudePreviewGroup = new THREE.Group();
+    scene.add(extrudePreviewGroup);
+    extrudePreviewRef.current = extrudePreviewGroup;
 
     // Cursor point (constant screen size)
     const cursorGeometry = new THREE.SphereGeometry(1, 16, 16);
@@ -1085,10 +1095,11 @@ export function Viewport() {
       const plane = getPlaneById(sketch.planeId, studio.planes);
       if (!plane) continue;
 
-      // Determine color and opacity based on hover state
+      // Determine color and opacity based on hover/selection state
       const isHovered = hoveredFace?.type === "sketch" && hoveredFace.sketchId === sketchId;
-      const color = isHovered ? 0x69db7c : 0x4dabf7;
-      const opacity = isHovered ? 0.9 : 0.5;
+      const isSelected = selectedFace?.type === "sketch-profile" && selectedFace.sketchId === sketchId;
+      const color = (isHovered || isSelected) ? 0x69db7c : 0x4dabf7;
+      const opacity = (isHovered || isSelected) ? 0.9 : 0.5;
 
       // Create 3D lines for the sketch with transparent style
       const sketchLines = createSketchLines(sketch, plane, color, opacity);
@@ -1097,7 +1108,7 @@ export function Viewport() {
       sketchLines.userData.isSketch = true;
       sketchGroup.add(sketchLines);
     }
-  }, [studio, timelinePosition, hoveredFace]);
+  }, [studio, timelinePosition, hoveredFace, selectedFace]);
 
   // Update body face highlight
   useEffect(() => {
@@ -1178,6 +1189,124 @@ export function Viewport() {
     scene.add(highlightMesh);
     faceHighlightRef.current = highlightMesh;
   }, [editorMode, hoveredFace]);
+
+  // Render extrude preview when pending extrude has a sketch selected
+  useEffect(() => {
+    const extrudePreviewGroup = extrudePreviewRef.current;
+    if (!extrudePreviewGroup) return;
+
+    // Clear existing preview
+    while (extrudePreviewGroup.children.length > 0) {
+      const child = extrudePreviewGroup.children[0];
+      extrudePreviewGroup.remove(child);
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose());
+        } else {
+          child.material.dispose();
+        }
+      }
+      if (child instanceof THREE.LineSegments) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    }
+
+    // Only show preview if we have a pending extrude with a sketch selected
+    if (!pendingExtrude?.sketchId || !occApi || !studio) return;
+
+    const sketch = studio.sketches.get(pendingExtrude.sketchId as any);
+    if (!sketch) return;
+
+    try {
+      // Build profile from sketch lines (same logic as in the main geometry builder)
+      const lines: Array<{ start: string; end: string }> = [];
+      const points: Map<string, [number, number]> = new Map();
+
+      for (const [id, prim] of sketch.primitives) {
+        if (prim.type === "point") {
+          const solved = sketch.solvedPositions?.get(id);
+          const pos: [number, number] = solved ? [solved[0], solved[1]] : [prim.x, prim.y];
+          points.set(id, pos);
+        } else if (prim.type === "line") {
+          lines.push({ start: prim.start, end: prim.end });
+        }
+      }
+
+      if (lines.length < 3) return;
+
+      // Order lines into closed loop
+      const orderedPoints: [number, number, number][] = [];
+      let currentEnd = lines[0].start;
+
+      for (let i = 0; i < lines.length; i++) {
+        const nextLine = lines.find(
+          (l) => l.start === currentEnd || l.end === currentEnd
+        );
+        if (!nextLine) break;
+
+        if (nextLine.start === currentEnd) {
+          const pos = points.get(nextLine.start);
+          if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+          currentEnd = nextLine.end;
+        } else {
+          const pos = points.get(nextLine.end);
+          if (pos) orderedPoints.push([pos[0], pos[1], 0]);
+          currentEnd = nextLine.start;
+        }
+        lines.splice(lines.indexOf(nextLine), 1);
+        i = -1;
+      }
+
+      if (orderedPoints.length < 3) return;
+
+      // Get depth and direction from pending extrude
+      const depth = pendingExtrude.depth || 10;
+      const direction: [number, number, number] =
+        pendingExtrude.direction === "reverse" ? [0, 0, -1] : [0, 0, 1];
+
+      // Create preview geometry using OCC
+      const wire = occApi.makePolygon(orderedPoints);
+      const face = occApi.makeFace(wire);
+      const solid = occApi.extrude(face, direction, depth);
+      const meshData = occApi.mesh(solid, 0.5);
+
+      // Clean up OCC shapes
+      occApi.freeShape(wire);
+      occApi.freeShape(face);
+      occApi.freeShape(solid);
+
+      // Create Three.js preview mesh with transparent green material
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+      if (meshData.normals.length > 0) {
+        geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+      }
+      geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+      if (meshData.normals.length === 0) {
+        geometry.computeVertexNormals();
+      }
+
+      const previewMaterial = new THREE.MeshStandardMaterial({
+        color: 0x69db7c,
+        transparent: true,
+        opacity: 0.5,
+        side: THREE.DoubleSide,
+      });
+
+      const previewMesh = new THREE.Mesh(geometry, previewMaterial);
+      extrudePreviewGroup.add(previewMesh);
+
+      // Add edges for better visibility
+      const edgesGeometry = new THREE.EdgesGeometry(geometry, 30);
+      const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x40c057, linewidth: 2 });
+      const edgeLines = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+      extrudePreviewGroup.add(edgeLines);
+    } catch (err) {
+      console.error("Failed to create extrude preview:", err);
+    }
+  }, [pendingExtrude, occApi, studio]);
 
   // Update sketch preview and cursor point
   useEffect(() => {
@@ -1608,15 +1737,21 @@ export function Viewport() {
       // For extrude-profile, we want to select sketch faces or body faces
       if (faceSelectionTarget.type === "extrude-profile") {
         if (hoveredFace.type === "sketch") {
-          console.log("[Viewport] Selected sketch for extrude:", hoveredFace.sketchId);
-          setPendingExtrudeSketch(hoveredFace.sketchId);
+          // Check if we're in revolve mode or extrude mode
+          if (pendingRevolve) {
+            console.log("[Viewport] Selected sketch for revolve:", hoveredFace.sketchId);
+            setPendingRevolveSketch(hoveredFace.sketchId);
+          } else {
+            console.log("[Viewport] Selected sketch for extrude:", hoveredFace.sketchId);
+            setPendingExtrudeSketch(hoveredFace.sketchId);
+          }
         } else if (hoveredFace.type === "body-face") {
           console.log("[Viewport] Selected body face for extrude:", hoveredFace.opId, "face", hoveredFace.faceIndex);
           setPendingExtrudeBodyFace({ opId: hoveredFace.opId, faceIndex: hoveredFace.faceIndex });
         }
       }
     }
-  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, hoveredFace]);
+  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace]);
 
   // View controls
   const handleResetView = useCallback(() => {
