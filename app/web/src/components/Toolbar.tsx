@@ -215,7 +215,7 @@ const styles = {
     minWidth: 200,
     zIndex: 1000,
     boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
-    overflow: "hidden",
+    overflow: "visible",
   } as React.CSSProperties,
 
   menuItem: {
@@ -480,8 +480,14 @@ function ProfileMenu({
               setShowImportSubmenu(true);
               setShowExportSubmenu(false);
             }}
-            onMouseLeave={() => {
+            onMouseLeave={(e) => {
+              // Don't close if moving to the submenu
+              const relatedTarget = e.relatedTarget as HTMLElement;
+              if (relatedTarget?.closest?.('[data-submenu="import"]')) {
+                return;
+              }
               setHoveredItem(null);
+              setShowImportSubmenu(false);
             }}
           >
             <button
@@ -495,7 +501,14 @@ function ProfileMenu({
               <span style={styles.submenuArrow}>▶</span>
             </button>
             {showImportSubmenu && (
-              <div style={styles.submenu}>
+              <div
+                style={styles.submenu}
+                data-submenu="import"
+                onMouseLeave={() => {
+                  setHoveredItem(null);
+                  setShowImportSubmenu(false);
+                }}
+              >
                 <div style={styles.submenuInner}>
                   {importFormats.map((format) => (
                     <button
@@ -525,8 +538,14 @@ function ProfileMenu({
               setShowExportSubmenu(true);
               setShowImportSubmenu(false);
             }}
-            onMouseLeave={() => {
+            onMouseLeave={(e) => {
+              // Don't close if moving to the submenu
+              const relatedTarget = e.relatedTarget as HTMLElement;
+              if (relatedTarget?.closest?.('[data-submenu="export"]')) {
+                return;
+              }
               setHoveredItem(null);
+              setShowExportSubmenu(false);
             }}
           >
             <button
@@ -540,7 +559,14 @@ function ProfileMenu({
               <span style={styles.submenuArrow}>▶</span>
             </button>
             {showExportSubmenu && (
-              <div style={styles.submenu}>
+              <div
+                style={styles.submenu}
+                data-submenu="export"
+                onMouseLeave={() => {
+                  setHoveredItem(null);
+                  setShowExportSubmenu(false);
+                }}
+              >
                 <div style={styles.submenuInner}>
                   {exportFormats.map((format) => {
                     const hasData = format.needsMesh ? hasGeometry : hasShapeHandles;
