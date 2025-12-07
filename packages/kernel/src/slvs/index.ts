@@ -1,5 +1,5 @@
 /**
- * SolveSpace constraint solver bindings.
+ * Constraint solver bindings using PlaneGCS (FreeCAD).
  */
 
 export type {
@@ -10,20 +10,22 @@ export type {
   ConstraintHandle,
 } from "./api";
 
-export { createSlvsStub } from "./stub";
+export type { PlaneGcsInstance } from "./loader";
 
 // ============================================================================
 // Loader
 // ============================================================================
 
 import type { SlvsApi } from "./api";
-import { createSlvsStub } from "./stub";
+import { SlvsApiImpl } from "./impl";
+import { GcsWrapper, init_planegcs_module } from "@salusoft89/planegcs";
 
 let slvsInstance: SlvsApi | null = null;
 let loadingPromise: Promise<SlvsApi> | null = null;
+let gcsModule: any = null;
 
 /**
- * Load the SolveSpace WASM module.
+ * Load the constraint solver WASM module.
  * Returns a singleton instance.
  */
 export async function loadSlvs(): Promise<SlvsApi> {
@@ -36,12 +38,17 @@ export async function loadSlvs(): Promise<SlvsApi> {
   }
 
   loadingPromise = (async () => {
-    // TODO: Load actual SolveSpace WASM module
-    // For now, return stub implementation
-    console.warn(
-      "[kernel] Using SLVS stub implementation. Real WASM not loaded."
-    );
-    slvsInstance = createSlvsStub();
+    // Load PlaneGCS module
+    gcsModule = await init_planegcs_module();
+    console.log("[kernel] PlaneGCS WASM loaded successfully");
+
+    // Create a factory that creates new GcsWrapper instances
+    const gcsFactory = () => {
+      const gcsSystem = new gcsModule.GcsSystem();
+      return new GcsWrapper(gcsSystem);
+    };
+
+    slvsInstance = new SlvsApiImpl(gcsFactory);
     return slvsInstance;
   })();
 

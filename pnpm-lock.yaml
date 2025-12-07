@@ -173,9 +173,15 @@ importers:
 
   packages/kernel:
     dependencies:
+      '@salusoft89/planegcs':
+        specifier: ^1.1.7
+        version: 1.1.7
       '@vibecad/core':
         specifier: workspace:*
         version: link:../core
+      opencascade.js:
+        specifier: ^1.1.1
+        version: 1.1.1
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -590,6 +596,9 @@ packages:
     resolution: {integrity: sha512-UhTd8u31dXadv0MopwGgNOBpUVROFKWVQgAg5N1ESyCz8AuBcMqm4AuTjrwgQKGDfoFuz02EuMRHQIw/frmYKQ==}
     cpu: [x64]
     os: [win32]
+
+  '@salusoft89/planegcs@1.1.7':
+    resolution: {integrity: sha512-7xTCyQBS8xzRXvB5vXj7vzcGdmPVUZHYgZXrcHBMaBtSE/XMSKH1/OWpdJp8DonbBnuzmjpX8djLta2MFbkhzw==}
 
   '@swc/core-darwin-arm64@1.15.3':
     resolution: {integrity: sha512-AXfeQn0CvcQ4cndlIshETx6jrAM45oeUrK8YeEY6oUZU/qzz0Id0CyvlEywxkWVC81Ajpd8TQQ1fW5yx6zQWkQ==}
@@ -1276,6 +1285,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.53.3':
     optional: true
+
+  '@salusoft89/planegcs@1.1.7': {}
 
   '@swc/core-darwin-arm64@1.15.3':
     optional: true

@@ -10,7 +10,6 @@
 export {
   loadOcc,
   getOcc,
-  createOccStub,
   type OccApi,
   type MeshData,
   type ShapeHandle,
@@ -23,7 +22,6 @@ export {
 export {
   loadSlvs,
   getSlvs,
-  createSlvsStub,
   type SlvsApi,
   type SolveResult,
   type GroupHandle,

@@ -55,7 +55,7 @@ export type FaceSelectionTarget =
 // Selected face reference
 export type SelectedFace =
   | { type: "datum-plane"; planeId: string }
-  | { type: "sketch-profile"; sketchId: string }
+  | { type: "sketch-profile"; sketchId: string; loopIndex?: number }
   | { type: "body-face"; bodyId: string; faceIndex: number };
 
 interface CadState {
@@ -105,6 +105,7 @@ interface CadState {
   // Pending extrude (when user clicks extrude before selecting a profile)
   pendingExtrude: {
     sketchId: string | null;
+    loopIndex?: number;  // Optional loop index within the sketch (undefined = all loops)
     bodyFace: { opId: string; faceIndex: number } | null;
     depth: number;
     direction: "normal" | "reverse" | "symmetric";
@@ -135,6 +136,7 @@ interface CadState {
   hoveredFace: {
     type: "sketch";
     sketchId: string;
+    loopIndex?: number;
   } | {
     type: "body-face";
     opId: string;
@@ -195,7 +197,7 @@ interface CadActions {
 
   // Sketch/Operation creation
   createNewSketch: (planeId?: SketchPlaneId) => SketchId | null;
-  createExtrude: (sketchId: SketchId, depth?: number, direction?: "normal" | "reverse" | "symmetric") => OpId | null;
+  createExtrude: (sketchId: SketchId, depth?: number, direction?: "normal" | "reverse" | "symmetric", loopIndex?: number) => OpId | null;
   createExtrudeFromFace: (opId: string, faceIndex: number, depth?: number, direction?: "normal" | "reverse" | "symmetric") => OpId | null;
 
   // Sketch primitive editing
@@ -223,7 +225,7 @@ interface CadActions {
 
   // Extrude workflow
   startExtrude: () => void;
-  setPendingExtrudeSketch: (sketchId: string | null) => void;
+  setPendingExtrudeSketch: (sketchId: string | null, loopIndex?: number) => void;
   setPendingExtrudeBodyFace: (bodyFace: { opId: string; faceIndex: number } | null) => void;
   setPendingExtrudeDepth: (depth: number) => void;
   setPendingExtrudeDirection: (direction: "normal" | "reverse" | "symmetric") => void;
@@ -645,7 +647,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
     return sketch.id;
   },
 
-  createExtrude: (sketchId, depth = 100, direction = "normal") => {
+  createExtrude: (sketchId, depth = 100, direction = "normal", loopIndex) => {
     const { document, activeStudioId, historyState } = get();
     if (!activeStudioId) return null;
 
@@ -674,6 +676,8 @@ export const useCadStore = create<CadStore>((set, get) => ({
       profile: {
         type: "sketch",
         sketchId: sketchId,
+        // If a specific loop was selected, use it; otherwise extrude all loops
+        profileIndices: loopIndex !== undefined ? [loopIndex] : undefined,
       },
       direction: direction,
       depth: dimLiteral(depth),
@@ -1275,15 +1279,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
     }
   },
 
-  setPendingExtrudeSketch: (sketchId) => {
+  setPendingExtrudeSketch: (sketchId, loopIndex) => {
     const { pendingExtrude, selection, document, activeStudioId } = get();
     if (pendingExtrude) {
       // Clear body face when setting sketch, exit face selection mode
       set({
-        pendingExtrude: { ...pendingExtrude, sketchId, bodyFace: null },
+        pendingExtrude: { ...pendingExtrude, sketchId, loopIndex, bodyFace: null },
         editorMode: "object",
         faceSelectionTarget: null,
-        selectedFace: sketchId ? { type: "sketch-profile", sketchId } : null,
+        selectedFace: sketchId ? { type: "sketch-profile", sketchId, loopIndex } : null,
       });
     } else if (selection.size === 1 && activeStudioId && sketchId) {
       // If no pending extrude but an op is selected, update that op's profile
@@ -1294,7 +1298,11 @@ export const useCadStore = create<CadStore>((set, get) => ({
         // Update the op with new sketch profile
         const updatedOp = {
           ...opNode.op,
-          profile: { type: "sketch" as const, sketchId: sketchId as SketchId },
+          profile: {
+            type: "sketch" as const,
+            sketchId: sketchId as SketchId,
+            profileIndices: loopIndex !== undefined ? [loopIndex] : undefined,
+          },
         };
         const newOpGraph = new Map(studio!.opGraph);
         newOpGraph.set(selectedOpId as OpId, { ...opNode, op: updatedOp });
@@ -1305,7 +1313,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
           document: { ...document, partStudios: newPartStudios },
           editorMode: "object",
           faceSelectionTarget: null,
-          selectedFace: { type: "sketch-profile", sketchId },
+          selectedFace: { type: "sketch-profile", sketchId, loopIndex },
         });
       }
     }
@@ -1340,7 +1348,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   confirmExtrude: () => {
     const { pendingExtrude, createExtrude, createExtrudeFromFace } = get();
     if (pendingExtrude?.sketchId) {
-      createExtrude(pendingExtrude.sketchId as any, pendingExtrude.depth, pendingExtrude.direction);
+      createExtrude(pendingExtrude.sketchId as any, pendingExtrude.depth, pendingExtrude.direction, pendingExtrude.loopIndex);
     } else if (pendingExtrude?.bodyFace) {
       createExtrudeFromFace(
         pendingExtrude.bodyFace.opId,

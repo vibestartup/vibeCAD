@@ -431,7 +431,7 @@ function RevolveProperties({ op, isPending = false }: { op?: any; isPending?: bo
     if (isCreating) {
       setPendingRevolveAxis(newAxis);
     } else if (op) {
-      updateOp(op.id, { axis: newAxis });
+      updateOp(op.id, { axis: newAxis } as any);
     }
   };
 
@@ -638,7 +638,7 @@ function FilletProperties({ op, isPending = false }: { op?: any; isPending?: boo
     if (isCreating) {
       setPendingFilletTarget(newTarget);
     } else if (op) {
-      updateOp(op.id, { targetOpId: newTarget });
+      updateOp(op.id, { targetOpId: newTarget } as any);
     }
   };
 
@@ -729,7 +729,7 @@ function BooleanProperties({ op, isPending = false }: { op?: any; isPending?: bo
   );
 
   // Determine if we're in pending mode or editing an existing op
-  const isCreating = isPending && pendingBoolean;
+  const isCreating = isPending && !!pendingBoolean;
 
   // Get current values from either pending state or existing op
   const currentTargetOpId = isCreating ? pendingBoolean?.targetOpId : op?.targetOpId;
@@ -749,7 +749,7 @@ function BooleanProperties({ op, isPending = false }: { op?: any; isPending?: bo
     if (isCreating) {
       setPendingBooleanTarget(newTarget);
     } else if (op) {
-      updateOp(op.id, { targetOpId: newTarget });
+      updateOp(op.id, { targetOpId: newTarget } as any);
     }
   };
 
@@ -758,7 +758,7 @@ function BooleanProperties({ op, isPending = false }: { op?: any; isPending?: bo
     if (isCreating) {
       setPendingBooleanTool(newTool);
     } else if (op) {
-      updateOp(op.id, { toolOpId: newTool });
+      updateOp(op.id, { toolOpId: newTool } as any);
     }
   };
 

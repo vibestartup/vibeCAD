@@ -1,8 +1,5 @@
 /**
  * OpenCascade.js WASM loader.
- *
- * Note: This loader is currently disabled due to Vite WASM loading issues.
- * The stub implementation is used instead.
  */
 
 // The OpenCascade.js module type
@@ -12,15 +9,22 @@ export interface OpenCascadeInstance {
 }
 
 /**
- * Attempt to load the real OpenCascade.js WASM module.
- * This is separated out so it can be dynamically imported only when needed.
+ * Load the real OpenCascade.js WASM module.
  *
  * @internal
  */
 export async function loadRealOcc(): Promise<OpenCascadeInstance> {
-  // Use a variable to prevent Vite from statically analyzing the import
-  const moduleName = ["opencascade", "js"].join(".");
-  const initOpenCascade = await import(/* @vite-ignore */ moduleName);
-  const oc = await (initOpenCascade.default || initOpenCascade)();
+  // Dynamic import opencascade.js
+  // The module exports { initOpenCascade } as a named export
+  const occModule = await import("opencascade.js") as any;
+
+  // Handle both named export and default export patterns
+  const initFn = occModule.initOpenCascade || occModule.default?.initOpenCascade || occModule.default;
+
+  if (typeof initFn !== 'function') {
+    throw new Error('Failed to find initOpenCascade function in opencascade.js module');
+  }
+
+  const oc = await initFn();
   return oc;
 }

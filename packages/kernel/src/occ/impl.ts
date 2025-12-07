@@ -465,7 +465,9 @@ export class OccApiImpl implements OccApi {
     const positions: number[] = [];
     const normals: number[] = [];
     const indices: number[] = [];
+    const faceGroups: { start: number; count: number }[] = [];
     let vertexOffset = 0;
+    let triangleOffset = 0;
 
     const faceExplorer = new this.oc.TopExp_Explorer_2(
       shapeObj,
@@ -476,13 +478,16 @@ export class OccApiImpl implements OccApi {
     while (faceExplorer.More()) {
       const face = this.oc.TopoDS.Face_1(faceExplorer.Current());
       const location = new this.oc.TopLoc_Location_1();
-      const triangulation = this.oc.BRep_Tool.Triangulation(face, location, 0);
+      const triangulation = this.oc.BRep_Tool.Triangulation(face, location);
 
       if (!triangulation.IsNull()) {
         const transformation = location.Transformation();
         const tri = triangulation.get();
         const numNodes = tri.NbNodes();
         const numTriangles = tri.NbTriangles();
+
+        // Track face group - start index in the indices array (multiply by 3 since each triangle has 3 indices)
+        const faceGroupStart = triangleOffset;
 
         // Extract vertices and normals
         for (let i = 1; i <= numNodes; i++) {
@@ -519,7 +524,14 @@ export class OccApiImpl implements OccApi {
           }
         }
 
+        // Record face group
+        faceGroups.push({
+          start: faceGroupStart,
+          count: numTriangles,
+        });
+
         vertexOffset += numNodes;
+        triangleOffset += numTriangles;
       }
 
       faceExplorer.Next();
@@ -529,6 +541,7 @@ export class OccApiImpl implements OccApi {
       positions: new Float32Array(positions),
       normals: new Float32Array(normals),
       indices: new Uint32Array(indices),
+      faceGroups,
     };
   }
 

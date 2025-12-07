@@ -342,6 +342,25 @@ function createEdges(geometry: THREE.BufferGeometry): THREE.LineSegments {
   return line;
 }
 
+// Map a triangle index to an OCC face index using faceGroups
+function triangleToFaceIndex(
+  triangleIndex: number,
+  faceGroups: { start: number; count: number }[] | undefined
+): number {
+  if (!faceGroups || faceGroups.length === 0) {
+    return triangleIndex; // Fallback: treat each triangle as a face
+  }
+
+  for (let i = 0; i < faceGroups.length; i++) {
+    const group = faceGroups[i];
+    if (triangleIndex >= group.start && triangleIndex < group.start + group.count) {
+      return i;
+    }
+  }
+
+  return -1; // Not found
+}
+
 // Get plane by ID (datum planes or custom)
 function getPlaneById(planeId: SketchPlaneId, customPlanes?: Map<SketchPlaneId, SketchPlane>): SketchPlane | undefined {
   // Check datum planes first
@@ -567,7 +586,8 @@ function createSketchLines(
   // Find and fill closed loops from line segments
   if (lineSegments.length >= 3) {
     const loops = findClosedLoops(lineSegments);
-    for (const loop of loops) {
+    for (let loopIndex = 0; loopIndex < loops.length; loopIndex++) {
+      const loop = loops[loopIndex];
       // Create a THREE.Shape from the loop points (in 2D sketch coords)
       const shape = new THREE.Shape();
       shape.moveTo(loop[0][0], loop[0][1]);
@@ -578,6 +598,10 @@ function createSketchLines(
 
       const fillGeometry = new THREE.ShapeGeometry(shape);
       const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
+
+      // Tag mesh with loop index for hit detection
+      fillMesh.userData.isSketchLoop = true;
+      fillMesh.userData.loopIndex = loopIndex;
 
       // Position at plane origin and orient to plane
       const origin3D = new THREE.Vector3(
@@ -1017,6 +1041,8 @@ export function Viewport() {
           mesh.userData.opId = opId;
           mesh.userData.opType = op.type;
           mesh.userData.isBody = true;
+          // Store face groups for proper face selection (maps OCC face index to triangle range)
+          mesh.userData.faceGroups = meshData.faceGroups;
 
           // Add edges
           const edges = createEdges(mesh.geometry);
@@ -1144,31 +1170,53 @@ export function Viewport() {
     const geometry = targetMesh.geometry as THREE.BufferGeometry;
     const position = geometry.getAttribute("position");
     const index = geometry.getIndex();
+    const faceGroups = targetMesh.userData.faceGroups as { start: number; count: number }[] | undefined;
 
     if (!position) return;
 
-    // Get the triangle vertices for the hovered face
+    // Get the OCC face index
     const faceIndex = hoveredFace.faceIndex;
-    let i0: number, i1: number, i2: number;
 
-    if (index) {
-      i0 = index.getX(faceIndex * 3);
-      i1 = index.getX(faceIndex * 3 + 1);
-      i2 = index.getX(faceIndex * 3 + 2);
+    // Get the face group for this OCC face
+    const faceGroup = faceGroups?.[faceIndex];
+
+    // Create highlight geometry for all triangles in this face
+    const highlightGeo = new THREE.BufferGeometry();
+    const vertices: number[] = [];
+
+    if (faceGroup && index) {
+      // Highlight all triangles in the face group
+      for (let t = 0; t < faceGroup.count; t++) {
+        const triIndex = faceGroup.start + t;
+        const i0 = index.getX(triIndex * 3);
+        const i1 = index.getX(triIndex * 3 + 1);
+        const i2 = index.getX(triIndex * 3 + 2);
+        vertices.push(
+          position.getX(i0), position.getY(i0), position.getZ(i0),
+          position.getX(i1), position.getY(i1), position.getZ(i1),
+          position.getX(i2), position.getY(i2), position.getZ(i2)
+        );
+      }
     } else {
-      i0 = faceIndex * 3;
-      i1 = faceIndex * 3 + 1;
-      i2 = faceIndex * 3 + 2;
+      // Fallback: highlight single triangle (old behavior)
+      let i0: number, i1: number, i2: number;
+      if (index) {
+        i0 = index.getX(faceIndex * 3);
+        i1 = index.getX(faceIndex * 3 + 1);
+        i2 = index.getX(faceIndex * 3 + 2);
+      } else {
+        i0 = faceIndex * 3;
+        i1 = faceIndex * 3 + 1;
+        i2 = faceIndex * 3 + 2;
+      }
+      vertices.push(
+        position.getX(i0), position.getY(i0), position.getZ(i0),
+        position.getX(i1), position.getY(i1), position.getZ(i1),
+        position.getX(i2), position.getY(i2), position.getZ(i2)
+      );
     }
 
-    // Create a highlight triangle
-    const highlightGeo = new THREE.BufferGeometry();
-    const vertices = new Float32Array([
-      position.getX(i0), position.getY(i0), position.getZ(i0),
-      position.getX(i1), position.getY(i1), position.getZ(i1),
-      position.getX(i2), position.getY(i2), position.getZ(i2),
-    ]);
-    highlightGeo.setAttribute("position", new THREE.BufferAttribute(vertices, 3));
+    highlightGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(vertices), 3));
 
     const highlightMat = new THREE.MeshBasicMaterial({
       color: 0x69db7c,
@@ -1642,7 +1690,11 @@ export function Viewport() {
         if (bodyIntersects.length > 0) {
           const hit = bodyIntersects[0];
           const opId = hit.object.userData.opId;
-          const faceIndex = hit.faceIndex ?? -1;
+          const triangleIndex = hit.faceIndex ?? -1;
+          const faceGroups = hit.object.userData.faceGroups;
+
+          // Map triangle index to OCC face index
+          const faceIndex = triangleToFaceIndex(triangleIndex, faceGroups);
 
           if (opId && faceIndex >= 0) {
             const newHover = { type: "body-face" as const, opId, faceIndex };
@@ -1660,7 +1712,7 @@ export function Viewport() {
       if (sketchGroup && faceSelectionTarget?.type === "extrude-profile") {
         const allSketchObjects: THREE.Object3D[] = [];
         sketchGroup.traverse((obj) => {
-          if (obj.userData.isSketch || obj.parent?.userData.isSketch) {
+          if (obj.userData.isSketch || obj.parent?.userData.isSketch || obj.userData.isSketchLoop) {
             allSketchObjects.push(obj);
           }
         });
@@ -1668,7 +1720,15 @@ export function Viewport() {
         const intersects = raycaster.intersectObjects(allSketchObjects, true);
         if (intersects.length > 0) {
           let sketchId: string | null = null;
+          let loopIndex: number | undefined = undefined;
           let obj: THREE.Object3D | null = intersects[0].object;
+
+          // Check if we hit a sketch loop mesh directly
+          if (obj.userData.isSketchLoop && obj.userData.loopIndex !== undefined) {
+            loopIndex = obj.userData.loopIndex;
+          }
+
+          // Walk up to find the sketch ID
           while (obj && !sketchId) {
             if (obj.userData.sketchId) {
               sketchId = obj.userData.sketchId;
@@ -1677,8 +1737,10 @@ export function Viewport() {
           }
 
           if (sketchId) {
-            const newHover = { type: "sketch" as const, sketchId };
-            if (hoveredFace?.type !== "sketch" || hoveredFace.sketchId !== sketchId) {
+            const newHover = { type: "sketch" as const, sketchId, loopIndex };
+            if (hoveredFace?.type !== "sketch" ||
+                hoveredFace.sketchId !== sketchId ||
+                hoveredFace.loopIndex !== loopIndex) {
               setHoveredFace(newHover);
             }
             return;
@@ -1739,11 +1801,11 @@ export function Viewport() {
         if (hoveredFace.type === "sketch") {
           // Check if we're in revolve mode or extrude mode
           if (pendingRevolve) {
-            console.log("[Viewport] Selected sketch for revolve:", hoveredFace.sketchId);
+            console.log("[Viewport] Selected sketch for revolve:", hoveredFace.sketchId, "loop:", hoveredFace.loopIndex);
             setPendingRevolveSketch(hoveredFace.sketchId);
           } else {
-            console.log("[Viewport] Selected sketch for extrude:", hoveredFace.sketchId);
-            setPendingExtrudeSketch(hoveredFace.sketchId);
+            console.log("[Viewport] Selected sketch for extrude:", hoveredFace.sketchId, "loop:", hoveredFace.loopIndex);
+            setPendingExtrudeSketch(hoveredFace.sketchId, hoveredFace.loopIndex);
           }
         } else if (hoveredFace.type === "body-face") {
           console.log("[Viewport] Selected body face for extrude:", hoveredFace.opId, "face", hoveredFace.faceIndex);

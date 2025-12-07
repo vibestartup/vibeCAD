@@ -14,6 +14,8 @@ export interface MeshData {
   positions: Float32Array;
   normals: Float32Array;
   indices: Uint32Array;
+  /** Face groups - maps OCC face index to triangle range in indices array */
+  faceGroups?: { start: number; count: number }[];
 }
 
 export interface OccApi {
