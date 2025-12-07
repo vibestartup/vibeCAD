@@ -427,10 +427,7 @@ interface ContextMenuState {
  * Used by both the standalone OpTimeline and the LeftSidebar.
  */
 export function OpTimelineContent() {
-  const activeStudioId = useCadStore((s) => s.activeStudioId);
-  const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
-  );
+  const studio = useCadStore((s) => s.studio);
   const opSelection = useCadStore((s) => s.opSelection);
   const setOpSelection = useCadStore((s) => s.setOpSelection);
   const timelinePosition = useCadStore((s) => s.timelinePosition);
@@ -608,10 +605,10 @@ export function OpTimelineContent() {
     };
   }, [isDragging, ops.length, setTimelinePosition]);
 
-  if (!activeStudioId || !studio) {
+  if (!studio) {
     return (
       <div style={{ ...styles.container, padding: 16 }}>
-        <div style={styles.emptyState}>No part studio selected</div>
+        <div style={styles.emptyState}>No part studio loaded</div>
       </div>
     );
   }

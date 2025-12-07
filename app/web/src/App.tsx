@@ -11,7 +11,7 @@ import {
   type CadDocument,
 } from "./store/tabs-store";
 import { useCadStore } from "./store/cad-store";
-import { createDocumentWithCube } from "@vibecad/core";
+import { createPartStudioWithCube } from "@vibecad/core";
 
 // ============================================================================
 // Styles
@@ -45,28 +45,21 @@ export const App: React.FC = () => {
   const setActiveTab = useTabsStore((s) => s.setActiveTab);
   const getTab = useTabsStore((s) => s.getTab);
 
-  const setDocument = useCadStore((s) => s.setDocument);
-  const document = useCadStore((s) => s.document);
-  const setActiveStudio = useCadStore((s) => s.setActiveStudio);
+  const setStudio = useCadStore((s) => s.setStudio);
+  const studio = useCadStore((s) => s.studio);
 
   // Get active tab
   const activeTab = activeTabId ? getTab(activeTabId) : null;
 
-  // Create new CAD document
+  // Create new CAD document (now creates a single PartStudio)
   const handleNewCadDocument = useCallback(() => {
-    const doc = createDocumentWithCube("Untitled");
-    setDocument(doc);
-
-    // Set active studio
-    const firstStudioId = doc.partStudios.keys().next().value;
-    if (firstStudioId) {
-      setActiveStudio(firstStudioId);
-    }
+    const newStudio = createPartStudioWithCube("Untitled");
+    setStudio(newStudio);
 
     // Create and open tab
-    const tab = createCadTab(doc.name, doc.id);
+    const tab = createCadTab(newStudio.name, newStudio.id);
     openTab(tab);
-  }, [setDocument, setActiveStudio, openTab]);
+  }, [setStudio, openTab]);
 
   // Open file dialog
   const handleOpenFile = useCallback(async () => {
@@ -84,18 +77,14 @@ export const App: React.FC = () => {
 
         try {
           if (docType === "cad") {
-            // Load CAD document
+            // Load CAD file as PartStudio
             const text = await file.text();
             const data = JSON.parse(text);
-            // TODO: Properly deserialize and load CAD document
-            // For now, create a new document
-            const doc = createDocumentWithCube(file.name.replace(/\.vibecad\.json$/, "").replace(/\.json$/, ""));
-            setDocument(doc);
-            const firstStudioId = doc.partStudios.keys().next().value;
-            if (firstStudioId) {
-              setActiveStudio(firstStudioId);
-            }
-            const tab = createCadTab(doc.name, doc.id);
+            // TODO: Use deserializePartStudio from file-store for proper loading
+            // For now, create a new studio with the file name
+            const newStudio = createPartStudioWithCube(file.name.replace(/\.vibecad\.json$/, "").replace(/\.json$/, "").replace(/\.vibecad$/, ""));
+            setStudio(newStudio);
+            const tab = createCadTab(newStudio.name, newStudio.id);
             openTab(tab);
           } else if (docType === "image") {
             const tab = await createImageTabFromFile(file);
@@ -111,7 +100,7 @@ export const App: React.FC = () => {
     };
 
     input.click();
-  }, [setDocument, setActiveStudio, openTab]);
+  }, [setStudio, openTab]);
 
   // When active CAD tab changes, sync the CAD store
   useEffect(() => {
@@ -121,13 +110,13 @@ export const App: React.FC = () => {
     }
   }, [activeTab]);
 
-  // Auto-create a tab for the initial document if none exist
+  // Auto-create a tab for the initial studio if none exist
   useEffect(() => {
-    if (tabs.length === 0 && document) {
-      const tab = createCadTab(document.name, document.id);
+    if (tabs.length === 0 && studio) {
+      const tab = createCadTab(studio.name, studio.id);
       openTab(tab);
     }
-  }, [tabs.length, document, openTab]);
+  }, [tabs.length, studio, openTab]);
 
   // Check if active tab is a CAD document
   const showCadEditor = activeTab?.type === "cad";

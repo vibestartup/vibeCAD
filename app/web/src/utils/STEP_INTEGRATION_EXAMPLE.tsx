@@ -12,15 +12,12 @@ import { getOcc } from "@vibecad/kernel";
 import type { ShapeHandle } from "@vibecad/kernel";
 
 /**
- * Hook to get exportable shape handles from the current document
+ * Hook to get exportable shape handles from the current studio
  */
 export function useExportableShapes(): ShapeHandle[] {
   return useCadStore((state) => {
-    const { document, activeStudioId, timelinePosition } = state;
+    const { studio, timelinePosition } = state;
 
-    if (!activeStudioId) return [];
-
-    const studio = document.partStudios.get(activeStudioId);
     if (!studio?.results) return [];
 
     const shapeHandles: ShapeHandle[] = [];
@@ -50,7 +47,7 @@ export function useExportableShapes(): ShapeHandle[] {
 function ToolbarWithSTEPExport() {
   // Existing STL export
   const exportMeshes = useCadStore((s) => s.exportMeshes);
-  const documentName = useCadStore((s) => s.document.name);
+  const studioName = useCadStore((s) => s.studio.name);
 
   // NEW: Shape handles for STEP export
   const exportableShapes = useExportableShapes();
@@ -61,9 +58,9 @@ function ToolbarWithSTEPExport() {
       console.warn("[Toolbar] No meshes available for export");
       return;
     }
-    const filename = documentName.replace(/\s+/g, "_") || "model";
+    const filename = studioName.replace(/\s+/g, "_") || "model";
     // ... existing STL export code
-  }, [exportMeshes, documentName]);
+  }, [exportMeshes, studioName]);
 
   // NEW: STEP export handler
   const handleExportSTEP = React.useCallback(() => {
@@ -81,7 +78,7 @@ function ToolbarWithSTEPExport() {
       return;
     }
 
-    const filename = documentName.replace(/\s+/g, "_") || "model";
+    const filename = studioName.replace(/\s+/g, "_") || "model";
 
     try {
       exportSTEP(occApi, exportableShapes, filename, true);
@@ -90,7 +87,7 @@ function ToolbarWithSTEPExport() {
       console.error("[Toolbar] STEP export failed:", error);
       alert("STEP export failed. Check console for details.");
     }
-  }, [exportableShapes, documentName]);
+  }, [exportableShapes, studioName]);
 
   // ... rest of toolbar implementation
   return null; // Your actual toolbar JSX
@@ -179,13 +176,13 @@ function ToolbarUsageExample() {
  */
 function SimpleSTEPExportButton() {
   const exportableShapes = useExportableShapes();
-  const documentName = useCadStore((s) => s.document.name);
+  const studioName = useCadStore((s) => s.studio.name);
 
   const handleExportSTEP = () => {
     const occApi = getOcc();
     if (!occApi || exportableShapes.length === 0) return;
 
-    const filename = documentName.replace(/\s+/g, "_") || "model";
+    const filename = studioName.replace(/\s+/g, "_") || "model";
     exportSTEP(occApi, exportableShapes, filename, true);
   };
 

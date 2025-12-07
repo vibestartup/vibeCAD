@@ -701,9 +701,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   // Get length unit from settings
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
 
-  const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
-  );
+  const studio = useCadStore((s) => s.studio);
   const timelinePosition = useCadStore((s) => s.timelinePosition);
   const editorMode = useCadStore((s) => s.editorMode);
   const objectSelection = useCadStore((s) => s.objectSelection);

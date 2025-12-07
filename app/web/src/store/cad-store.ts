@@ -1,11 +1,13 @@
 /**
  * CAD Store - global state management using Zustand.
+ *
+ * Refactored to work with a single PartStudio per file (1 file = 1 tab = 1 PartStudio).
+ * No more Document wrapper with multiple part studios.
  */
 
 import { create } from "zustand";
 import type {
-  Document,
-  PartStudioId,
+  PartStudio,
   SketchId,
   SketchPlaneId,
   ParamEnv,
@@ -34,13 +36,13 @@ import type {
 import type { ExportableMesh } from "../utils/stl-export";
 import type { ShapeHandle } from "@vibecad/kernel";
 import {
-  createDocumentWithCube,
-  getDefaultStudio,
+  createPartStudioWithCube,
   createParam,
   createSketch,
   newId,
   dimLiteral,
   DATUM_XY,
+  touchPartStudio,
 } from "@vibecad/core";
 import { history, HistoryState, createHistory, pushState, undo, redo } from "@vibecad/core";
 import { params } from "@vibecad/core";
@@ -66,12 +68,11 @@ export type SelectedFace =
   | { type: "body-face"; bodyId: string; faceIndex: number };
 
 interface CadState {
-  // Document state
-  document: Document;
-  historyState: HistoryState<Document>;
+  // Main state - single PartStudio (the open file)
+  studio: PartStudio;
+  historyState: HistoryState<PartStudio>;
 
   // UI state
-  activeStudioId: PartStudioId | null;
   activeSketchId: SketchId | null;
   objectSelection: Set<string>;  // 3D solid/body selection
   opSelection: Set<string>;      // Operation selection in timeline
@@ -198,12 +199,15 @@ interface CadState {
 }
 
 interface CadActions {
-  // Document actions
-  setDocument: (doc: Document) => void;
-  updateDocument: (updater: (doc: Document) => Document) => void;
+  // Studio actions (replaces document actions)
+  setStudio: (studio: PartStudio) => void;
+  updateStudio: (updater: (studio: PartStudio) => PartStudio) => void;
+
+  // Legacy compatibility - maps to studio
+  setDocument: (studio: PartStudio) => void;
+  loadDocument: (studio: PartStudio) => void;
 
   // UI actions
-  setActiveStudio: (id: PartStudioId | null) => void;
   setActiveSketch: (id: SketchId | null) => void;
   setObjectSelection: (ids: Set<string>) => void;
   clearObjectSelection: () => void;
@@ -353,14 +357,12 @@ export type CadStore = CadState & CadActions;
 // ============================================================================
 
 function createInitialState(): CadState {
-  // Create a document with a default 10cm cube to get users started
-  const document = createDocumentWithCube("Untitled");
-  const defaultStudio = getDefaultStudio(document);
+  // Create a PartStudio with a default 10cm cube to get users started
+  const studio = createPartStudioWithCube("Untitled");
 
   return {
-    document,
-    historyState: createHistory(document),
-    activeStudioId: defaultStudio?.id ?? null,
+    studio,
+    historyState: createHistory(studio),
     activeSketchId: null,
     objectSelection: new Set(),
     opSelection: new Set(),
@@ -394,26 +396,37 @@ function createInitialState(): CadState {
 export const useCadStore = create<CadStore>((set, get) => ({
   ...createInitialState(),
 
-  // Document actions
-  setDocument: (doc) => {
-    set({ document: doc });
-  },
-
-  updateDocument: (updater) => {
-    const { document, historyState } = get();
-    const newDoc = updater(document);
-
+  // Studio actions
+  setStudio: (studio) => {
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio,
+      historyState: createHistory(studio),
+      activeSketchId: null,
+      objectSelection: new Set(),
+      opSelection: new Set(),
     });
   },
 
-  // UI actions
-  setActiveStudio: (id) => {
-    set({ activeStudioId: id, activeSketchId: null });
+  updateStudio: (updater) => {
+    const { studio, historyState } = get();
+    const newStudio = touchPartStudio(updater(studio));
+
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+    });
   },
 
+  // Legacy compatibility
+  setDocument: (studio) => {
+    get().setStudio(studio);
+  },
+
+  loadDocument: (studio) => {
+    get().setStudio(studio);
+  },
+
+  // UI actions
   setActiveSketch: (id) => {
     set({ activeSketchId: id });
   },
@@ -509,8 +522,8 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   // History actions
   pushHistory: () => {
-    const { document, historyState } = get();
-    set({ historyState: pushState(historyState, document) });
+    const { studio, historyState } = get();
+    set({ historyState: pushState(historyState, studio) });
   },
 
   undo: () => {
@@ -518,7 +531,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newHistory = undo(historyState);
     set({
       historyState: newHistory,
-      document: newHistory.present,
+      studio: newHistory.present,
     });
   },
 
@@ -527,7 +540,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newHistory = redo(historyState);
     set({
       historyState: newHistory,
-      document: newHistory.present,
+      studio: newHistory.present,
     });
   },
 
@@ -547,21 +560,13 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   rebuild: async () => {
-    const { document, activeStudioId, kernel } = get();
-    if (!kernel || !activeStudioId) return;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return;
+    const { studio, kernel } = get();
+    if (!kernel) return;
 
     set({ isRebuilding: true, rebuildError: null });
 
     try {
-      // const { partStudio } = await import("@vibecad/core");
-      // const rebuiltStudio = await partStudio.rebuild(studio, document.params, kernel.occ, kernel.slvs);
-
-      // For now, just mark as done since rebuild needs actual WASM
       // TODO: Hook up real rebuild when WASM is integrated
-
       set({ isRebuilding: false });
     } catch (e) {
       set({
@@ -573,11 +578,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   // Operations
   updateOp: (opId, updates) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return;
+    const { studio, historyState } = get();
 
     const opNode = studio.opGraph.get(opId);
     if (!opNode) return;
@@ -585,23 +586,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newOpGraph = new Map(studio.opGraph);
     newOpGraph.set(opId, { ...opNode, op: { ...opNode.op, ...updates } as Op });
 
-    const newStudio = { ...studio, opGraph: newOpGraph };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    const newStudio = touchPartStudio({ ...studio, opGraph: newOpGraph });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
   },
 
   deleteOp: (opId) => {
-    const { document, activeStudioId, historyState, objectSelection, opSelection } = get();
-    if (!activeStudioId) return;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return;
+    const { studio, historyState, objectSelection, opSelection } = get();
 
     const opNode = studio.opGraph.get(opId);
     if (!opNode) return;
@@ -621,16 +614,12 @@ export const useCadStore = create<CadStore>((set, get) => ({
       newSketches.delete(sketchOp.sketchId);
     }
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
       sketches: newSketches,
-    };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     // Remove from both selections if selected
     const newObjectSelection = new Set(objectSelection);
@@ -639,65 +628,61 @@ export const useCadStore = create<CadStore>((set, get) => ({
     newOpSelection.delete(opId);
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       objectSelection: newObjectSelection,
       opSelection: newOpSelection,
     });
   },
 
-  // Parameters
+  // Parameters - now on studio.params instead of document.params
   addParam: (name, value, unit) => {
-    const { document, historyState } = get();
+    const { studio, historyState } = get();
     const param = createParam(name, value, unit);
-    const newParams = params.addParam(document.params, param);
-    const newDoc = { ...document, params: newParams };
+    const newParams = params.addParam(studio.params, param);
+    const newStudio = touchPartStudio({ ...studio, params: newParams });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
   },
 
   updateParam: (paramId, updates) => {
-    const { document, historyState } = get();
-    const existingParam = document.params.params.get(paramId);
+    const { studio, historyState } = get();
+    const existingParam = studio.params.params.get(paramId);
     if (!existingParam) return;
 
-    const newParamsMap = new Map(document.params.params);
+    const newParamsMap = new Map(studio.params.params);
     newParamsMap.set(paramId, { ...existingParam, ...updates });
 
     const newParams: ParamEnv = {
-      ...document.params,
+      ...studio.params,
       params: newParamsMap,
     };
 
     // Re-evaluate if expression changed
     const evaluatedParams = params.evaluateParams(newParams);
 
-    const newDoc = { ...document, params: evaluatedParams };
+    const newStudio = touchPartStudio({ ...studio, params: evaluatedParams });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
   },
 
   removeParam: (paramId) => {
-    const { document, historyState } = get();
-    const newParams = params.removeParam(document.params, paramId);
-    const newDoc = { ...document, params: newParams };
+    const { studio, historyState } = get();
+    const newParams = params.removeParam(studio.params, paramId);
+    const newStudio = touchPartStudio({ ...studio, params: newParams });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
   },
 
   // Sketch/Operation creation
   createNewSketch: (planeId) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     // Use provided plane or default to XY datum
     const targetPlaneId = planeId ?? DATUM_XY.id;
@@ -726,23 +711,18 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, sketchOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       sketches: newSketches,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     console.log("[CAD] createNewSketch:", sketch.id, sketch.name);
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       activeSketchId: sketch.id,
       editorMode: "sketch",
       activeTool: "line",
@@ -753,11 +733,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createExtrude: (sketchId, depth = 100, direction = "normal", loopIndex) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const sketch = studio.sketches.get(sketchId);
     if (!sketch) return null;
@@ -797,20 +773,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, extrudeOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null, // Show all ops
     });
 
@@ -818,11 +789,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createExtrudeFromFace: (opId, faceIndex, depth = 100, direction = "normal") => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     // Verify the source operation exists
     const sourceOp = studio.opGraph.get(opId as OpId);
@@ -856,20 +823,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, extrudeOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -878,11 +840,8 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   // Sketch primitive editing
   addPoint: (x, y) => {
-    const { document, activeStudioId, activeSketchId, historyState } = get();
-    if (!activeStudioId || !activeSketchId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, activeSketchId, historyState } = get();
+    if (!activeSketchId) return null;
 
     const sketch = studio.sketches.get(activeSketchId);
     if (!sketch) return null;
@@ -911,14 +870,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newSketches = new Map(studio.sketches);
     newSketches.set(activeSketchId, newSketch);
 
-    const newStudio = { ...studio, sketches: newSketches };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
 
     return pointId;
@@ -926,15 +881,9 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   addLine: (startX, startY, endX, endY) => {
     console.log("[CAD] addLine:", { startX, startY, endX, endY });
-    const { document, activeStudioId, activeSketchId, historyState } = get();
-    if (!activeStudioId || !activeSketchId) {
-      console.log("[CAD] addLine failed: no active studio or sketch", { activeStudioId, activeSketchId });
-      return null;
-    }
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) {
-      console.log("[CAD] addLine failed: studio not found");
+    const { studio, activeSketchId, historyState } = get();
+    if (!activeSketchId) {
+      console.log("[CAD] addLine failed: no active sketch", { activeSketchId });
       return null;
     }
 
@@ -991,14 +940,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newSketches = new Map(studio.sketches);
     newSketches.set(activeSketchId, newSketch);
 
-    const newStudio = { ...studio, sketches: newSketches };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
 
     console.log("[CAD] addLine SUCCESS:", lineId, "sketch now has", newPrimitives.size, "primitives");
@@ -1007,11 +952,8 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   addCircle: (centerX, centerY, radius) => {
     console.log("[CAD] addCircle:", { centerX, centerY, radius });
-    const { document, activeStudioId, activeSketchId, historyState } = get();
-    if (!activeStudioId || !activeSketchId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, activeSketchId, historyState } = get();
+    if (!activeSketchId) return null;
 
     const sketch = studio.sketches.get(activeSketchId);
     if (!sketch) return null;
@@ -1051,25 +993,18 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newSketches = new Map(studio.sketches);
     newSketches.set(activeSketchId, newSketch);
 
-    const newStudio = { ...studio, sketches: newSketches };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
 
     return circleId;
   },
 
   addRectangle: (x1, y1, x2, y2) => {
-    const { document, activeStudioId, activeSketchId, historyState } = get();
-    if (!activeStudioId || !activeSketchId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, activeSketchId, historyState } = get();
+    if (!activeSketchId) return null;
 
     const sketch = studio.sketches.get(activeSketchId);
     if (!sketch) return null;
@@ -1121,25 +1056,18 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newSketches = new Map(studio.sketches);
     newSketches.set(activeSketchId, newSketch);
 
-    const newStudio = { ...studio, sketches: newSketches };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
 
     return l1Id; // Return first line as reference
   },
 
   addArc: (centerX, centerY, startX, startY, endX, endY, clockwise = false) => {
-    const { document, activeStudioId, activeSketchId, historyState } = get();
-    if (!activeStudioId || !activeSketchId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, activeSketchId, historyState } = get();
+    if (!activeSketchId) return null;
 
     const sketch = studio.sketches.get(activeSketchId);
     if (!sketch) return null;
@@ -1203,14 +1131,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const newSketches = new Map(studio.sketches);
     newSketches.set(activeSketchId, newSketch);
 
-    const newStudio = { ...studio, sketches: newSketches };
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
     });
 
     return arcId;
@@ -1328,7 +1252,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   selectFace: (face) => {
-    const { faceSelectionTarget, pendingExtrude, document, activeStudioId, historyState } = get();
+    const { faceSelectionTarget, pendingExtrude, studio, historyState } = get();
 
     // If selecting for sketch plane
     if (faceSelectionTarget?.type === "sketch-plane") {
@@ -1347,39 +1271,32 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     // If editing an existing sketch's plane
     if (faceSelectionTarget?.type === "edit-sketch-plane") {
-      if (face.type === "datum-plane" && activeStudioId) {
-        const studio = document.partStudios.get(activeStudioId);
-        if (studio) {
-          const { opId, sketchId } = faceSelectionTarget;
-          const newPlaneId = face.planeId as SketchPlaneId;
+      if (face.type === "datum-plane") {
+        const { opId, sketchId } = faceSelectionTarget;
+        const newPlaneId = face.planeId as SketchPlaneId;
 
-          // Update the SketchOp's planeRef
-          const opNode = studio.opGraph.get(opId as OpId);
-          if (opNode && opNode.op.type === "sketch") {
-            const updatedOp = { ...opNode.op, planeRef: newPlaneId };
-            const newOpGraph = new Map(studio.opGraph);
-            newOpGraph.set(opId as OpId, { ...opNode, op: updatedOp });
+        // Update the SketchOp's planeRef
+        const opNode = studio.opGraph.get(opId as OpId);
+        if (opNode && opNode.op.type === "sketch") {
+          const updatedOp = { ...opNode.op, planeRef: newPlaneId };
+          const newOpGraph = new Map(studio.opGraph);
+          newOpGraph.set(opId as OpId, { ...opNode, op: updatedOp });
 
-            // Update the Sketch's planeId
-            const sketch = studio.sketches.get(sketchId as SketchId);
-            if (sketch) {
-              const updatedSketch = { ...sketch, planeId: newPlaneId };
-              const newSketches = new Map(studio.sketches);
-              newSketches.set(sketchId as SketchId, updatedSketch);
+          // Update the Sketch's planeId
+          const sketch = studio.sketches.get(sketchId as SketchId);
+          if (sketch) {
+            const updatedSketch = { ...sketch, planeId: newPlaneId };
+            const newSketches = new Map(studio.sketches);
+            newSketches.set(sketchId as SketchId, updatedSketch);
 
-              const newStudio = { ...studio, opGraph: newOpGraph, sketches: newSketches };
-              const newPartStudios = new Map(document.partStudios);
-              newPartStudios.set(activeStudioId, newStudio);
-
-              const newDoc = { ...document, partStudios: newPartStudios };
-              set({
-                document: newDoc,
-                historyState: pushState(historyState, newDoc),
-                editorMode: "object",
-                faceSelectionTarget: null,
-                selectedFace: null,
-              });
-            }
+            const newStudio = touchPartStudio({ ...studio, opGraph: newOpGraph, sketches: newSketches });
+            set({
+              studio: newStudio,
+              historyState: pushState(historyState, newStudio),
+              editorMode: "object",
+              faceSelectionTarget: null,
+              selectedFace: null,
+            });
           }
         }
       } else {
@@ -1432,7 +1349,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   setPendingExtrudeSketch: (sketchId, loopIndex) => {
-    const { pendingExtrude, opSelection, document, activeStudioId } = get();
+    const { pendingExtrude, opSelection, studio } = get();
     if (pendingExtrude) {
       // Clear body face when setting sketch, exit face selection mode
       set({
@@ -1441,11 +1358,10 @@ export const useCadStore = create<CadStore>((set, get) => ({
         faceSelectionTarget: null,
         selectedFace: sketchId ? { type: "sketch-profile", sketchId, loopIndex } : null,
       });
-    } else if (opSelection.size === 1 && activeStudioId && sketchId) {
+    } else if (opSelection.size === 1 && sketchId) {
       // If no pending extrude but an op is selected, update that op's profile
       const selectedOpId = Array.from(opSelection)[0];
-      const studio = document.partStudios.get(activeStudioId);
-      const opNode = studio?.opGraph.get(selectedOpId as OpId);
+      const opNode = studio.opGraph.get(selectedOpId as OpId);
       if (opNode && opNode.op.type === "extrude") {
         // Update the op with new sketch profile
         const updatedOp = {
@@ -1456,13 +1372,11 @@ export const useCadStore = create<CadStore>((set, get) => ({
             profileIndices: loopIndex !== undefined ? [loopIndex] : undefined,
           },
         };
-        const newOpGraph = new Map(studio!.opGraph);
+        const newOpGraph = new Map(studio.opGraph);
         newOpGraph.set(selectedOpId as OpId, { ...opNode, op: updatedOp });
-        const newStudio = { ...studio!, opGraph: newOpGraph };
-        const newPartStudios = new Map(document.partStudios);
-        newPartStudios.set(activeStudioId, newStudio);
+        const newStudio = touchPartStudio({ ...studio, opGraph: newOpGraph });
         set({
-          document: { ...document, partStudios: newPartStudios },
+          studio: newStudio,
           editorMode: "object",
           faceSelectionTarget: null,
           selectedFace: { type: "sketch-profile", sketchId, loopIndex },
@@ -1598,11 +1512,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createRevolve: (sketchId, angle = 360, axis = "sketch-x") => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const sketch = studio.sketches.get(sketchId);
     if (!sketch) return null;
@@ -1662,20 +1572,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, revolveOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -1733,11 +1638,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createFillet: (targetOpId, edgeIndices, radius) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const targetOp = studio.opGraph.get(targetOpId);
     if (!targetOp) return null;
@@ -1765,20 +1666,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, filletOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -1830,11 +1726,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createBoolean: (operation, targetOpId, toolOpId) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const targetOp = studio.opGraph.get(targetOpId);
     const toolOp = studio.opGraph.get(toolOpId);
@@ -1859,20 +1751,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, booleanOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -1954,11 +1841,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createBox: (center, dimensions) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const boxOpId = newId("Op") as OpId;
     const boxOp: BoxOp = {
@@ -1975,20 +1858,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, boxOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -1996,11 +1874,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createCylinder: (center, axis, radius, height) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const cylinderOpId = newId("Op") as OpId;
     const cylinderOp: CylinderOp = {
@@ -2019,20 +1893,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, cylinderOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -2040,11 +1909,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createSphere: (center, radius) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const sphereOpId = newId("Op") as OpId;
     const sphereOp: SphereOp = {
@@ -2061,20 +1926,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, sphereOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -2082,11 +1942,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   createCone: (center, axis, radius1, radius2, height) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    const { studio, historyState } = get();
 
     const coneOpId = newId("Op") as OpId;
     const coneOp: ConeOp = {
@@ -2106,20 +1962,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, coneOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -2187,12 +2038,8 @@ export const useCadStore = create<CadStore>((set, get) => ({
     });
   },
 
-  createTransform: (targetOpId, transformType, params) => {
-    const { document, activeStudioId, historyState } = get();
-    if (!activeStudioId) return null;
-
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+  createTransform: (targetOpId, transformType, transformParams) => {
+    const { studio, historyState } = get();
 
     const targetOp = studio.opGraph.get(targetOpId);
     if (!targetOp) return null;
@@ -2205,12 +2052,12 @@ export const useCadStore = create<CadStore>((set, get) => ({
       suppressed: false,
       targetOp: targetOpId,
       transformType: transformType,
-      translation: params.translation,
-      rotationOrigin: params.rotationOrigin,
-      rotationAxis: params.rotationAxis,
-      rotationAngle: params.rotationAngle !== undefined ? dimLiteral(params.rotationAngle * Math.PI / 180) : undefined,
-      scaleFactor: params.scaleFactor !== undefined ? dimLiteral(params.scaleFactor) : undefined,
-      scaleCenter: params.scaleCenter,
+      translation: transformParams.translation,
+      rotationOrigin: transformParams.rotationOrigin,
+      rotationAxis: transformParams.rotationAxis,
+      rotationAngle: transformParams.rotationAngle !== undefined ? dimLiteral(transformParams.rotationAngle * Math.PI / 180) : undefined,
+      scaleFactor: transformParams.scaleFactor !== undefined ? dimLiteral(transformParams.scaleFactor) : undefined,
+      scaleCenter: transformParams.scaleCenter,
     };
 
     const newOpGraph = new Map(studio.opGraph);
@@ -2221,20 +2068,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
     const newOpOrder = [...studio.opOrder, transformOpId];
 
-    const newStudio = {
+    const newStudio = touchPartStudio({
       ...studio,
       opGraph: newOpGraph,
       opOrder: newOpOrder,
-    };
-
-    const newPartStudios = new Map(document.partStudios);
-    newPartStudios.set(activeStudioId, newStudio);
-
-    const newDoc = { ...document, partStudios: newPartStudios };
+    });
 
     set({
-      document: newDoc,
-      historyState: pushState(historyState, newDoc),
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
       timelinePosition: null,
     });
 
@@ -2262,19 +2104,16 @@ export const useCadStore = create<CadStore>((set, get) => ({
 // Selectors
 // ============================================================================
 
-export const selectDocument = (state: CadStore) => state.document;
-export const selectActiveStudio = (state: CadStore) => {
-  const { document, activeStudioId } = state;
-  if (!activeStudioId) return null;
-  return document.partStudios.get(activeStudioId) ?? null;
-};
+export const selectStudio = (state: CadStore) => state.studio;
+// Legacy compatibility - components using selectDocument will get studio
+export const selectDocument = (state: CadStore) => state.studio;
+export const selectActiveStudio = (state: CadStore) => state.studio;
 export const selectActiveSketch = (state: CadStore) => {
-  const studio = selectActiveStudio(state);
-  const { activeSketchId } = state;
-  if (!studio || !activeSketchId) return null;
+  const { studio, activeSketchId } = state;
+  if (!activeSketchId) return null;
   return studio.sketches.get(activeSketchId) ?? null;
 };
-export const selectParams = (state: CadStore) => state.document.params;
+export const selectParams = (state: CadStore) => state.studio.params;
 export const selectObjectSelection = (state: CadStore) => state.objectSelection;
 export const selectOpSelection = (state: CadStore) => state.opSelection;
 export const selectIsRebuilding = (state: CadStore) => state.isRebuilding;

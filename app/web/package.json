@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@vibecad/core": "workspace:*",
+    "@vibecad/fs": "workspace:*",
     "@vibecad/kernel": "workspace:*",
     "@vibecad/react": "workspace:*",
     "react": "^18.3.1",

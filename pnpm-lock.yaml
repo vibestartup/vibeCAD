@@ -106,6 +106,9 @@ importers:
       '@vibecad/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@vibecad/fs':
+        specifier: workspace:*
+        version: link:../../packages/fs
       '@vibecad/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel

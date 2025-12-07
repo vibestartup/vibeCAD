@@ -16,3 +16,4 @@ export { DocumentContainer } from "./DocumentContainer";
 export { TabbedSidebar } from "./TabbedSidebar";
 export { LeftSidebar } from "./LeftSidebar";
 export { RightSidebar } from "./RightSidebar";
+export { FileExplorer } from "./FileExplorer";

@@ -103,8 +103,7 @@ export function SketchCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const activeSketchId = useCadStore((s) => s.activeSketchId);
-  const activeStudioId = useCadStore((s) => s.activeStudioId);
-  const document = useCadStore((s) => s.document);
+  const studio = useCadStore((s) => s.studio);
   const activeTool = useCadStore((s) => s.activeTool);
   const editorMode = useCadStore((s) => s.editorMode);
   const sketchMousePos = useCadStore((s) => s.sketchMousePos);
@@ -124,11 +123,9 @@ export function SketchCanvas() {
 
   // Get the active sketch (for editing mode)
   const activeSketch: Sketch | null = React.useMemo(() => {
-    if (!activeStudioId || !activeSketchId) return null;
-    const studio = document.partStudios.get(activeStudioId);
-    if (!studio) return null;
+    if (!activeSketchId || !studio) return null;
     return studio.sketches.get(activeSketchId) ?? null;
-  }, [document, activeStudioId, activeSketchId]);
+  }, [studio, activeSketchId]);
 
   // Convert screen coords to sketch coords (centered origin)
   const screenToSketch = useCallback((screenX: number, screenY: number): Point2D => {

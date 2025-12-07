@@ -307,7 +307,7 @@ function FaceSelector({ label, value, targetType, onClear }: FaceSelectorProps) 
   const enterFaceSelectionMode = useCadStore((s) => s.enterFaceSelectionMode);
   const exitFaceSelectionMode = useCadStore((s) => s.exitFaceSelectionMode);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
 
   const isListening = faceSelectionTarget?.type === targetType;
@@ -444,7 +444,7 @@ function PlaneSelector({ opId, sketchId, currentPlaneId }: PlaneSelectorProps) {
 
 function SketchProperties({ op }: { op: any }) {
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
 
   // Get the sketch from the op
@@ -533,7 +533,7 @@ function RevolveProperties({ op, isPending = false }: { op?: any; isPending?: bo
   const confirmRevolve = useCadStore((s) => s.confirmRevolve);
   const cancelRevolve = useCadStore((s) => s.cancelRevolve);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
 
   // Determine if we're in pending mode or editing an existing op
@@ -720,7 +720,7 @@ function FilletProperties({ op, isPending = false }: { op?: any; isPending?: boo
   const confirmFillet = useCadStore((s) => s.confirmFillet);
   const cancelFillet = useCadStore((s) => s.cancelFillet);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
   const unitLabel = getLengthUnitLabel(lengthUnit);
@@ -868,7 +868,7 @@ function BooleanProperties({ op, isPending = false }: { op?: any; isPending?: bo
   const confirmBoolean = useCadStore((s) => s.confirmBoolean);
   const cancelBoolean = useCadStore((s) => s.cancelBoolean);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
 
   // Determine if we're in pending mode or editing an existing op
@@ -1342,7 +1342,7 @@ function TransformProperties({ op, isPending = false }: { op?: any; isPending?: 
   const confirmTransform = useCadStore((s) => s.confirmTransform);
   const cancelTransform = useCadStore((s) => s.cancelTransform);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
   const angleUnit = useSettingsStore((s) => s.angleUnit);
@@ -1544,7 +1544,7 @@ function ExtrudeProperties({ op, isPending = false }: { op?: any; isPending?: bo
   const confirmExtrude = useCadStore((s) => s.confirmExtrude);
   const cancelExtrude = useCadStore((s) => s.cancelExtrude);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
   const unitLabel = getLengthUnitLabel(lengthUnit);
@@ -1739,7 +1739,7 @@ function ExtrudeProperties({ op, isPending = false }: { op?: any; isPending?: bo
 // ============================================================================
 
 function ParametersTab() {
-  const params = useCadStore((s) => s.document.params);
+  const params = useCadStore((s) => s.studio.params);
   const addParam = useCadStore((s) => s.addParam);
   const updateParam = useCadStore((s) => s.updateParam);
   const removeParam = useCadStore((s) => s.removeParam);
@@ -1836,7 +1836,7 @@ function ParameterRow({ param, onUpdate, onDelete }: ParameterRowProps) {
 
 function RenderingTab() {
   const openTab = useTabsStore((s) => s.openTab);
-  const documentName = useCadStore((s) => s.document.name);
+  const studioName = useCadStore((s) => s.studio.name);
 
   const [selectedPreset, setSelectedPreset] = React.useState(1); // Full HD default
   const [customWidth, setCustomWidth] = React.useState(1920);
@@ -1876,9 +1876,9 @@ function RenderingTab() {
 
   const handleDownload = React.useCallback(() => {
     if (!lastCapture) return;
-    const filename = documentName.replace(/\s+/g, "_") || "render";
+    const filename = studioName.replace(/\s+/g, "_") || "render";
     downloadCapture(lastCapture, filename);
-  }, [lastCapture, documentName]);
+  }, [lastCapture, studioName]);
 
   const handleSaveToLibrary = React.useCallback(async () => {
     if (!lastCapture) return;
@@ -1886,14 +1886,14 @@ function RenderingTab() {
     // Convert data URL to File object
     const response = await fetch(lastCapture.dataUrl);
     const blob = await response.blob();
-    const filename = `${documentName.replace(/\s+/g, "_") || "render"}_${Date.now()}.png`;
+    const filename = `${studioName.replace(/\s+/g, "_") || "render"}_${Date.now()}.png`;
     const file = new File([blob], filename, { type: "image/png" });
 
     // Create image tab from file
     const { createImageTabFromFile } = await import("../store/tabs-store");
     const tab = await createImageTabFromFile(file);
     openTab(tab);
-  }, [lastCapture, documentName, openTab]);
+  }, [lastCapture, studioName, openTab]);
 
   return (
     <div>
@@ -2078,7 +2078,7 @@ export function PropertiesContent() {
   const pendingPrimitive = useCadStore((s) => s.pendingPrimitive);
   const pendingTransform = useCadStore((s) => s.pendingTransform);
   const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
+    s.studio
   );
 
   // Get selected operation

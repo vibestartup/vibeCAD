@@ -9,7 +9,7 @@ import { SettingsModal } from "../components/SettingsModal";
 import { AboutModal } from "../components/AboutModal";
 import { MyLibrary } from "../components/MyLibrary";
 import { useCadStore } from "../store";
-import { useProjectStore } from "../store/project-store";
+import { useFileStore, serializeDocument, downloadFile } from "../store/file-store";
 import { captureThumbnail } from "../utils/viewport-capture";
 
 // ============================================================================
@@ -22,9 +22,7 @@ function StatusBar() {
   const isRebuilding = useCadStore((s) => s.isRebuilding);
   const editorMode = useCadStore((s) => s.editorMode);
 
-  const studio = useCadStore((s) =>
-    s.activeStudioId ? s.document.partStudios.get(s.activeStudioId) : null
-  );
+  const studio = useCadStore((s) => s.studio);
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
@@ -81,18 +79,24 @@ export function Editor() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const document = useCadStore((s) => s.document);
-  const saveProject = useProjectStore((s) => s.saveProject);
-  const downloadProject = useProjectStore((s) => s.downloadProject);
+  const studioForSave = useCadStore((s) => s.studio);
+  const fileStore = useFileStore();
   const resetDocument = useCadStore((s) => s.resetDocument);
 
   // Save project with thumbnail capture
-  const handleSaveProject = useCallback(() => {
+  const handleSaveProject = useCallback(async () => {
     // Capture thumbnail from viewport
     const thumbnail = captureThumbnail(200, 150, 0.7);
     // Save with thumbnail
-    saveProject(document, thumbnail ?? undefined);
-  }, [document, saveProject]);
+    await fileStore.savePartStudio(studioForSave, { thumbnail: thumbnail ?? undefined });
+  }, [studioForSave, fileStore]);
+
+  // Download project as file
+  const handleDownloadProject = useCallback(() => {
+    const content = JSON.stringify(serializeDocument(studioForSave), null, 2);
+    const filename = studioForSave.name.replace(/\s+/g, "_") + ".vibecad";
+    downloadFile(content, filename);
+  }, [studioForSave]);
 
   // ViewCube positioning (accounts for toolbar and right panel collapse state)
   const viewCubeTopOffset = TOOLBAR_HEIGHT + VIEWCUBE_GAP;
@@ -156,7 +160,7 @@ export function Editor() {
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenLibrary={() => setLibraryOpen(true)}
             onSaveProject={handleSaveProject}
-            onDownloadProject={() => { downloadProject(document); }}
+            onDownloadProject={handleDownloadProject}
             onNewProject={() => {
               if (confirm("Create a new project? Unsaved changes will be lost.")) {
                 resetDocument();

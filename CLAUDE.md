@@ -175,16 +175,59 @@ You are the implementation agent for **vibeCAD**, a browser-native parametric CA
 - **Constraint solving integration** - API ready, needs full UI connection
 - **Revolve/Sweep/Loft** - Types + UI exist, OCC execution needs completion
 - **Boolean operations** - Framework in place, needs full integration
-- **Assembly system** - Types defined, implementation stub
+- **File model refactor** - Currently uses Document→PartStudios structure, needs simplification to 1 file = 1 OpGraph (see "File & Data Model" section)
 
 ### Not Implemented
 
 - Full automatic rebuild pipeline
 - Pattern/Mirror operations
 - Advanced constraint tools (tangent, symmetric)
-- Assembly mating
+- Assembly operations (InsertPart, Mate) - will be regular ops, not a separate file type
 - Database persistence (localStorage only)
 - Desktop/mobile apps
+
+---
+
+## File & Data Model
+
+### Design Philosophy
+
+**1 file = 1 operation graph = 1 tab**
+
+A `.vibecad` file is simply a sequence of operations (OpGraph) that produces geometry. There is no distinction between "Part Studio" and "Assembly" - they are the same thing. The difference is just which operations you use:
+
+- **Part-like files:** Use sketch, extrude, fillet, boolean, etc.
+- **Assembly-like files:** Also use `InsertPart` (reference another file) and `Mate` (position constraints)
+
+This unified model means:
+- Each open file = one tab in the UI
+- Switching tabs = switching files
+- No nested "documents containing multiple part studios"
+- Assemblies reference other files by relative path (e.g., `./bracket.vibecad`)
+- Users organize files however they want - no forced folder structure
+
+### File Format
+
+```
+.vibecad file = {
+  name: string,
+  opGraph: Map<OpId, Op>,      // All operations
+  opOrder: OpId[],             // Execution order
+  sketches: Map<SketchId, Sketch>,
+  planes: Map<PlaneId, Plane>,
+  params: ParamEnv,            // Parameters/variables
+  meta: { version, created, modified }
+}
+```
+
+### Assembly Operations (Future)
+
+When we implement assemblies, they'll just be additional operation types:
+
+- `InsertPart { path: string, transform?: Mat4 }` - Import geometry from another file
+- `Mate { partA: Ref, partB: Ref, type: MateType }` - Position constraint between parts
+
+These operations live in the same OpGraph as everything else.
 
 ---
 

@@ -692,7 +692,7 @@ export function Toolbar({
   const exitSketchMode = useCadStore((s) => s.exitSketchMode);
   const exportMeshes = useCadStore(selectExportMeshes);
   const exportShapeHandles = useCadStore(selectExportShapeHandles);
-  const documentName = useCadStore((s) => s.document.name);
+  const studioName = useCadStore((s) => s.studio.name);
 
   const canUndo = useCadStore((s) => s.canUndo());
   const canRedo = useCadStore((s) => s.canRedo());
@@ -786,7 +786,7 @@ export function Toolbar({
 
   // Handle export for all formats
   const handleExport = React.useCallback((formatId: string) => {
-    const filename = documentName.replace(/\s+/g, "_") || "model";
+    const filename = studioName.replace(/\s+/g, "_") || "model";
 
     switch (formatId) {
       case "stl":
@@ -833,7 +833,7 @@ export function Toolbar({
       default:
         console.warn("[Toolbar] Unknown export format:", formatId);
     }
-  }, [exportMeshes, exportShapeHandles, documentName]);
+  }, [exportMeshes, exportShapeHandles, studioName]);
 
   // Handle import (stub)
   const handleImport = React.useCallback((formatId: string) => {

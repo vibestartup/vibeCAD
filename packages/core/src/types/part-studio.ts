@@ -1,5 +1,9 @@
 /**
  * Part Studio - contains sketches and operations that define geometry.
+ *
+ * This is the core file format for vibeCAD. Each .vibecad file is a single PartStudio.
+ * There is no distinction between "part studio" and "assembly" - assemblies are just
+ * PartStudios that use InsertPart and Mate operations.
  */
 
 import { OpId, PartStudioId, SketchId, SketchPlaneId, PrimitiveId, newId } from "./id";
@@ -9,6 +13,7 @@ import { Sketch, createSketch } from "./sketch";
 import { Op, TopoRef, SketchOp, ExtrudeOp } from "./op";
 import { PointPrimitive, LinePrimitive } from "./primitive";
 import { dimLiteral } from "./constraint";
+import { ParamEnv, createParamEnv } from "./params";
 
 // ============================================================================
 // Mesh Data
@@ -53,6 +58,13 @@ export interface OpResult {
 // Part Studio
 // ============================================================================
 
+/** Metadata for a PartStudio file */
+export interface PartStudioMeta {
+  createdAt: number;
+  modifiedAt: number;
+  version: number;
+}
+
 export interface PartStudio {
   id: PartStudioId;
   name: string;
@@ -68,6 +80,12 @@ export interface PartStudio {
 
   /** Topologically sorted operation order */
   opOrder: OpId[];
+
+  /** Parameters / variables for this file */
+  params: ParamEnv;
+
+  /** File metadata */
+  meta: PartStudioMeta;
 
   // === Runtime state (populated after rebuild) ===
 
@@ -86,6 +104,7 @@ export interface PartStudio {
  * Create a new empty part studio.
  */
 export function createPartStudio(name: string): PartStudio {
+  const now = Date.now();
   return {
     id: newId("PartStudio"),
     name,
@@ -93,6 +112,12 @@ export function createPartStudio(name: string): PartStudio {
     sketches: new Map(),
     opGraph: new Map(),
     opOrder: [],
+    params: createParamEnv(),
+    meta: {
+      createdAt: now,
+      modifiedAt: now,
+      version: 1,
+    },
   };
 }
 
@@ -186,6 +211,7 @@ export function createPartStudioWithCube(name: string): PartStudio {
  * Create a deep copy of a part studio (without runtime state).
  */
 export function clonePartStudio(studio: PartStudio): PartStudio {
+  const now = Date.now();
   return {
     ...studio,
     id: newId("PartStudio"),
@@ -207,8 +233,31 @@ export function clonePartStudio(studio: PartStudio): PartStudio {
       ])
     ),
     opOrder: [...studio.opOrder],
+    params: {
+      params: new Map(studio.params.params),
+      errors: new Map(studio.params.errors),
+    },
+    meta: {
+      createdAt: now,
+      modifiedAt: now,
+      version: 1,
+    },
     results: undefined,
     rebuildErrors: undefined,
+  };
+}
+
+/**
+ * Update part studio metadata (modifiedAt, version).
+ */
+export function touchPartStudio(studio: PartStudio): PartStudio {
+  return {
+    ...studio,
+    meta: {
+      ...studio.meta,
+      modifiedAt: Date.now(),
+      version: studio.meta.version + 1,
+    },
   };
 }
 

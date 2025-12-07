@@ -1,25 +1,28 @@
 /**
  * LeftSidebar - tabbed sidebar for the left panel.
- * Contains: Operations (timeline), and extensible for more tabs.
+ * Contains: Explorer (file browser) and Operations (timeline).
  */
 
 import React from "react";
 import { TabbedSidebar, type TabDefinition } from "./TabbedSidebar";
 import { OpTimelineContent } from "./OpTimeline";
+import { FileExplorer } from "./FileExplorer";
 
 export function LeftSidebar() {
   const tabs: TabDefinition[] = [
+    {
+      id: "explorer",
+      label: "Explorer",
+      content: <FileExplorer />,
+    },
     {
       id: "operations",
       label: "Operations",
       content: <OpTimelineContent />,
     },
-    // Future tabs can be added here:
-    // { id: "parts", label: "Parts", content: <PartsPanel /> },
-    // { id: "assemblies", label: "Assemblies", content: <AssembliesPanel /> },
   ];
 
-  return <TabbedSidebar tabs={tabs} defaultTab="operations" />;
+  return <TabbedSidebar tabs={tabs} defaultTab="explorer" />;
 }
 
 export default LeftSidebar;
