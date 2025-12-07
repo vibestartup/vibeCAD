@@ -5,7 +5,17 @@
 import React from "react";
 import { useCadStore } from "../store";
 import { useSettingsStore } from "../store/settings-store";
+import { useTabsStore, createImageTabFromFile } from "../store/tabs-store";
 import { getLengthUnitLabel, getAngleUnitLabel } from "../utils/units";
+import {
+  captureViewport,
+  downloadCapture,
+  formatFileSize,
+  getDataUrlSize,
+  RESOLUTION_PRESETS,
+  BACKGROUND_PRESETS,
+  type CaptureResult,
+} from "../utils/viewport-capture";
 import type { Op, Parameter, ParamId, SketchId } from "@vibecad/core";
 
 const styles = {
@@ -277,7 +287,7 @@ const styles = {
   } as React.CSSProperties,
 };
 
-type TabId = "properties" | "parameters";
+type TabId = "properties" | "parameters" | "render";
 
 // ============================================================================
 // Face/Sketch Selector Component
@@ -1086,6 +1096,237 @@ function ParameterRow({ param, onUpdate, onDelete }: ParameterRowProps) {
 }
 
 // ============================================================================
+// Rendering Tab
+// ============================================================================
+
+function RenderingTab() {
+  const openTab = useTabsStore((s) => s.openTab);
+  const documentName = useCadStore((s) => s.document.name);
+
+  const [selectedPreset, setSelectedPreset] = React.useState(1); // Full HD default
+  const [customWidth, setCustomWidth] = React.useState(1920);
+  const [customHeight, setCustomHeight] = React.useState(1080);
+  const [backgroundColor, setBackgroundColor] = React.useState("#0f0f1a");
+  const [transparentBg, setTransparentBg] = React.useState(false);
+  const [lastCapture, setLastCapture] = React.useState<CaptureResult | null>(null);
+  const [isCapturing, setIsCapturing] = React.useState(false);
+
+  const currentResolution = React.useMemo(() => {
+    const preset = RESOLUTION_PRESETS[selectedPreset];
+    if (preset.width === 0) {
+      return { width: customWidth, height: customHeight };
+    }
+    return { width: preset.width, height: preset.height };
+  }, [selectedPreset, customWidth, customHeight]);
+
+  const handleCapture = React.useCallback(() => {
+    setIsCapturing(true);
+
+    // Small delay to let UI update
+    setTimeout(() => {
+      const capture = captureViewport({
+        width: currentResolution.width,
+        height: currentResolution.height,
+        backgroundColor,
+        transparentBackground: transparentBg,
+      });
+
+      setIsCapturing(false);
+
+      if (capture) {
+        setLastCapture(capture);
+      }
+    }, 50);
+  }, [currentResolution, backgroundColor, transparentBg]);
+
+  const handleDownload = React.useCallback(() => {
+    if (!lastCapture) return;
+    const filename = documentName.replace(/\s+/g, "_") || "render";
+    downloadCapture(lastCapture, filename);
+  }, [lastCapture, documentName]);
+
+  const handleSaveToLibrary = React.useCallback(async () => {
+    if (!lastCapture) return;
+
+    // Convert data URL to File object
+    const response = await fetch(lastCapture.dataUrl);
+    const blob = await response.blob();
+    const filename = `${documentName.replace(/\s+/g, "_") || "render"}_${Date.now()}.png`;
+    const file = new File([blob], filename, { type: "image/png" });
+
+    // Create image tab from file
+    const { createImageTabFromFile } = await import("../store/tabs-store");
+    const tab = await createImageTabFromFile(file);
+    openTab(tab);
+  }, [lastCapture, documentName, openTab]);
+
+  return (
+    <div>
+      <div style={styles.section}>
+        <div style={styles.sectionTitle}>Resolution</div>
+
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Preset</label>
+          <select
+            style={styles.select}
+            value={selectedPreset}
+            onChange={(e) => setSelectedPreset(parseInt(e.target.value))}
+          >
+            {RESOLUTION_PRESETS.map((preset, idx) => (
+              <option key={idx} value={idx}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {RESOLUTION_PRESETS[selectedPreset].width === 0 && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ ...styles.field, flex: 1 }}>
+              <label style={styles.fieldLabel}>Width</label>
+              <input
+                type="number"
+                style={styles.input}
+                value={customWidth}
+                onChange={(e) => setCustomWidth(parseInt(e.target.value) || 1920)}
+                min={100}
+                max={8192}
+              />
+            </div>
+            <div style={{ ...styles.field, flex: 1 }}>
+              <label style={styles.fieldLabel}>Height</label>
+              <input
+                type="number"
+                style={styles.input}
+                value={customHeight}
+                onChange={(e) => setCustomHeight(parseInt(e.target.value) || 1080)}
+                min={100}
+                max={8192}
+              />
+            </div>
+          </div>
+        )}
+
+        <div style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
+          Output: {currentResolution.width} × {currentResolution.height} px
+        </div>
+      </div>
+
+      <div style={styles.section}>
+        <div style={styles.sectionTitle}>Background</div>
+
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>Color</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {BACKGROUND_PRESETS.filter((p) => p.color !== "transparent").map((preset) => (
+              <button
+                key={preset.color}
+                onClick={() => {
+                  setBackgroundColor(preset.color);
+                  setTransparentBg(false);
+                }}
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 4,
+                  border: backgroundColor === preset.color && !transparentBg
+                    ? "2px solid #646cff"
+                    : "1px solid #444",
+                  backgroundColor: preset.color,
+                  cursor: "pointer",
+                }}
+                title={preset.label}
+              />
+            ))}
+            <button
+              onClick={() => setTransparentBg(true)}
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 4,
+                border: transparentBg ? "2px solid #646cff" : "1px solid #444",
+                background: `
+                  linear-gradient(45deg, #444 25%, transparent 25%),
+                  linear-gradient(-45deg, #444 25%, transparent 25%),
+                  linear-gradient(45deg, transparent 75%, #444 75%),
+                  linear-gradient(-45deg, transparent 75%, #444 75%)
+                `,
+                backgroundSize: "8px 8px",
+                backgroundPosition: "0 0, 0 4px, 4px -4px, -4px 0px",
+                cursor: "pointer",
+              }}
+              title="Transparent"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.section}>
+        <button
+          style={{
+            ...styles.primaryButton,
+            width: "100%",
+            opacity: isCapturing ? 0.7 : 1,
+          }}
+          onClick={handleCapture}
+          disabled={isCapturing}
+        >
+          {isCapturing ? "Capturing..." : "Capture Viewport"}
+        </button>
+      </div>
+
+      {lastCapture && (
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>Last Capture</div>
+
+          {/* Preview */}
+          <div
+            style={{
+              backgroundColor: "#0f0f1a",
+              borderRadius: 8,
+              overflow: "hidden",
+              marginBottom: 12,
+            }}
+          >
+            <img
+              src={lastCapture.dataUrl}
+              alt="Last render"
+              style={{
+                width: "100%",
+                height: "auto",
+                display: "block",
+              }}
+            />
+          </div>
+
+          {/* Info */}
+          <div style={{ fontSize: 11, color: "#666", marginBottom: 12 }}>
+            {lastCapture.width} × {lastCapture.height} px •{" "}
+            {formatFileSize(getDataUrlSize(lastCapture.dataUrl))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              style={{ ...styles.secondaryButton, flex: 1 }}
+              onClick={handleDownload}
+            >
+              Download
+            </button>
+            <button
+              style={{ ...styles.primaryButton, flex: 1 }}
+              onClick={handleSaveToLibrary}
+            >
+              Open in Tab
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // Main Panel
 // ============================================================================
 
@@ -1128,6 +1369,15 @@ export function PropertiesPanel() {
         >
           Parameters
         </button>
+        <button
+          style={{
+            ...styles.tab,
+            ...(activeTab === "render" ? styles.tabActive : {}),
+          }}
+          onClick={() => setActiveTab("render")}
+        >
+          Render
+        </button>
       </div>
 
       <div style={styles.content}>
@@ -1145,9 +1395,11 @@ export function PropertiesPanel() {
               Select an operation to view its properties.
             </div>
           )
-        ) : (
+        ) : activeTab === "parameters" ? (
           <ParametersTab />
-        )}
+        ) : activeTab === "render" ? (
+          <RenderingTab />
+        ) : null}
       </div>
     </div>
   );
