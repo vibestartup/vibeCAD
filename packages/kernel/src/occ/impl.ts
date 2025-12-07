@@ -173,9 +173,10 @@ export class OccApiImpl implements OccApi {
   makeBox(center: Vec3, dimensions: Vec3): ShapeHandle {
     const [width, depth, height] = dimensions;
 
-    // Following official opencascade.js examples:
-    // BRepPrimAPI_MakeBox_2(dx, dy, dz) creates box at origin
-    const box = new this.oc.BRepPrimAPI_MakeBox_2(width, depth, height);
+    // BRepPrimAPI_MakeBox_3(gp_Pnt, gp_Pnt) - two corner points
+    const p1 = new this.oc.gp_Pnt_3(0, 0, 0);
+    const p2 = new this.oc.gp_Pnt_3(width, depth, height);
+    const box = new this.oc.BRepPrimAPI_MakeBox_3(p1, p2);
     let shape = box.Shape();
 
     // Translate to center (box is created with one corner at origin)
@@ -199,35 +200,36 @@ export class OccApiImpl implements OccApi {
   }
 
   makeCylinder(center: Vec3, axis: Vec3, radius: number, height: number): ShapeHandle {
-    // BRepPrimAPI_MakeCylinder_2(R, H) creates cylinder at origin along Z
-    const cylinder = new this.oc.BRepPrimAPI_MakeCylinder_2(radius, height);
+    // BRepPrimAPI_MakeCylinder_1(R, H) - creates cylinder at origin along Z
+    const cylinder = new this.oc.BRepPrimAPI_MakeCylinder_1(radius, height);
     let shape = cylinder.Shape();
 
     // Transform to desired position/orientation
+    const cx = center[0], cy = center[1], cz = center[2];
+    const ax = axis[0], ay = axis[1], az = axis[2];
     const needsTransform =
-      Math.abs(center[0]) > 1e-9 || Math.abs(center[1]) > 1e-9 || Math.abs(center[2]) > 1e-9 ||
-      Math.abs(axis[0]) > 1e-9 || Math.abs(axis[1]) > 1e-9 || Math.abs(axis[2] - 1) > 1e-9;
+      Math.abs(cx) > 1e-9 || Math.abs(cy) > 1e-9 || Math.abs(cz) > 1e-9 ||
+      Math.abs(ax) > 1e-9 || Math.abs(ay) > 1e-9 || Math.abs(az - 1) > 1e-9;
 
     if (needsTransform) {
-      // Build transformation matrix
       const trsf = new this.oc.gp_Trsf_1();
 
-      // First handle rotation if axis is not Z
-      const isZAxis = Math.abs(axis[0]) < 1e-6 && Math.abs(axis[1]) < 1e-6 && Math.abs(axis[2] - 1) < 1e-6;
+      // Handle rotation if axis is not Z
+      const isZAxis = Math.abs(ax) < 1e-6 && Math.abs(ay) < 1e-6 && Math.abs(az - 1) < 1e-6;
       if (!isZAxis) {
         const sourceDir = new this.oc.gp_Dir_4(0, 0, 1);
-        const targetDir = new this.oc.gp_Dir_4(axis[0], axis[1], axis[2]);
+        const targetDir = new this.oc.gp_Dir_4(ax, ay, az);
         const rotAxis = sourceDir.IsParallel(targetDir, 1e-6)
-          ? new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), new this.oc.gp_Dir_4(1, 0, 0))
-          : new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), sourceDir.Crossed(targetDir));
+          ? new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_3(0, 0, 0), new this.oc.gp_Dir_4(1, 0, 0))
+          : new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_3(0, 0, 0), sourceDir.Crossed(targetDir));
         const angle = Math.acos(Math.max(-1, Math.min(1, sourceDir.Dot(targetDir))));
         if (Math.abs(angle) > 1e-9) {
           trsf.SetRotation_1(rotAxis, angle);
         }
       }
 
-      // Then translate
-      const vec = new this.oc.gp_Vec_4(center[0], center[1], center[2]);
+      // Translate to center
+      const vec = new this.oc.gp_Vec_4(cx, cy, cz);
       const transTrsf = new this.oc.gp_Trsf_1();
       transTrsf.SetTranslation_1(vec);
       trsf.Multiply(transTrsf);
@@ -242,13 +244,14 @@ export class OccApiImpl implements OccApi {
   }
 
   makeSphere(center: Vec3, radius: number): ShapeHandle {
-    // BRepPrimAPI_MakeSphere_2(R) creates sphere at origin with radius R
-    const sphere = new this.oc.BRepPrimAPI_MakeSphere_2(radius);
+    // BRepPrimAPI_MakeSphere_1(R) - creates sphere at origin
+    const sphere = new this.oc.BRepPrimAPI_MakeSphere_1(radius);
     let shape = sphere.Shape();
 
     // Translate to center
-    if (Math.abs(center[0]) > 1e-9 || Math.abs(center[1]) > 1e-9 || Math.abs(center[2]) > 1e-9) {
-      const vec = new this.oc.gp_Vec_4(center[0], center[1], center[2]);
+    const cx = center[0], cy = center[1], cz = center[2];
+    if (Math.abs(cx) > 1e-9 || Math.abs(cy) > 1e-9 || Math.abs(cz) > 1e-9) {
+      const vec = new this.oc.gp_Vec_4(cx, cy, cz);
       const trsf = new this.oc.gp_Trsf_1();
       trsf.SetTranslation_1(vec);
 
@@ -262,32 +265,36 @@ export class OccApiImpl implements OccApi {
   }
 
   makeCone(center: Vec3, axis: Vec3, radius1: number, radius2: number, height: number): ShapeHandle {
-    // BRepPrimAPI_MakeCone_2(R1, R2, H) creates cone at origin along Z
-    const cone = new this.oc.BRepPrimAPI_MakeCone_2(radius1, radius2, height);
+    // BRepPrimAPI_MakeCone_1(R1, R2, H) - creates cone at origin along Z
+    const cone = new this.oc.BRepPrimAPI_MakeCone_1(radius1, radius2, height);
     let shape = cone.Shape();
 
-    // Transform to desired position/orientation (same logic as cylinder)
+    // Transform to desired position/orientation
+    const cx = center[0], cy = center[1], cz = center[2];
+    const ax = axis[0], ay = axis[1], az = axis[2];
     const needsTransform =
-      Math.abs(center[0]) > 1e-9 || Math.abs(center[1]) > 1e-9 || Math.abs(center[2]) > 1e-9 ||
-      Math.abs(axis[0]) > 1e-9 || Math.abs(axis[1]) > 1e-9 || Math.abs(axis[2] - 1) > 1e-9;
+      Math.abs(cx) > 1e-9 || Math.abs(cy) > 1e-9 || Math.abs(cz) > 1e-9 ||
+      Math.abs(ax) > 1e-9 || Math.abs(ay) > 1e-9 || Math.abs(az - 1) > 1e-9;
 
     if (needsTransform) {
       const trsf = new this.oc.gp_Trsf_1();
 
-      const isZAxis = Math.abs(axis[0]) < 1e-6 && Math.abs(axis[1]) < 1e-6 && Math.abs(axis[2] - 1) < 1e-6;
+      // Handle rotation if axis is not Z
+      const isZAxis = Math.abs(ax) < 1e-6 && Math.abs(ay) < 1e-6 && Math.abs(az - 1) < 1e-6;
       if (!isZAxis) {
         const sourceDir = new this.oc.gp_Dir_4(0, 0, 1);
-        const targetDir = new this.oc.gp_Dir_4(axis[0], axis[1], axis[2]);
+        const targetDir = new this.oc.gp_Dir_4(ax, ay, az);
         const rotAxis = sourceDir.IsParallel(targetDir, 1e-6)
-          ? new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), new this.oc.gp_Dir_4(1, 0, 0))
-          : new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_1(), sourceDir.Crossed(targetDir));
+          ? new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_3(0, 0, 0), new this.oc.gp_Dir_4(1, 0, 0))
+          : new this.oc.gp_Ax1_2(new this.oc.gp_Pnt_3(0, 0, 0), sourceDir.Crossed(targetDir));
         const angle = Math.acos(Math.max(-1, Math.min(1, sourceDir.Dot(targetDir))));
         if (Math.abs(angle) > 1e-9) {
           trsf.SetRotation_1(rotAxis, angle);
         }
       }
 
-      const vec = new this.oc.gp_Vec_4(center[0], center[1], center[2]);
+      // Translate to center
+      const vec = new this.oc.gp_Vec_4(cx, cy, cz);
       const transTrsf = new this.oc.gp_Trsf_1();
       transTrsf.SetTranslation_1(vec);
       trsf.Multiply(transTrsf);

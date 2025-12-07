@@ -16,6 +16,7 @@ out/
 *.js
 *.js.map
 *.d.ts.map
+*.tsbuildinfo
 # Declaration files in src directories (should only be in dist/)
 **/src/**/*.d.ts
 
