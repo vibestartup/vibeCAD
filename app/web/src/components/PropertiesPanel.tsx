@@ -1554,6 +1554,9 @@ function ExtrudeProperties({ op, isPending = false }: { op?: any; isPending?: bo
 
   // Get current values from either pending state or existing op
   const currentSketchId = isCreating ? pendingExtrude?.sketchId : op?.profile?.sketchId;
+  const currentProfileIndices = isCreating
+    ? (pendingExtrude?.loopIndex !== undefined ? [pendingExtrude.loopIndex] : undefined)
+    : op?.profile?.profileIndices;
   const currentBodyFace = isCreating ? pendingExtrude?.bodyFace : (op?.profile?.type === "face" ? op.profile.faceRef : null);
   const currentDirection = isCreating ? (pendingExtrude?.direction ?? "normal") : (op?.direction ?? "normal");
   const currentDepth = isCreating ? (pendingExtrude?.depth ?? 10) : (op?.depth?.value ?? 10);
@@ -1575,25 +1578,38 @@ function ExtrudeProperties({ op, isPending = false }: { op?: any; isPending?: bo
     if (currentSketchId) {
       const sketch = studio.sketches.get(currentSketchId as SketchId);
       if (sketch) {
+        let sketchName: string | null = null;
         for (const [, node] of studio.opGraph) {
           if (node.op.type === "sketch" && (node.op as any).sketchId === currentSketchId) {
-            return node.op.name;
+            sketchName = node.op.name;
+            break;
           }
         }
-        return `Sketch ${currentSketchId.slice(0, 8)}`;
+        if (!sketchName) {
+          sketchName = `Sketch ${currentSketchId.slice(0, 8)}`;
+        }
+        // Add profile index if specific profile(s) selected
+        if (currentProfileIndices && currentProfileIndices.length > 0) {
+          if (currentProfileIndices.length === 1) {
+            return `${sketchName}:Profile ${currentProfileIndices[0] + 1}`;
+          } else {
+            return `${sketchName}:Profiles ${currentProfileIndices.map((i: number) => i + 1).join(", ")}`;
+          }
+        }
+        return sketchName;
       }
     }
 
     if (currentBodyFace) {
       const sourceOp = studio.opGraph.get(currentBodyFace.opId);
       if (sourceOp) {
-        return `${sourceOp.op.name} - Face ${(currentBodyFace.faceIndex ?? currentBodyFace.index ?? 0) + 1}`;
+        return `${sourceOp.op.name}:Face ${(currentBodyFace.faceIndex ?? currentBodyFace.index ?? 0) + 1}`;
       }
       return `Face ${(currentBodyFace.faceIndex ?? currentBodyFace.index ?? 0) + 1}`;
     }
 
     return null;
-  }, [currentSketchId, currentBodyFace, studio]);
+  }, [currentSketchId, currentBodyFace, currentProfileIndices, studio]);
 
   const handleDirectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newDirection = e.target.value as "normal" | "reverse" | "symmetric";

@@ -1242,6 +1242,9 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     const exportableMeshes: ExportableMesh[] = [];
     const exportableShapeHandles: number[] = [];
 
+    // Map of opId -> ShapeHandle for face-based operations to reference
+    const opShapes = new Map<string, number>();
+
     try {
       // Determine how many operations to process based on timeline position
       const maxIndex = timelinePosition ?? studio.opOrder.length - 1;
@@ -1258,13 +1261,57 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         if (op.type === "extrude") {
           console.log("[Extrude] Processing extrude op:", op.name, op);
 
-          // Only render extrusions from sketch profiles in the 3D view
-          if (op.profile.type !== "sketch") {
-            console.log("[Extrude] Skipping - profile type is not sketch:", op.profile.type);
-            continue;
-          }
+          let resultSolid: number | null = null;
 
-          const extrudeSketchId = op.profile.sketchId;
+          // Handle face-based extrusion (extrude from existing body face)
+          if (op.profile.type === "face") {
+            const faceRef = op.profile.faceRef;
+            const sourceShape = opShapes.get(faceRef.opId);
+
+            if (!sourceShape) {
+              console.log("[Extrude] Skipping - source shape not found for opId:", faceRef.opId);
+              continue;
+            }
+
+            try {
+              // Get the face at the specified index
+              const faces = occApi.getFaces(sourceShape);
+              if (faceRef.index >= faces.length) {
+                console.log("[Extrude] Skipping - face index out of range:", faceRef.index, "faces:", faces.length);
+                continue;
+              }
+
+              const targetFace = faces[faceRef.index];
+              const faceNormal = occApi.faceNormal(targetFace);
+
+              // Determine extrude direction based on face normal
+              const depth = op.depth.value;
+              let direction: [number, number, number];
+              if (op.direction === "reverse") {
+                direction = [-faceNormal[0], -faceNormal[1], -faceNormal[2]];
+              } else {
+                direction = [faceNormal[0], faceNormal[1], faceNormal[2]];
+              }
+
+              console.log("[Extrude from face] Face normal:", faceNormal, "direction:", direction, "depth:", depth);
+
+              // Extrude the face
+              resultSolid = occApi.extrude(targetFace, direction, depth);
+
+              // Fuse with the source body
+              const fusedSolid = occApi.fuse(sourceShape, resultSolid);
+              occApi.freeShape(resultSolid);
+              resultSolid = fusedSolid;
+
+              console.log("[Extrude from face] Created fused solid:", resultSolid);
+            } catch (err) {
+              console.error("[Extrude from face] Failed:", err);
+              continue;
+            }
+          }
+          // Handle sketch-based extrusion
+          else if (op.profile.type === "sketch") {
+            const extrudeSketchId = op.profile.sketchId;
           const sketch = studio.sketches.get(extrudeSketchId);
           if (!sketch) {
             console.log("[Extrude] Skipping - sketch not found:", extrudeSketchId);
@@ -1412,48 +1459,51 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
             }
           }
 
-          console.log("[Extrude] Total wires created:", wires.length);
-          if (wires.length === 0) {
-            console.log("[Extrude] No wires - skipping extrude");
-            continue;
-          }
-
-          // Create faces from wires and extrude
-          // For now, extrude each loop separately and fuse them
-          let resultSolid: number | null = null;
-          const shapesToFree: number[] = [];
-
-          for (const wire of wires) {
-            try {
-              const face = occApi.makeFace(wire);
-              shapesToFree.push(face);
-
-              const solid = occApi.extrude(face, direction, depth);
-
-              if (resultSolid === null) {
-                resultSolid = solid;
-              } else {
-                // Fuse multiple solids together
-                const fused: number = occApi.fuse(resultSolid, solid);
-                shapesToFree.push(resultSolid);
-                shapesToFree.push(solid);
-                resultSolid = fused;
-              }
-            } catch (err) {
-              console.error("Failed to extrude loop:", err);
+            console.log("[Extrude] Total wires created:", wires.length);
+            if (wires.length === 0) {
+              console.log("[Extrude] No wires - skipping extrude");
+              continue;
             }
-          }
 
-          // Free wires
-          for (const wire of wiresCreated) {
-            occApi.freeShape(wire);
-          }
-          // Free intermediate shapes (but not the final solid)
-          for (const shape of shapesToFree) {
-            occApi.freeShape(shape);
-          }
+            // Create faces from wires and extrude
+            // For now, extrude each loop separately and fuse them
+            const shapesToFree: number[] = [];
+
+            for (const wire of wires) {
+              try {
+                const face = occApi.makeFace(wire);
+                shapesToFree.push(face);
+
+                const solid = occApi.extrude(face, direction, depth);
+
+                if (resultSolid === null) {
+                  resultSolid = solid;
+                } else {
+                  // Fuse multiple solids together
+                  const fused: number = occApi.fuse(resultSolid, solid);
+                  shapesToFree.push(resultSolid);
+                  shapesToFree.push(solid);
+                  resultSolid = fused;
+                }
+              } catch (err) {
+                console.error("Failed to extrude loop:", err);
+              }
+            }
+
+            // Free wires
+            for (const wire of wiresCreated) {
+              occApi.freeShape(wire);
+            }
+            // Free intermediate shapes (but not the final solid)
+            for (const shape of shapesToFree) {
+              occApi.freeShape(shape);
+            }
+          } // end sketch-based extrusion
 
           if (resultSolid === null) continue;
+
+          // Store shape handle for face-based operations to reference
+          opShapes.set(opId, resultSolid);
 
           // Mesh the shape
           const meshData = occApi.mesh(resultSolid, 0.5);
