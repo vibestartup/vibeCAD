@@ -43,6 +43,7 @@ import {
   dimLiteral,
   DATUM_XY,
   touchPartStudio,
+  getReferencedPoints,
 } from "@vibecad/core";
 import { history, HistoryState, createHistory, pushState, undo, redo } from "@vibecad/core";
 import { params } from "@vibecad/core";
@@ -66,6 +67,34 @@ export type SelectedFace =
   | { type: "datum-plane"; planeId: string }
   | { type: "sketch-profile"; sketchId: string; loopIndex?: number }
   | { type: "body-face"; bodyId: string; faceIndex: number };
+
+// Sketch entity selection - represents a selected sketch primitive
+export type SketchEntitySelection = {
+  primitiveId: PrimitiveId;
+  // The original entity type that was clicked (allows materialization to lower order)
+  originalType: "point" | "line" | "circle" | "arc" | "rect";
+};
+
+// Transform gizmo interaction state
+export type SketchGizmoState = {
+  mode: "idle" | "translate-x" | "translate-y" | "translate-xy" | "rotate";
+  // Initial mouse position when drag started (in sketch coordinates)
+  dragStart: { x: number; y: number } | null;
+  // Selection centroid at drag start
+  centroidStart: { x: number; y: number } | null;
+  // Initial angle for rotation
+  rotationStart: number | null;
+  // Original point positions at drag start (for computing delta from original)
+  originalPositions: Map<PrimitiveId, { x: number; y: number }> | null;
+};
+
+// Sketch clipboard - stores copied primitives for paste
+export type SketchClipboard = {
+  // Deep copy of primitives (with original IDs for reference mapping)
+  primitives: Map<PrimitiveId, PointPrimitive | LinePrimitive | CirclePrimitive | ArcPrimitive>;
+  // Centroid of copied entities (for relative positioning on paste)
+  centroid: { x: number; y: number };
+} | null;
 
 interface CadState {
   // Main state - single PartStudio (the open file)
@@ -106,6 +135,15 @@ interface CadState {
 
   // Grid snapping for sketch mode
   gridSnappingEnabled: boolean;
+
+  // Sketch entity selection (for selecting points, lines, shapes in sketch mode)
+  sketchSelection: Set<PrimitiveId>;
+  // Hovered sketch entity (for hover highlighting)
+  hoveredSketchEntity: PrimitiveId | null;
+  // Transform gizmo state
+  sketchGizmoState: SketchGizmoState;
+  // Sketch clipboard for copy/paste
+  sketchClipboard: SketchClipboard;
 
   // Face selection state
   faceSelectionTarget: FaceSelectionTarget | null;
@@ -272,6 +310,27 @@ interface CadActions {
   // Grid snapping toggle
   toggleGridSnapping: () => void;
 
+  // Sketch selection actions
+  setSketchSelection: (ids: Set<PrimitiveId>) => void;
+  clearSketchSelection: () => void;
+  toggleSketchEntitySelected: (id: PrimitiveId) => void;
+  setHoveredSketchEntity: (id: PrimitiveId | null) => void;
+  // Get all point IDs that are part of the selection (materialized)
+  getMaterializedSelectionPoints: () => PrimitiveId[];
+  // Update point positions (for transform gizmo)
+  updateSketchPointPositions: (updates: Map<PrimitiveId, { x: number; y: number }>) => void;
+  // Gizmo interaction
+  startSketchGizmoDrag: (mode: SketchGizmoState["mode"], mousePos: { x: number; y: number }) => void;
+  updateSketchGizmoDrag: (mousePos: { x: number; y: number }) => void;
+  endSketchGizmoDrag: () => void;
+  // Clipboard operations
+  deleteSketchSelection: () => void;
+  copySketchSelection: () => void;
+  cutSketchSelection: () => void;
+  pasteSketchClipboard: () => void;
+  duplicateSketchSelection: () => void;
+  selectAllSketchEntities: () => void;
+
   // Face selection actions
   enterFaceSelectionMode: (target: FaceSelectionTarget) => void;
   exitFaceSelectionMode: () => void;
@@ -374,7 +433,17 @@ function createInitialState(): CadState {
     kernel: null,
     sketchMousePos: null,
     sketchDrawingState: { type: "idle" },
-    gridSnappingEnabled: true,
+    gridSnappingEnabled: false,
+    sketchSelection: new Set<PrimitiveId>(),
+    hoveredSketchEntity: null,
+    sketchGizmoState: {
+      mode: "idle",
+      dragStart: null,
+      centroidStart: null,
+      rotationStart: null,
+      originalPositions: null,
+    },
+    sketchClipboard: null,
     faceSelectionTarget: null,
     selectedFace: null,
     pendingExtrude: null,
@@ -507,7 +576,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
     set({
       editorMode: "sketch",
       activeSketchId: sketchId,
-      activeTool: "line",
+      activeTool: "select",
     });
   },
 
@@ -517,6 +586,15 @@ export const useCadStore = create<CadStore>((set, get) => ({
       editorMode: "object",
       activeSketchId: null,
       activeTool: "select",
+      sketchSelection: new Set(),
+      hoveredSketchEntity: null,
+      sketchGizmoState: {
+        mode: "idle",
+        dragStart: null,
+        centroidStart: null,
+        rotationStart: null,
+        originalPositions: null,
+      },
     });
   },
 
@@ -1232,6 +1310,452 @@ export const useCadStore = create<CadStore>((set, get) => ({
 
   toggleGridSnapping: () => {
     set((state) => ({ gridSnappingEnabled: !state.gridSnappingEnabled }));
+  },
+
+  // Sketch selection actions
+  setSketchSelection: (ids) => {
+    set({ sketchSelection: ids });
+  },
+
+  clearSketchSelection: () => {
+    set({ sketchSelection: new Set() });
+  },
+
+  toggleSketchEntitySelected: (id) => {
+    const { sketchSelection } = get();
+    const newSelection = new Set(sketchSelection);
+    if (newSelection.has(id)) {
+      newSelection.delete(id);
+    } else {
+      newSelection.add(id);
+    }
+    set({ sketchSelection: newSelection });
+  },
+
+  setHoveredSketchEntity: (id) => {
+    set({ hoveredSketchEntity: id });
+  },
+
+  getMaterializedSelectionPoints: () => {
+    const { studio, activeSketchId, sketchSelection } = get();
+    if (!activeSketchId) return [];
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return [];
+
+    const pointIds = new Set<PrimitiveId>();
+
+    for (const primId of sketchSelection) {
+      const prim = sketch.primitives.get(primId);
+      if (!prim) continue;
+
+      if (prim.type === "point") {
+        pointIds.add(primId);
+      } else {
+        // Get all referenced points for non-point primitives
+        const refs = getReferencedPoints(prim);
+        for (const refId of refs) {
+          pointIds.add(refId);
+        }
+      }
+    }
+
+    return Array.from(pointIds);
+  },
+
+  updateSketchPointPositions: (updates) => {
+    const { studio, activeSketchId, historyState } = get();
+    if (!activeSketchId) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    const newPrimitives = new Map(sketch.primitives);
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+
+    for (const [primId, pos] of updates) {
+      const prim = sketch.primitives.get(primId);
+      if (prim?.type === "point") {
+        // Update the primitive
+        newPrimitives.set(primId, { ...prim, x: pos.x, y: pos.y });
+        // Update solved positions
+        newSolvedPositions.set(primId, [pos.x, pos.y]);
+      }
+    }
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+    });
+  },
+
+  startSketchGizmoDrag: (mode, mousePos) => {
+    const { studio, activeSketchId, sketchSelection } = get();
+    if (!activeSketchId || sketchSelection.size === 0) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    // Calculate centroid of selected points and store original positions
+    const pointIds = get().getMaterializedSelectionPoints();
+    if (pointIds.length === 0) return;
+
+    let cx = 0, cy = 0;
+    const originalPositions = new Map<PrimitiveId, { x: number; y: number }>();
+
+    for (const pointId of pointIds) {
+      const solved = sketch.solvedPositions?.get(pointId);
+      let px: number, py: number;
+      if (solved) {
+        px = solved[0];
+        py = solved[1];
+      } else {
+        const prim = sketch.primitives.get(pointId);
+        if (prim?.type === "point") {
+          px = prim.x;
+          py = prim.y;
+        } else {
+          continue;
+        }
+      }
+      cx += px;
+      cy += py;
+      originalPositions.set(pointId, { x: px, y: py });
+    }
+    cx /= pointIds.length;
+    cy /= pointIds.length;
+
+    // Calculate initial rotation angle if in rotate mode
+    let rotationStart: number | null = null;
+    if (mode === "rotate") {
+      rotationStart = Math.atan2(mousePos.y - cy, mousePos.x - cx);
+    }
+
+    set({
+      sketchGizmoState: {
+        mode,
+        dragStart: { x: mousePos.x, y: mousePos.y },
+        centroidStart: { x: cx, y: cy },
+        rotationStart,
+        originalPositions,
+      },
+    });
+  },
+
+  updateSketchGizmoDrag: (mousePos) => {
+    const { studio, activeSketchId, sketchGizmoState } = get();
+    if (!activeSketchId || sketchGizmoState.mode === "idle") return;
+    if (!sketchGizmoState.dragStart || !sketchGizmoState.centroidStart || !sketchGizmoState.originalPositions) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    const newPrimitives = new Map(sketch.primitives);
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+
+    const { mode, dragStart, centroidStart, rotationStart, originalPositions } = sketchGizmoState;
+
+    // Calculate delta from drag start position (in sketch 2D coordinates)
+    let dx = mousePos.x - dragStart.x;
+    let dy = mousePos.y - dragStart.y;
+
+    // Constrain movement based on mode
+    if (mode === "translate-x") {
+      dy = 0;
+    } else if (mode === "translate-y") {
+      dx = 0;
+    }
+
+    // Apply transformation to each point using original positions
+    for (const [pointId, origPos] of originalPositions) {
+      const prim = sketch.primitives.get(pointId);
+      if (prim?.type !== "point") continue;
+
+      let newX: number, newY: number;
+
+      if (mode === "rotate" && rotationStart !== null) {
+        // For rotation, calculate angle delta
+        const currentAngle = Math.atan2(mousePos.y - centroidStart.y, mousePos.x - centroidStart.x);
+        const angleDelta = currentAngle - rotationStart;
+
+        // Translate to centroid origin, rotate, translate back
+        const relX = origPos.x - centroidStart.x;
+        const relY = origPos.y - centroidStart.y;
+        const cos = Math.cos(angleDelta);
+        const sin = Math.sin(angleDelta);
+        newX = centroidStart.x + relX * cos - relY * sin;
+        newY = centroidStart.y + relX * sin + relY * cos;
+      } else {
+        // Translation: apply delta to original position
+        newX = origPos.x + dx;
+        newY = origPos.y + dy;
+      }
+
+      newPrimitives.set(pointId, { ...prim, x: newX, y: newY });
+      newSolvedPositions.set(pointId, [newX, newY]);
+    }
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    // Don't push history on every drag update - only on end
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+    set({ studio: newStudio });
+  },
+
+  endSketchGizmoDrag: () => {
+    const { studio, historyState } = get();
+
+    // Push the final state to history
+    set({
+      sketchGizmoState: {
+        mode: "idle",
+        dragStart: null,
+        centroidStart: null,
+        rotationStart: null,
+        originalPositions: null,
+      },
+      historyState: pushState(historyState, studio),
+    });
+  },
+
+  // Clipboard operations
+  deleteSketchSelection: () => {
+    const { studio, activeSketchId, sketchSelection, historyState } = get();
+    if (!activeSketchId || sketchSelection.size === 0) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    // Get all primitives to delete (including referenced points for lines/arcs/circles)
+    const toDelete = new Set<PrimitiveId>();
+    for (const primId of sketchSelection) {
+      toDelete.add(primId);
+      const prim = sketch.primitives.get(primId);
+      if (prim) {
+        // Also delete referenced points for non-point primitives
+        const refs = getReferencedPoints(prim);
+        for (const refId of refs) {
+          toDelete.add(refId);
+        }
+      }
+    }
+
+    // Remove primitives and their solved positions
+    const newPrimitives = new Map(sketch.primitives);
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    for (const primId of toDelete) {
+      newPrimitives.delete(primId);
+      newSolvedPositions.delete(primId);
+    }
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+      sketchSelection: new Set(),
+    });
+  },
+
+  copySketchSelection: () => {
+    const { studio, activeSketchId, sketchSelection } = get();
+    if (!activeSketchId || sketchSelection.size === 0) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    // Collect all primitives to copy (selected + their referenced points)
+    const toCopy = new Set<PrimitiveId>();
+    for (const primId of sketchSelection) {
+      toCopy.add(primId);
+      const prim = sketch.primitives.get(primId);
+      if (prim) {
+        const refs = getReferencedPoints(prim);
+        for (const refId of refs) {
+          toCopy.add(refId);
+        }
+      }
+    }
+
+    // Deep copy primitives
+    const copiedPrimitives = new Map<PrimitiveId, PointPrimitive | LinePrimitive | CirclePrimitive | ArcPrimitive>();
+    let cx = 0, cy = 0, pointCount = 0;
+
+    for (const primId of toCopy) {
+      const prim = sketch.primitives.get(primId);
+      if (!prim) continue;
+
+      // Deep copy (primitives are already immutable, but spread for safety)
+      copiedPrimitives.set(primId, { ...prim } as any);
+
+      // Calculate centroid from points only
+      if (prim.type === "point") {
+        const solved = sketch.solvedPositions?.get(primId);
+        if (solved) {
+          cx += solved[0];
+          cy += solved[1];
+        } else {
+          cx += prim.x;
+          cy += prim.y;
+        }
+        pointCount++;
+      }
+    }
+
+    if (pointCount > 0) {
+      cx /= pointCount;
+      cy /= pointCount;
+    }
+
+    set({
+      sketchClipboard: {
+        primitives: copiedPrimitives,
+        centroid: { x: cx, y: cy },
+      },
+    });
+  },
+
+  cutSketchSelection: () => {
+    const { copySketchSelection, deleteSketchSelection } = get();
+    copySketchSelection();
+    deleteSketchSelection();
+  },
+
+  pasteSketchClipboard: () => {
+    const { studio, activeSketchId, sketchClipboard, sketchMousePos, historyState } = get();
+    if (!activeSketchId || !sketchClipboard) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    // Calculate paste offset - paste at mouse position or offset from original
+    const pasteOffset = sketchMousePos
+      ? { x: sketchMousePos.x - sketchClipboard.centroid.x, y: sketchMousePos.y - sketchClipboard.centroid.y }
+      : { x: 20, y: 20 }; // Default offset if no mouse position
+
+    // Create mapping from old IDs to new IDs
+    const idMapping = new Map<PrimitiveId, PrimitiveId>();
+    for (const oldId of sketchClipboard.primitives.keys()) {
+      idMapping.set(oldId, newId("Primitive") as PrimitiveId);
+    }
+
+    const newPrimitives = new Map(sketch.primitives);
+    const newSolvedPositions = new Map(sketch.solvedPositions || []);
+    const pastedIds = new Set<PrimitiveId>();
+
+    // Paste primitives with new IDs and updated references
+    for (const [oldId, oldPrim] of sketchClipboard.primitives) {
+      const newPrimId = idMapping.get(oldId)!;
+      pastedIds.add(newPrimId);
+
+      if (oldPrim.type === "point") {
+        const newX = oldPrim.x + pasteOffset.x;
+        const newY = oldPrim.y + pasteOffset.y;
+        const newPoint: PointPrimitive = {
+          ...oldPrim,
+          id: newPrimId,
+          x: newX,
+          y: newY,
+        };
+        newPrimitives.set(newPrimId, newPoint);
+        newSolvedPositions.set(newPrimId, [newX, newY]);
+      } else if (oldPrim.type === "line") {
+        const newLine: LinePrimitive = {
+          ...oldPrim,
+          id: newPrimId,
+          start: idMapping.get(oldPrim.start) || oldPrim.start,
+          end: idMapping.get(oldPrim.end) || oldPrim.end,
+        };
+        newPrimitives.set(newPrimId, newLine);
+      } else if (oldPrim.type === "circle") {
+        const newCircle: CirclePrimitive = {
+          ...oldPrim,
+          id: newPrimId,
+          center: idMapping.get(oldPrim.center) || oldPrim.center,
+        };
+        newPrimitives.set(newPrimId, newCircle);
+      } else if (oldPrim.type === "arc") {
+        const newArc: ArcPrimitive = {
+          ...oldPrim,
+          id: newPrimId,
+          center: idMapping.get(oldPrim.center) || oldPrim.center,
+          start: idMapping.get(oldPrim.start) || oldPrim.start,
+          end: idMapping.get(oldPrim.end) || oldPrim.end,
+        };
+        newPrimitives.set(newPrimId, newArc);
+      }
+    }
+
+    const newSketch: Sketch = {
+      ...sketch,
+      primitives: newPrimitives,
+      solvedPositions: newSolvedPositions,
+    };
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, newSketch);
+
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+      // Select the pasted entities (non-point primitives only for cleaner selection)
+      sketchSelection: new Set(
+        Array.from(pastedIds).filter((id) => {
+          const prim = newPrimitives.get(id);
+          return prim && prim.type !== "point";
+        })
+      ),
+    });
+  },
+
+  duplicateSketchSelection: () => {
+    const { copySketchSelection, pasteSketchClipboard } = get();
+    copySketchSelection();
+    pasteSketchClipboard();
+  },
+
+  selectAllSketchEntities: () => {
+    const { studio, activeSketchId } = get();
+    if (!activeSketchId) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    // Select all non-point primitives (lines, circles, arcs)
+    const allEntities = new Set<PrimitiveId>();
+    for (const [id, prim] of sketch.primitives) {
+      if (prim.type !== "point") {
+        allEntities.add(id);
+      }
+    }
+
+    set({ sketchSelection: allEntities });
   },
 
   // Face selection actions
