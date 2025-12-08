@@ -9,7 +9,7 @@ import { persist } from "zustand/middleware";
 // Types
 // ============================================================================
 
-export type DocumentType = "cad" | "drawing" | "image" | "raw" | "text" | "pdf" | "markdown" | "video" | "audio" | "model3d";
+export type DocumentType = "cad" | "drawing" | "schematic" | "pcb" | "image" | "raw" | "text" | "pdf" | "markdown" | "video" | "audio" | "model3d";
 
 interface DocumentBase {
   id: string;
@@ -98,9 +98,29 @@ export interface DrawingDocument extends DocumentBase {
   sourcePaths: string[];
 }
 
+export interface SchematicTabDocument extends DocumentBase {
+  type: "schematic";
+  // Reference to the schematic in schematic-store
+  schematicDocumentId: string;
+  // Original filename (if loaded from file)
+  originalFilename?: string;
+}
+
+export interface PcbTabDocument extends DocumentBase {
+  type: "pcb";
+  // Reference to the PCB in pcb-store
+  pcbDocumentId: string;
+  // Linked schematic path (optional)
+  linkedSchematicPath?: string;
+  // Original filename (if loaded from file)
+  originalFilename?: string;
+}
+
 export type TabDocument =
   | CadDocument
   | DrawingDocument
+  | SchematicTabDocument
+  | PcbTabDocument
   | ImageDocument
   | RawDocument
   | TextDocument
@@ -285,6 +305,44 @@ export function createDrawingTab(name: string, drawingId: string, sourcePaths: s
     drawingId,
     sourcePaths,
     icon: "drawing",
+  };
+}
+
+/**
+ * Create a new schematic document tab
+ */
+export function createSchematicTab(
+  name: string,
+  schematicDocumentId: string,
+  originalFilename?: string
+): SchematicTabDocument {
+  return {
+    id: generateTabId(),
+    name,
+    type: "schematic",
+    schematicDocumentId,
+    originalFilename,
+    icon: "schematic",
+  };
+}
+
+/**
+ * Create a new PCB document tab
+ */
+export function createPcbTab(
+  name: string,
+  pcbDocumentId: string,
+  linkedSchematicPath?: string,
+  originalFilename?: string
+): PcbTabDocument {
+  return {
+    id: generateTabId(),
+    name,
+    type: "pcb",
+    pcbDocumentId,
+    linkedSchematicPath,
+    originalFilename,
+    icon: "pcb",
   };
 }
 
@@ -562,7 +620,17 @@ export function getDocumentTypeFromFile(file: File): DocumentType {
     return "image";
   }
 
-  // vibeCAD files
+  // vibeCAD schematic files
+  if (lowerName.endsWith(".vibecad.sch") || lowerName.endsWith(".vibecad.sch.json")) {
+    return "schematic";
+  }
+
+  // vibeCAD PCB files
+  if (lowerName.endsWith(".vibecad.pcb") || lowerName.endsWith(".vibecad.pcb.json")) {
+    return "pcb";
+  }
+
+  // vibeCAD CAD files
   const cadExtensions = [".vibecad.json", ".vibecad"];
   if (cadExtensions.some((e) => lowerName.endsWith(e))) {
     return "cad";
