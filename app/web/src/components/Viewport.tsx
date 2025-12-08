@@ -1943,6 +1943,356 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
           // Skip for now - transform will be applied to the already-rendered geometry
           console.log("[Transform] Transform operations pending proper implementation");
         }
+
+        // Handle boolean operations
+        else if (op.type === "boolean") {
+          console.log("[Boolean] Processing boolean op:", op.name, op);
+
+          // Get the target and tool shapes
+          const targetShape = opShapes.get(op.targetOp);
+          const toolShape = opShapes.get(op.toolOp);
+
+          if (!targetShape || !toolShape) {
+            console.log("[Boolean] Skipping - missing shapes. target:", op.targetOp, "tool:", op.toolOp);
+            continue;
+          }
+
+          try {
+            let resultSolid: number;
+
+            switch (op.operation) {
+              case "union":
+                resultSolid = occApi.fuse(targetShape, toolShape);
+                break;
+              case "subtract":
+                resultSolid = occApi.cut(targetShape, toolShape);
+                break;
+              case "intersect":
+                resultSolid = occApi.intersect(targetShape, toolShape);
+                break;
+            }
+
+            console.log("[Boolean] Created result solid:", resultSolid);
+
+            // Store shape for later operations
+            opShapes.set(opId, resultSolid);
+            exportableShapeHandles.push(resultSolid);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(resultSolid, 0.1);
+            console.log("[Boolean] Meshed result:", meshData.positions.length / 3, "vertices");
+
+            // Store for export
+            exportableMeshes.push({
+              positions: meshData.positions,
+              normals: meshData.normals,
+              indices: meshData.indices,
+              name: op.name,
+            });
+
+            // Create Three.js geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+            geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+            geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+            // Create mesh with default material
+            const material = new THREE.MeshStandardMaterial({
+              color: 0x3498db,
+              metalness: 0.2,
+              roughness: 0.7,
+              flatShading: false,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.opId = opId;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Swap Y/Z for Three.js coordinate system
+            mesh.rotation.x = -Math.PI / 2;
+
+            // Create edge lines
+            const edgesGeometry = new THREE.EdgesGeometry(geometry, 15);
+            const edgesMaterial = new THREE.LineBasicMaterial({
+              color: 0x1a252f,
+              linewidth: 1,
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            edges.rotation.x = -Math.PI / 2;
+            edges.userData.isEdge = true;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Boolean] Failed to perform boolean operation:", err);
+          }
+        }
+
+        // Handle fillet operations
+        else if (op.type === "fillet") {
+          console.log("[Fillet] Processing fillet op:", op.name, op);
+
+          // Get the target shape
+          const targetShape = opShapes.get(op.targetOp);
+
+          if (!targetShape) {
+            console.log("[Fillet] Skipping - target shape not found:", op.targetOp);
+            continue;
+          }
+
+          try {
+            // Get all edges of the target shape
+            const allEdges = occApi.getEdges(targetShape);
+
+            // Filter to the edges specified in the operation
+            const edgeHandles: number[] = [];
+            for (const edgeRef of op.edges) {
+              if (edgeRef.opId === op.targetOp && edgeRef.index < allEdges.length) {
+                edgeHandles.push(allEdges[edgeRef.index]);
+              }
+            }
+
+            if (edgeHandles.length === 0) {
+              console.log("[Fillet] No valid edges to fillet");
+              continue;
+            }
+
+            // Apply fillet
+            const radius = op.radius.value;
+            const resultSolid = occApi.fillet(targetShape, edgeHandles, radius);
+
+            console.log("[Fillet] Created filleted solid:", resultSolid);
+
+            // Store shape for later operations
+            opShapes.set(opId, resultSolid);
+            exportableShapeHandles.push(resultSolid);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(resultSolid, 0.1);
+            console.log("[Fillet] Meshed result:", meshData.positions.length / 3, "vertices");
+
+            // Store for export
+            exportableMeshes.push({
+              positions: meshData.positions,
+              normals: meshData.normals,
+              indices: meshData.indices,
+              name: op.name,
+            });
+
+            // Create Three.js geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+            geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+            geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+            // Create mesh with default material
+            const material = new THREE.MeshStandardMaterial({
+              color: 0x3498db,
+              metalness: 0.2,
+              roughness: 0.7,
+              flatShading: false,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.opId = opId;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Swap Y/Z for Three.js coordinate system
+            mesh.rotation.x = -Math.PI / 2;
+
+            // Create edge lines
+            const edgesGeometry = new THREE.EdgesGeometry(geometry, 15);
+            const edgesMaterial = new THREE.LineBasicMaterial({
+              color: 0x1a252f,
+              linewidth: 1,
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            edges.rotation.x = -Math.PI / 2;
+            edges.userData.isEdge = true;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Fillet] Failed to apply fillet:", err);
+          }
+        }
+
+        // Handle chamfer operations
+        else if (op.type === "chamfer") {
+          console.log("[Chamfer] Processing chamfer op:", op.name, op);
+
+          // Get the target shape
+          const targetShape = opShapes.get(op.targetOp);
+
+          if (!targetShape) {
+            console.log("[Chamfer] Skipping - target shape not found:", op.targetOp);
+            continue;
+          }
+
+          try {
+            // Get all edges of the target shape
+            const allEdges = occApi.getEdges(targetShape);
+
+            // Filter to the edges specified in the operation
+            const edgeHandles: number[] = [];
+            for (const edgeRef of op.edges) {
+              if (edgeRef.opId === op.targetOp && edgeRef.index < allEdges.length) {
+                edgeHandles.push(allEdges[edgeRef.index]);
+              }
+            }
+
+            if (edgeHandles.length === 0) {
+              console.log("[Chamfer] No valid edges to chamfer");
+              continue;
+            }
+
+            // Apply chamfer
+            const distance = op.distance.value;
+            const resultSolid = occApi.chamfer(targetShape, edgeHandles, distance);
+
+            console.log("[Chamfer] Created chamfered solid:", resultSolid);
+
+            // Store shape for later operations
+            opShapes.set(opId, resultSolid);
+            exportableShapeHandles.push(resultSolid);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(resultSolid, 0.1);
+            console.log("[Chamfer] Meshed result:", meshData.positions.length / 3, "vertices");
+
+            // Store for export
+            exportableMeshes.push({
+              positions: meshData.positions,
+              normals: meshData.normals,
+              indices: meshData.indices,
+              name: op.name,
+            });
+
+            // Create Three.js geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+            geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+            geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+            // Create mesh with default material
+            const material = new THREE.MeshStandardMaterial({
+              color: 0x3498db,
+              metalness: 0.2,
+              roughness: 0.7,
+              flatShading: false,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.opId = opId;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Swap Y/Z for Three.js coordinate system
+            mesh.rotation.x = -Math.PI / 2;
+
+            // Create edge lines
+            const edgesGeometry = new THREE.EdgesGeometry(geometry, 15);
+            const edgesMaterial = new THREE.LineBasicMaterial({
+              color: 0x1a252f,
+              linewidth: 1,
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            edges.rotation.x = -Math.PI / 2;
+            edges.userData.isEdge = true;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Chamfer] Failed to apply chamfer:", err);
+          }
+        }
+
+        // Handle shell operations
+        else if (op.type === "shell") {
+          console.log("[Shell] Processing shell op:", op.name, op);
+
+          // Get the target shape
+          const targetShape = opShapes.get(op.targetOp);
+
+          if (!targetShape) {
+            console.log("[Shell] Skipping - target shape not found:", op.targetOp);
+            continue;
+          }
+
+          try {
+            // Get all faces of the target shape
+            const allFaces = occApi.getFaces(targetShape);
+
+            // Filter to the faces specified for removal
+            const faceHandles: number[] = [];
+            for (const faceRef of op.facesToRemove) {
+              if (faceRef.opId === op.targetOp && faceRef.index < allFaces.length) {
+                faceHandles.push(allFaces[faceRef.index]);
+              }
+            }
+
+            // Apply shell
+            const thickness = op.thickness.value;
+            const resultSolid = occApi.shell(targetShape, faceHandles, thickness);
+
+            console.log("[Shell] Created shelled solid:", resultSolid);
+
+            // Store shape for later operations
+            opShapes.set(opId, resultSolid);
+            exportableShapeHandles.push(resultSolid);
+
+            // Mesh the shape
+            const meshData = occApi.mesh(resultSolid, 0.1);
+            console.log("[Shell] Meshed result:", meshData.positions.length / 3, "vertices");
+
+            // Store for export
+            exportableMeshes.push({
+              positions: meshData.positions,
+              normals: meshData.normals,
+              indices: meshData.indices,
+              name: op.name,
+            });
+
+            // Create Three.js geometry
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute("position", new THREE.BufferAttribute(meshData.positions, 3));
+            geometry.setAttribute("normal", new THREE.BufferAttribute(meshData.normals, 3));
+            geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+
+            // Create mesh with default material
+            const material = new THREE.MeshStandardMaterial({
+              color: 0x3498db,
+              metalness: 0.2,
+              roughness: 0.7,
+              flatShading: false,
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.opId = opId;
+            mesh.userData.faceGroups = meshData.faceGroups;
+
+            // Swap Y/Z for Three.js coordinate system
+            mesh.rotation.x = -Math.PI / 2;
+
+            // Create edge lines
+            const edgesGeometry = new THREE.EdgesGeometry(geometry, 15);
+            const edgesMaterial = new THREE.LineBasicMaterial({
+              color: 0x1a252f,
+              linewidth: 1,
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            edges.rotation.x = -Math.PI / 2;
+            edges.userData.isEdge = true;
+
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+          } catch (err) {
+            console.error("[Shell] Failed to apply shell:", err);
+          }
+        }
       }
 
       // Update export data in store
