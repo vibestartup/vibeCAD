@@ -655,27 +655,24 @@ export class OccApiImpl implements OccApi {
   faceNormal(face: FaceHandle): Vec3 {
     const faceObj = this.store.get(face);
 
-    // Get the surface
-    const location = new this.oc.TopLoc_Location_1();
-    const surface = this.oc.BRep_Tool.Surface_2(faceObj, location);
+    // Use BRepAdaptor_Surface which handles the face directly
+    const adaptor = new this.oc.BRepAdaptor_Surface_2(faceObj, true);
 
-    // Get UV bounds
-    const uMin = { current: 0 };
-    const uMax = { current: 0 };
-    const vMin = { current: 0 };
-    const vMax = { current: 0 };
-
-    this.oc.BRepTools.UVBounds_1(faceObj, uMin, uMax, vMin, vMax);
+    // Get UV bounds from the adaptor
+    const uMin = adaptor.FirstUParameter();
+    const uMax = adaptor.LastUParameter();
+    const vMin = adaptor.FirstVParameter();
+    const vMax = adaptor.LastVParameter();
 
     // Evaluate at center of UV
-    const uMid = (uMin.current + uMax.current) / 2;
-    const vMid = (vMin.current + vMax.current) / 2;
+    const uMid = (uMin + uMax) / 2;
+    const vMid = (vMin + vMax) / 2;
 
     const pnt = new this.oc.gp_Pnt_1();
     const d1u = new this.oc.gp_Vec_1();
     const d1v = new this.oc.gp_Vec_1();
 
-    surface.get().D1(uMid, vMid, pnt, d1u, d1v);
+    adaptor.D1(uMid, vMid, pnt, d1u, d1v);
 
     // Normal is cross product of d1u and d1v
     const normal = d1u.Crossed(d1v);

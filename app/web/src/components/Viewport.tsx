@@ -2794,6 +2794,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     const previewMaterial = new THREE.LineBasicMaterial({
       color: 0x69db7c,
       linewidth: 2,
+      depthTest: false,
     });
 
     if (sketchDrawingState.type === "line" && sketchDrawingState.start) {
@@ -2801,6 +2802,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       const endPos = cursorPos;
       const geometry = new THREE.BufferGeometry().setFromPoints([startPos, endPos]);
       const line = new THREE.Line(geometry, previewMaterial);
+      line.renderOrder = 999;
       previewGroup.add(line);
     } else if (sketchDrawingState.type === "rect" && sketchDrawingState.start) {
       const s = sketchDrawingState.start;
@@ -2812,6 +2814,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       const p4 = sketchTo3D(s.x, e.y);
       const geometry = new THREE.BufferGeometry().setFromPoints([p1, p2, p3, p4, p1]);
       const line = new THREE.Line(geometry, previewMaterial);
+      line.renderOrder = 999;
       previewGroup.add(line);
     } else if (sketchDrawingState.type === "circle" && sketchDrawingState.center) {
       const center = sketchDrawingState.center;
@@ -2830,6 +2833,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         }
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
         const line = new THREE.Line(geometry, previewMaterial);
+        line.renderOrder = 999;
         previewGroup.add(line);
       }
     } else if (sketchDrawingState.type === "arc") {
@@ -2860,6 +2864,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
           }
           const geometry = new THREE.BufferGeometry().setFromPoints(points);
           const line = new THREE.Line(geometry, previewMaterial);
+          line.renderOrder = 999;
           previewGroup.add(line);
         }
       } else if (sketchDrawingState.center) {
@@ -2867,13 +2872,14 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         const centerPos = sketchTo3D(sketchDrawingState.center.x, sketchDrawingState.center.y);
         const geometry = new THREE.BufferGeometry().setFromPoints([centerPos, cursorPos]);
         const line = new THREE.Line(geometry, previewMaterial);
+        line.renderOrder = 999;
         previewGroup.add(line);
       }
     }
 
     // Also draw start point markers for multi-click tools
     if (sketchDrawingState.type !== "idle") {
-      const startMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0x69db7c });
+      const startMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0x69db7c, depthTest: false });
       const startMarkerGeometry = new THREE.SphereGeometry(1, 12, 12);
 
       if (sketchDrawingState.type === "line" || sketchDrawingState.type === "rect") {
@@ -2881,6 +2887,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         const startMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
         startMarker.position.copy(startPos);
         startMarker.userData.isMarker = true;
+        startMarker.renderOrder = 1000;
         const markerScale = startPos.distanceTo(camera.position) * 0.005;
         startMarker.scale.setScalar(markerScale);
         previewGroup.add(startMarker);
@@ -2889,6 +2896,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         const centerMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
         centerMarker.position.copy(centerPos);
         centerMarker.userData.isMarker = true;
+        centerMarker.renderOrder = 1000;
         const markerScale = centerPos.distanceTo(camera.position) * 0.005;
         centerMarker.scale.setScalar(markerScale);
         previewGroup.add(centerMarker);
@@ -2897,6 +2905,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         const centerMarker = new THREE.Mesh(startMarkerGeometry, startMarkerMaterial);
         centerMarker.position.copy(centerPos);
         centerMarker.userData.isMarker = true;
+        centerMarker.renderOrder = 1000;
         const markerScale = centerPos.distanceTo(camera.position) * 0.005;
         centerMarker.scale.setScalar(markerScale);
         previewGroup.add(centerMarker);
@@ -2906,6 +2915,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
           const startMarker = new THREE.Mesh(startMarkerGeometry.clone(), startMarkerMaterial);
           startMarker.position.copy(startPos);
           startMarker.userData.isMarker = true;
+          startMarker.renderOrder = 1000;
           const sMarkerScale = startPos.distanceTo(camera.position) * 0.005;
           startMarker.scale.setScalar(sMarkerScale);
           previewGroup.add(startMarker);
