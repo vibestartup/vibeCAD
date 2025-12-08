@@ -17,3 +17,4 @@ export { TabbedSidebar } from "./TabbedSidebar";
 export { LeftSidebar } from "./LeftSidebar";
 export { RightSidebar } from "./RightSidebar";
 export { FileExplorer } from "./FileExplorer";
+export { ImageEditorSidebar } from "./ImageEditorSidebar";

@@ -1,14 +1,12 @@
 /**
- * ImageEditorSidebar - sidebar panel for image editor tool settings
- * Uses TabbedSidebar for consistency with the rest of the app
+ * ImageEditorSidebar - sidebar panel showing tool-specific settings
+ * Tools are now in the toolbar, this only shows settings for the active tool
  */
 
 import React from "react";
 import {
   useImageEditorStore,
-  drawingTools,
   fontFamilies,
-  type DrawingTool,
 } from "../store/image-editor-store";
 
 // ============================================================================
@@ -34,39 +32,6 @@ const styles = {
     color: "#666",
     textTransform: "uppercase" as const,
     marginBottom: 10,
-  },
-
-  toolGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(5, 1fr)",
-    gap: 4,
-  },
-
-  toolButton: {
-    width: "100%",
-    aspectRatio: "1",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 4,
-    border: "1px solid #333",
-    backgroundColor: "transparent",
-    color: "#888",
-    fontSize: 14,
-    cursor: "pointer",
-    transition: "all 0.15s",
-  },
-
-  toolButtonHover: {
-    backgroundColor: "#252545",
-    borderColor: "#444",
-    color: "#fff",
-  },
-
-  toolButtonActive: {
-    backgroundColor: "#646cff",
-    borderColor: "#646cff",
-    color: "#fff",
   },
 
   row: {
@@ -213,6 +178,26 @@ const styles = {
     opacity: 0.4,
     cursor: "not-allowed",
   },
+
+  toolName: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#ccc",
+    marginBottom: 4,
+  },
+
+  toolDescription: {
+    fontSize: 11,
+    color: "#666",
+    lineHeight: 1.5,
+  },
+
+  noSettings: {
+    fontSize: 12,
+    color: "#666",
+    lineHeight: 1.6,
+    padding: "8px 0",
+  },
 };
 
 // Preset colors for quick selection
@@ -222,160 +207,147 @@ const presetColors = [
   "#ffffff", "#cccccc", "#888888", "#444444", "#000000",
 ];
 
+// Tool info for display
+const toolInfo: Record<string, { name: string; description: string }> = {
+  select: { name: "Select", description: "Click and drag to pan. Use scroll wheel to zoom." },
+  pen: { name: "Pen", description: "Draw freehand lines with hard edges." },
+  brush: { name: "Brush", description: "Paint with soft, customizable edges." },
+  eraser: { name: "Eraser", description: "Remove parts of your drawing." },
+  line: { name: "Line", description: "Draw straight lines between two points." },
+  arrow: { name: "Arrow", description: "Draw arrows with customizable head size." },
+  rectangle: { name: "Rectangle", description: "Draw rectangular shapes." },
+  ellipse: { name: "Ellipse", description: "Draw ellipses and circles." },
+  text: { name: "Text", description: "Click to add text. Press Enter to confirm, Escape to cancel." },
+  eyedropper: { name: "Eyedropper", description: "Click on the image to pick a color." },
+};
+
 // ============================================================================
-// Tool Settings Panel
+// Color Settings Component
 // ============================================================================
 
-function ToolSettingsPanel() {
+function ColorSettings() {
   const {
-    activeTool,
     strokeColor,
     setStrokeColor,
     fillColor,
     setFillColor,
+    fillEnabled,
+    setFillEnabled,
+    activeTool,
+  } = useImageEditorStore();
+
+  const [hoveredPreset, setHoveredPreset] = React.useState<string | null>(null);
+
+  const showFillOptions = ["rectangle", "ellipse"].includes(activeTool);
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>Color</div>
+
+      <div style={styles.colorRow}>
+        <span style={styles.label}>Stroke</span>
+        <div style={{ ...styles.colorSwatch, backgroundColor: strokeColor }}>
+          <input
+            type="color"
+            value={strokeColor}
+            onChange={(e) => setStrokeColor(e.target.value)}
+            style={styles.colorInput}
+          />
+        </div>
+        <span style={{ ...styles.value, flex: 1, textAlign: "left" as const }}>{strokeColor}</span>
+      </div>
+
+      {showFillOptions && (
+        <div style={{ ...styles.colorRow, marginTop: 8 }}>
+          <span style={styles.label}>Fill</span>
+          <div style={{ ...styles.colorSwatch, backgroundColor: fillEnabled ? fillColor : "transparent" }}>
+            <input
+              type="color"
+              value={fillColor}
+              onChange={(e) => setFillColor(e.target.value)}
+              style={styles.colorInput}
+              disabled={!fillEnabled}
+            />
+          </div>
+          <label style={styles.checkbox}>
+            <input
+              type="checkbox"
+              checked={fillEnabled}
+              onChange={(e) => setFillEnabled(e.target.checked)}
+              style={styles.checkboxInput}
+            />
+            Fill
+          </label>
+        </div>
+      )}
+
+      <div style={styles.presetColors}>
+        {presetColors.map((color) => (
+          <div
+            key={color}
+            style={{
+              ...styles.presetColor,
+              backgroundColor: color,
+              borderColor: hoveredPreset === color ? "#646cff" : "#444",
+              transform: hoveredPreset === color ? "scale(1.2)" : "scale(1)",
+            }}
+            onClick={() => setStrokeColor(color)}
+            onMouseEnter={() => setHoveredPreset(color)}
+            onMouseLeave={() => setHoveredPreset(null)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Stroke Settings Component
+// ============================================================================
+
+function StrokeSettings() {
+  const {
+    activeTool,
     strokeSize,
     setStrokeSize,
     opacity,
     setOpacity,
     brushHardness,
     setBrushHardness,
-    fontSize,
-    setFontSize,
-    fontFamily,
-    setFontFamily,
-    fillEnabled,
-    setFillEnabled,
-    strokeEnabled,
-    setStrokeEnabled,
-    arrowHeadSize,
-    setArrowHeadSize,
   } = useImageEditorStore();
 
-  const [hoveredPreset, setHoveredPreset] = React.useState<string | null>(null);
-
-  // Show different settings based on active tool
-  const showStrokeColor = ["pen", "brush", "line", "arrow", "rectangle", "ellipse", "text"].includes(activeTool);
-  const showFillColor = ["rectangle", "ellipse"].includes(activeTool);
-  const showStrokeSize = ["pen", "brush", "eraser", "line", "arrow", "rectangle", "ellipse"].includes(activeTool);
-  const showOpacity = ["pen", "brush", "eraser", "line", "arrow", "rectangle", "ellipse", "text"].includes(activeTool);
   const showBrushHardness = activeTool === "brush";
-  const showFontSettings = activeTool === "text";
-  const showShapeSettings = ["rectangle", "ellipse"].includes(activeTool);
-  const showArrowSettings = activeTool === "arrow";
-
-  if (activeTool === "select" || activeTool === "eyedropper") {
-    return (
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>
-          {activeTool === "select" ? "Selection" : "Eyedropper"}
-        </div>
-        <div style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-          {activeTool === "select"
-            ? "Click and drag to select annotations. Use Delete to remove selected items."
-            : "Click anywhere on the image to pick a color."}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div style={styles.section}>
-      <div style={styles.sectionTitle}>Tool Settings</div>
+      <div style={styles.sectionTitle}>Stroke</div>
 
-      {/* Stroke Color */}
-      {showStrokeColor && (
-        <>
-          <div style={styles.colorRow}>
-            <span style={styles.label}>Stroke</span>
-            <div style={{ ...styles.colorSwatch, backgroundColor: strokeColor }}>
-              <input
-                type="color"
-                value={strokeColor}
-                onChange={(e) => setStrokeColor(e.target.value)}
-                style={styles.colorInput}
-              />
-            </div>
-            <span style={{ ...styles.value, flex: 1, textAlign: "left" as const }}>{strokeColor}</span>
-          </div>
-          <div style={styles.presetColors}>
-            {presetColors.map((color) => (
-              <div
-                key={color}
-                style={{
-                  ...styles.presetColor,
-                  backgroundColor: color,
-                  borderColor: hoveredPreset === color ? "#646cff" : "#444",
-                  transform: hoveredPreset === color ? "scale(1.2)" : "scale(1)",
-                }}
-                onClick={() => setStrokeColor(color)}
-                onMouseEnter={() => setHoveredPreset(color)}
-                onMouseLeave={() => setHoveredPreset(null)}
-              />
-            ))}
-          </div>
-        </>
-      )}
+      <div style={styles.row}>
+        <span style={styles.label}>Size</span>
+        <input
+          type="range"
+          min="1"
+          max="100"
+          value={strokeSize}
+          onChange={(e) => setStrokeSize(parseInt(e.target.value))}
+          style={styles.slider}
+        />
+        <span style={styles.value}>{strokeSize}px</span>
+      </div>
 
-      {/* Fill Color */}
-      {showFillColor && (
-        <div style={{ marginTop: 12 }}>
-          <div style={styles.colorRow}>
-            <span style={styles.label}>Fill</span>
-            <div style={{ ...styles.colorSwatch, backgroundColor: fillEnabled ? fillColor : "transparent" }}>
-              <input
-                type="color"
-                value={fillColor}
-                onChange={(e) => setFillColor(e.target.value)}
-                style={styles.colorInput}
-                disabled={!fillEnabled}
-              />
-            </div>
-            <label style={styles.checkbox}>
-              <input
-                type="checkbox"
-                checked={fillEnabled}
-                onChange={(e) => setFillEnabled(e.target.checked)}
-                style={styles.checkboxInput}
-              />
-              Enable Fill
-            </label>
-          </div>
-        </div>
-      )}
+      <div style={styles.row}>
+        <span style={styles.label}>Opacity</span>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={opacity}
+          onChange={(e) => setOpacity(parseInt(e.target.value))}
+          style={styles.slider}
+        />
+        <span style={styles.value}>{opacity}%</span>
+      </div>
 
-      {/* Stroke Size */}
-      {showStrokeSize && (
-        <div style={{ ...styles.row, marginTop: 12 }}>
-          <span style={styles.label}>Size</span>
-          <input
-            type="range"
-            min="1"
-            max="100"
-            value={strokeSize}
-            onChange={(e) => setStrokeSize(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.value}>{strokeSize}px</span>
-        </div>
-      )}
-
-      {/* Opacity */}
-      {showOpacity && (
-        <div style={styles.row}>
-          <span style={styles.label}>Opacity</span>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={opacity}
-            onChange={(e) => setOpacity(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.value}>{opacity}%</span>
-        </div>
-      )}
-
-      {/* Brush Hardness */}
       {showBrushHardness && (
         <div style={styles.row}>
           <span style={styles.label}>Hardness</span>
@@ -390,101 +362,82 @@ function ToolSettingsPanel() {
           <span style={styles.value}>{brushHardness}%</span>
         </div>
       )}
-
-      {/* Font Settings */}
-      {showFontSettings && (
-        <>
-          <div style={{ ...styles.row, marginTop: 12 }}>
-            <span style={styles.label}>Font</span>
-            <select
-              value={fontFamily}
-              onChange={(e) => setFontFamily(e.target.value)}
-              style={styles.select}
-            >
-              {fontFamilies.map((font) => (
-                <option key={font} value={font}>
-                  {font}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={styles.row}>
-            <span style={styles.label}>Size</span>
-            <input
-              type="range"
-              min="8"
-              max="200"
-              value={fontSize}
-              onChange={(e) => setFontSize(parseInt(e.target.value))}
-              style={styles.slider}
-            />
-            <span style={styles.value}>{fontSize}px</span>
-          </div>
-        </>
-      )}
-
-      {/* Shape Settings */}
-      {showShapeSettings && (
-        <div style={{ marginTop: 12 }}>
-          <label style={styles.checkbox}>
-            <input
-              type="checkbox"
-              checked={strokeEnabled}
-              onChange={(e) => setStrokeEnabled(e.target.checked)}
-              style={styles.checkboxInput}
-            />
-            Show Stroke
-          </label>
-        </div>
-      )}
-
-      {/* Arrow Settings */}
-      {showArrowSettings && (
-        <div style={styles.row}>
-          <span style={styles.label}>Head Size</span>
-          <input
-            type="range"
-            min="4"
-            max="50"
-            value={arrowHeadSize}
-            onChange={(e) => setArrowHeadSize(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.value}>{arrowHeadSize}px</span>
-        </div>
-      )}
     </div>
   );
 }
 
 // ============================================================================
-// Tools Panel
+// Text Settings Component
 // ============================================================================
 
-function ToolsPanel() {
-  const { activeTool, setActiveTool } = useImageEditorStore();
-  const [hoveredTool, setHoveredTool] = React.useState<string | null>(null);
+function TextSettings() {
+  const {
+    fontSize,
+    setFontSize,
+    fontFamily,
+    setFontFamily,
+  } = useImageEditorStore();
 
   return (
     <div style={styles.section}>
-      <div style={styles.sectionTitle}>Drawing Tools</div>
-      <div style={styles.toolGrid}>
-        {drawingTools.map((tool) => (
-          <button
-            key={tool.id}
-            style={{
-              ...styles.toolButton,
-              ...(hoveredTool === tool.id && activeTool !== tool.id ? styles.toolButtonHover : {}),
-              ...(activeTool === tool.id ? styles.toolButtonActive : {}),
-            }}
-            onClick={() => setActiveTool(tool.id)}
-            onMouseEnter={() => setHoveredTool(tool.id)}
-            onMouseLeave={() => setHoveredTool(null)}
-            title={`${tool.label} (${tool.shortcut})\n${tool.description}`}
-          >
-            {tool.icon}
-          </button>
-        ))}
+      <div style={styles.sectionTitle}>Text</div>
+
+      <div style={styles.row}>
+        <span style={styles.label}>Font</span>
+        <select
+          value={fontFamily}
+          onChange={(e) => setFontFamily(e.target.value)}
+          style={styles.select}
+        >
+          {fontFamilies.map((font) => (
+            <option key={font} value={font}>
+              {font}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={styles.row}>
+        <span style={styles.label}>Size</span>
+        <input
+          type="range"
+          min="8"
+          max="200"
+          value={fontSize}
+          onChange={(e) => setFontSize(parseInt(e.target.value))}
+          style={styles.slider}
+        />
+        <span style={styles.value}>{fontSize}px</span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Arrow Settings Component
+// ============================================================================
+
+function ArrowSettings() {
+  const {
+    arrowHeadSize,
+    setArrowHeadSize,
+  } = useImageEditorStore();
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>Arrow</div>
+
+      <div style={styles.row}>
+        <span style={styles.label}>Head Size</span>
+        <input
+          type="range"
+          min="4"
+          max="50"
+          value={arrowHeadSize}
+          onChange={(e) => setArrowHeadSize(parseInt(e.target.value))}
+          style={styles.slider}
+        />
+        <span style={styles.value}>{arrowHeadSize}px</span>
       </div>
     </div>
   );
@@ -519,7 +472,7 @@ function ActionsPanel() {
           onMouseLeave={() => setHoveredButton(null)}
           title="Undo (Ctrl+Z)"
         >
-          ↩ Undo
+          Undo
         </button>
         <button
           style={{
@@ -533,7 +486,7 @@ function ActionsPanel() {
           onMouseLeave={() => setHoveredButton(null)}
           title="Redo (Ctrl+Shift+Z)"
         >
-          ↪ Redo
+          Redo
         </button>
       </div>
 
@@ -548,7 +501,7 @@ function ActionsPanel() {
         onMouseEnter={() => setHoveredButton("clear")}
         onMouseLeave={() => setHoveredButton(null)}
       >
-        Clear All Annotations ({strokes.length})
+        Clear All ({strokes.length})
       </button>
     </div>
   );
@@ -559,10 +512,41 @@ function ActionsPanel() {
 // ============================================================================
 
 export function ImageEditorSidebar() {
+  const { activeTool } = useImageEditorStore();
+  const info = toolInfo[activeTool] || { name: "Tool", description: "" };
+
+  // Determine which settings to show based on active tool
+  const showColorSettings = ["pen", "brush", "line", "arrow", "rectangle", "ellipse", "text"].includes(activeTool);
+  const showStrokeSettings = ["pen", "brush", "eraser", "line", "arrow", "rectangle", "ellipse"].includes(activeTool);
+  const showTextSettings = activeTool === "text";
+  const showArrowSettings = activeTool === "arrow";
+  const hasNoSettings = ["select", "eyedropper"].includes(activeTool);
+
   return (
     <div style={styles.container}>
-      <ToolsPanel />
-      <ToolSettingsPanel />
+      {/* Tool Info Header */}
+      <div style={styles.section}>
+        <div style={styles.toolName}>{info.name}</div>
+        <div style={styles.toolDescription}>{info.description}</div>
+      </div>
+
+      {/* Tool-specific Settings */}
+      {hasNoSettings && (
+        <div style={styles.section}>
+          <div style={styles.noSettings}>
+            {activeTool === "select"
+              ? "No settings available for the Select tool."
+              : "Click on the image to pick a color. The color will be set as your stroke color."}
+          </div>
+        </div>
+      )}
+
+      {showColorSettings && <ColorSettings />}
+      {showStrokeSettings && <StrokeSettings />}
+      {showTextSettings && <TextSettings />}
+      {showArrowSettings && <ArrowSettings />}
+
+      {/* Actions */}
       <ActionsPanel />
     </div>
   );

@@ -40,6 +40,10 @@ export interface DrawingStroke {
   text?: string;
   fontSize?: number;
   fontFamily?: string;
+  // For brush
+  brushHardness?: number;
+  // For arrow
+  arrowHeadSize?: number;
 }
 
 export interface ImageEditorState {

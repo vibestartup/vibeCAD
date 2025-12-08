@@ -45,3 +45,5 @@ export {
   type ImageDocument,
   type RawDocument,
 } from "./tabs-store";
+
+export { useSidebarStore } from "./sidebar-store";

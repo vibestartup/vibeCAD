@@ -6,14 +6,16 @@ import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import type { ImageDocument } from "../store/tabs-store";
 import {
   useImageEditorStore,
-  drawingTools,
   generateStrokeId,
   type DrawingTool,
   type DrawingStroke,
-  type DrawingPoint,
 } from "../store/image-editor-store";
-import { ImageEditorSidebar } from "./ImageEditorSidebar";
-import { TabbedSidebar, type TabDefinition } from "./TabbedSidebar";
+
+// ============================================================================
+// Types
+// ============================================================================
+
+type ShapeTool = "line" | "arrow" | "rectangle" | "ellipse";
 
 // ============================================================================
 // Styles
@@ -107,6 +109,7 @@ const styles = {
     flex: 1,
     display: "flex",
     overflow: "hidden",
+    position: "relative" as const,
   },
 
   viewport: {
@@ -114,10 +117,6 @@ const styles = {
     overflow: "hidden",
     position: "relative" as const,
     cursor: "grab",
-  },
-
-  viewportDragging: {
-    cursor: "grabbing",
   },
 
   canvasContainer: {
@@ -149,15 +148,6 @@ const styles = {
     backgroundPosition: "0 0, 0 10px, 10px -10px, -10px 0px",
   },
 
-  sidebar: {
-    width: 280,
-    backgroundColor: "rgba(20, 20, 35, 0.95)",
-    borderLeft: "1px solid #333",
-    display: "flex",
-    flexDirection: "column" as const,
-    overflow: "hidden",
-  },
-
   colorInfo: {
     position: "absolute" as const,
     bottom: 16,
@@ -181,62 +171,73 @@ const styles = {
     border: "1px solid #444",
   },
 
-  adjustmentSection: {
-    padding: 12,
-    borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
+  // Dropdown styles
+  dropdownContainer: {
+    position: "relative" as const,
   },
 
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#666",
-    textTransform: "uppercase" as const,
-    marginBottom: 10,
+  dropdownMenu: {
+    position: "absolute" as const,
+    top: "100%",
+    left: 0,
+    marginTop: 4,
+    backgroundColor: "#1a1a2e",
+    border: "1px solid #333",
+    borderRadius: 4,
+    padding: 4,
+    zIndex: 100,
+    minWidth: 120,
+    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
   },
 
-  sliderRow: {
+  dropdownItem: {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    marginBottom: 8,
-  },
-
-  sliderLabel: {
-    fontSize: 12,
+    padding: "6px 10px",
+    borderRadius: 3,
+    backgroundColor: "transparent",
+    border: "none",
     color: "#888",
-    minWidth: 70,
-  },
-
-  slider: {
-    flex: 1,
-    height: 4,
-    appearance: "none" as const,
-    backgroundColor: "#333",
-    borderRadius: 2,
+    fontSize: 12,
     cursor: "pointer",
-    outline: "none",
-  },
-
-  sliderValue: {
-    fontSize: 11,
-    color: "#666",
-    minWidth: 35,
-    textAlign: "right" as const,
-  },
-
-  resetButton: {
     width: "100%",
-    padding: "8px 12px",
-    borderRadius: 4,
-    backgroundColor: "#252545",
-    border: "1px solid #333",
-    color: "#888",
-    fontSize: 12,
-    cursor: "pointer",
-    transition: "background-color 0.15s, color 0.15s",
-    marginTop: 8,
+    textAlign: "left" as const,
   },
+
+  dropdownItemHover: {
+    backgroundColor: "#252545",
+    color: "#fff",
+  },
+
+  dropdownItemActive: {
+    backgroundColor: "#646cff",
+    color: "#fff",
+  },
+
+  // Text input overlay
+  textInputOverlay: {
+    position: "absolute" as const,
+    zIndex: 20,
+    backgroundColor: "transparent",
+    border: "1px dashed #646cff",
+    padding: 4,
+    outline: "none",
+    resize: "none" as const,
+    overflow: "hidden",
+    minWidth: 100,
+    minHeight: 30,
+  },
+
 };
+
+// Shape tool definitions
+const shapeTools: { id: ShapeTool; label: string; icon: string }[] = [
+  { id: "line", label: "Line", icon: "╱" },
+  { id: "arrow", label: "Arrow", icon: "→" },
+  { id: "rectangle", label: "Rectangle", icon: "▢" },
+  { id: "ellipse", label: "Ellipse", icon: "○" },
+];
 
 // ============================================================================
 // Helpers
@@ -274,6 +275,10 @@ function getCursorForTool(tool: DrawingTool): string {
   }
 }
 
+function isShapeTool(tool: DrawingTool): tool is ShapeTool {
+  return ["line", "arrow", "rectangle", "ellipse"].includes(tool);
+}
+
 // ============================================================================
 // Drawing Canvas Component
 // ============================================================================
@@ -283,12 +288,12 @@ interface DrawingCanvasProps {
   height: number;
   strokes: DrawingStroke[];
   currentStroke: DrawingStroke | null;
+  brushHardness: number;
 }
 
-function DrawingCanvas({ width, height, strokes, currentStroke }: DrawingCanvasProps) {
+function DrawingCanvas({ width, height, strokes, currentStroke, brushHardness }: DrawingCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Render strokes
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -311,7 +316,6 @@ function DrawingCanvas({ width, height, strokes, currentStroke }: DrawingCanvasP
 
       switch (stroke.tool) {
         case "pen":
-        case "brush":
           if (stroke.points.length > 0) {
             ctx.beginPath();
             ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
@@ -319,6 +323,27 @@ function DrawingCanvas({ width, height, strokes, currentStroke }: DrawingCanvasP
               ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
             }
             ctx.stroke();
+          }
+          break;
+
+        case "brush":
+          // Brush with hardness - use shadow blur for soft edges
+          if (stroke.points.length > 0) {
+            const hardnessValue = stroke.brushHardness ?? brushHardness;
+            const softness = ((100 - hardnessValue) / 100) * stroke.size;
+
+            if (softness > 0) {
+              ctx.shadowColor = stroke.color;
+              ctx.shadowBlur = softness;
+            }
+
+            ctx.beginPath();
+            ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+            for (let i = 1; i < stroke.points.length; i++) {
+              ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+            }
+            ctx.stroke();
+            ctx.shadowBlur = 0;
           }
           break;
 
@@ -345,18 +370,16 @@ function DrawingCanvas({ width, height, strokes, currentStroke }: DrawingCanvasP
 
         case "arrow":
           if (stroke.startPoint && stroke.endPoint) {
-            const headSize = 12;
+            const headSize = stroke.arrowHeadSize || 12;
             const dx = stroke.endPoint.x - stroke.startPoint.x;
             const dy = stroke.endPoint.y - stroke.startPoint.y;
             const angle = Math.atan2(dy, dx);
 
-            // Line
             ctx.beginPath();
             ctx.moveTo(stroke.startPoint.x, stroke.startPoint.y);
             ctx.lineTo(stroke.endPoint.x, stroke.endPoint.y);
             ctx.stroke();
 
-            // Arrow head
             ctx.beginPath();
             ctx.moveTo(stroke.endPoint.x, stroke.endPoint.y);
             ctx.lineTo(
@@ -404,7 +427,7 @@ function DrawingCanvas({ width, height, strokes, currentStroke }: DrawingCanvasP
 
       ctx.restore();
     }
-  }, [width, height, strokes, currentStroke]);
+  }, [width, height, strokes, currentStroke, brushHardness]);
 
   return (
     <canvas
@@ -417,165 +440,162 @@ function DrawingCanvas({ width, height, strokes, currentStroke }: DrawingCanvasP
 }
 
 // ============================================================================
-// Adjustments Content Component
+// Text Input Overlay Component
 // ============================================================================
 
-interface AdjustmentsContentProps {
-  brightness: number;
-  setBrightness: (v: number) => void;
-  contrast: number;
-  setContrast: (v: number) => void;
-  saturation: number;
-  setSaturation: (v: number) => void;
-  hue: number;
-  setHue: (v: number) => void;
-  blur: number;
-  setBlur: (v: number) => void;
-  invert: boolean;
-  setInvert: (v: boolean) => void;
-  grayscale: boolean;
-  setGrayscale: (v: boolean) => void;
-  rotation: number;
-  flipH: boolean;
-  flipV: boolean;
-  resetAdjustments: () => void;
-  resetTransforms: () => void;
+interface TextInputOverlayProps {
+  position: { x: number; y: number };
+  zoom: number;
+  pan: { x: number; y: number };
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  opacity: number;
+  onComplete: (text: string) => void;
+  onCancel: () => void;
 }
 
-function AdjustmentsContent({
-  brightness, setBrightness,
-  contrast, setContrast,
-  saturation, setSaturation,
-  hue, setHue,
-  blur, setBlur,
-  invert, setInvert,
-  grayscale, setGrayscale,
-  resetAdjustments,
-  resetTransforms,
-}: AdjustmentsContentProps) {
-  const [hoveredButton, setHoveredButton] = useState<string | null>(null);
+function TextInputOverlay({
+  position,
+  zoom,
+  pan,
+  fontSize,
+  fontFamily,
+  color,
+  opacity,
+  onComplete,
+  onCancel,
+}: TextInputOverlayProps) {
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [text, setText] = useState("");
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (text.trim()) {
+        onComplete(text);
+      } else {
+        onCancel();
+      }
+    } else if (e.key === "Escape") {
+      onCancel();
+    }
+  };
+
+  const handleBlur = () => {
+    if (text.trim()) {
+      onComplete(text);
+    } else {
+      onCancel();
+    }
+  };
+
+  const screenX = position.x * zoom + pan.x;
+  const screenY = position.y * zoom + pan.y;
+  const scaledFontSize = fontSize * zoom;
 
   return (
-    <div style={{ padding: 0 }}>
-      <div style={styles.adjustmentSection}>
-        <div style={styles.sectionTitle}>Adjustments</div>
+    <textarea
+      ref={inputRef}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={handleKeyDown}
+      onBlur={handleBlur}
+      style={{
+        ...styles.textInputOverlay,
+        left: screenX,
+        top: screenY - scaledFontSize,
+        fontSize: scaledFontSize,
+        fontFamily,
+        color,
+        opacity: opacity / 100,
+        lineHeight: 1.2,
+      }}
+      placeholder="Type here..."
+    />
+  );
+}
 
-        <div style={styles.sliderRow}>
-          <span style={styles.sliderLabel}>Brightness</span>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={brightness}
-            onChange={(e) => setBrightness(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.sliderValue}>{brightness}%</span>
+// ============================================================================
+// Shape Dropdown Component
+// ============================================================================
+
+interface ShapeDropdownProps {
+  activeTool: DrawingTool;
+  onSelectShape: (shape: ShapeTool) => void;
+  hoveredButton: string | null;
+  setHoveredButton: (id: string | null) => void;
+}
+
+function ShapeDropdown({ activeTool, onSelectShape, hoveredButton, setHoveredButton }: ShapeDropdownProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+
+  const currentShape = isShapeTool(activeTool) ? activeTool : "rectangle";
+  const currentShapeInfo = shapeTools.find((s) => s.id === currentShape) || shapeTools[2];
+  const isActive = isShapeTool(activeTool);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div style={styles.dropdownContainer} ref={dropdownRef}>
+      <button
+        style={{
+          ...styles.toolbarButton,
+          ...(hoveredButton === "shapes" && !isActive ? styles.toolbarButtonHover : {}),
+          ...(isActive ? styles.toolbarButtonActive : {}),
+        }}
+        onClick={() => {
+          if (isActive) {
+            setIsOpen(!isOpen);
+          } else {
+            onSelectShape(currentShape);
+          }
+        }}
+        onMouseEnter={() => setHoveredButton("shapes")}
+        onMouseLeave={() => setHoveredButton(null)}
+        title="Shapes"
+      >
+        {currentShapeInfo.icon}
+        <span style={{ fontSize: 8, marginLeft: 2 }}>▼</span>
+      </button>
+
+      {isOpen && (
+        <div style={styles.dropdownMenu}>
+          {shapeTools.map((shape) => (
+            <button
+              key={shape.id}
+              style={{
+                ...styles.dropdownItem,
+                ...(hoveredItem === shape.id ? styles.dropdownItemHover : {}),
+                ...(activeTool === shape.id ? styles.dropdownItemActive : {}),
+              }}
+              onClick={() => {
+                onSelectShape(shape.id);
+                setIsOpen(false);
+              }}
+              onMouseEnter={() => setHoveredItem(shape.id)}
+              onMouseLeave={() => setHoveredItem(null)}
+            >
+              <span>{shape.icon}</span>
+              <span>{shape.label}</span>
+            </button>
+          ))}
         </div>
-
-        <div style={styles.sliderRow}>
-          <span style={styles.sliderLabel}>Contrast</span>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={contrast}
-            onChange={(e) => setContrast(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.sliderValue}>{contrast}%</span>
-        </div>
-
-        <div style={styles.sliderRow}>
-          <span style={styles.sliderLabel}>Saturation</span>
-          <input
-            type="range"
-            min="0"
-            max="200"
-            value={saturation}
-            onChange={(e) => setSaturation(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.sliderValue}>{saturation}%</span>
-        </div>
-
-        <div style={styles.sliderRow}>
-          <span style={styles.sliderLabel}>Hue</span>
-          <input
-            type="range"
-            min="-180"
-            max="180"
-            value={hue}
-            onChange={(e) => setHue(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.sliderValue}>{hue}°</span>
-        </div>
-
-        <div style={styles.sliderRow}>
-          <span style={styles.sliderLabel}>Blur</span>
-          <input
-            type="range"
-            min="0"
-            max="20"
-            value={blur}
-            onChange={(e) => setBlur(parseInt(e.target.value))}
-            style={styles.slider}
-          />
-          <span style={styles.sliderValue}>{blur}px</span>
-        </div>
-      </div>
-
-      <div style={styles.adjustmentSection}>
-        <div style={styles.sectionTitle}>Effects</div>
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <button
-            style={{
-              ...styles.toolbarButton,
-              flex: 1,
-              ...(invert ? styles.toolbarButtonActive : {}),
-            }}
-            onClick={() => setInvert(!invert)}
-          >
-            Invert
-          </button>
-          <button
-            style={{
-              ...styles.toolbarButton,
-              flex: 1,
-              ...(grayscale ? styles.toolbarButtonActive : {}),
-            }}
-            onClick={() => setGrayscale(!grayscale)}
-          >
-            Grayscale
-          </button>
-        </div>
-
-        <button
-          style={{
-            ...styles.resetButton,
-            ...(hoveredButton === "resetAdj" ? { backgroundColor: "#333", color: "#fff" } : {}),
-          }}
-          onClick={resetAdjustments}
-          onMouseEnter={() => setHoveredButton("resetAdj")}
-          onMouseLeave={() => setHoveredButton(null)}
-        >
-          Reset Adjustments
-        </button>
-
-        <button
-          style={{
-            ...styles.resetButton,
-            ...(hoveredButton === "resetTrans" ? { backgroundColor: "#333", color: "#fff" } : {}),
-          }}
-          onClick={resetTransforms}
-          onMouseEnter={() => setHoveredButton("resetTrans")}
-          onMouseLeave={() => setHoveredButton(null)}
-        >
-          Reset Transforms
-        </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -600,6 +620,8 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
     setStrokeColor,
     strokeSize,
     opacity,
+    brushHardness,
+    arrowHeadSize,
     strokes,
     addStroke,
     pushUndoState,
@@ -623,8 +645,6 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
 
   // Display options
   const [showCheckerboard, setShowCheckerboard] = useState(true);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState("draw");
   const [pickedColor, setPickedColor] = useState<{ r: number; g: number; b: number; x: number; y: number } | null>(null);
 
   // Transform state
@@ -634,6 +654,9 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
 
   // Space key for panning
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Text editing state
+  const [textEditPosition, setTextEditPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Adjustment state
   const [brightness, setBrightness] = useState(100);
@@ -771,6 +794,27 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
     setZoom(newZoom);
   }, [zoom, pan]);
 
+  // Handle text completion
+  const handleTextComplete = useCallback((text: string) => {
+    if (textEditPosition && text.trim()) {
+      pushUndoState();
+      const newStroke: DrawingStroke = {
+        id: generateStrokeId(),
+        tool: "text",
+        points: [],
+        color: strokeColor,
+        size: strokeSize,
+        opacity: opacity,
+        startPoint: textEditPosition,
+        text,
+        fontSize,
+        fontFamily,
+      };
+      addStroke(newStroke);
+    }
+    setTextEditPosition(null);
+  }, [textEditPosition, pushUndoState, strokeColor, strokeSize, opacity, fontSize, fontFamily, addStroke]);
+
   // Handle mouse down
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -805,6 +849,12 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
       return;
     }
 
+    // Text tool - open text input
+    if (activeTool === "text") {
+      setTextEditPosition(imgCoords);
+      return;
+    }
+
     // Start drawing
     if (["pen", "brush", "eraser", "line", "arrow", "rectangle", "ellipse"].includes(activeTool)) {
       pushUndoState();
@@ -819,32 +869,13 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
         opacity: opacity,
         startPoint: imgCoords,
         endPoint: imgCoords,
+        brushHardness: activeTool === "brush" ? brushHardness : undefined,
+        arrowHeadSize: activeTool === "arrow" ? arrowHeadSize : undefined,
       };
 
       setCurrentStroke(newStroke);
     }
-
-    // Text tool
-    if (activeTool === "text") {
-      const text = window.prompt("Enter text:");
-      if (text) {
-        pushUndoState();
-        const newStroke: DrawingStroke = {
-          id: generateStrokeId(),
-          tool: "text",
-          points: [],
-          color: strokeColor,
-          size: strokeSize,
-          opacity: opacity,
-          startPoint: imgCoords,
-          text,
-          fontSize,
-          fontFamily,
-        };
-        addStroke(newStroke);
-      }
-    }
-  }, [activeTool, screenToImage, imageSize, pan, pushUndoState, strokeColor, strokeSize, opacity, fontSize, fontFamily, addStroke, setCurrentStroke, setIsDrawing, setStrokeColor]);
+  }, [activeTool, screenToImage, imageSize, pan, pushUndoState, strokeColor, strokeSize, opacity, brushHardness, arrowHeadSize, setCurrentStroke, setIsDrawing, setStrokeColor, isSpacePressed]);
 
   // Handle mouse move
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -916,9 +947,6 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
 
     ctx.filter = filterString;
     ctx.drawImage(img, 0, 0);
-
-    // Draw annotations on top
-    // (Simplified - would need full stroke rendering logic here)
 
     const link = window.document.createElement("a");
     link.download = imageDoc.name.replace(/\.[^/.]+$/, "") + "_edited.png";
@@ -1046,63 +1074,109 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
     return getCursorForTool(activeTool);
   }, [isPanning, activeTool, isSpacePressed]);
 
-  // Sidebar tabs
-  const sidebarTabs: TabDefinition[] = [
-    {
-      id: "draw",
-      label: "Draw",
-      content: <ImageEditorSidebar />,
-    },
-    {
-      id: "adjust",
-      label: "Adjust",
-      content: (
-        <AdjustmentsContent
-          brightness={brightness}
-          setBrightness={setBrightness}
-          contrast={contrast}
-          setContrast={setContrast}
-          saturation={saturation}
-          setSaturation={setSaturation}
-          hue={hue}
-          setHue={setHue}
-          blur={blur}
-          setBlur={setBlur}
-          invert={invert}
-          setInvert={setInvert}
-          grayscale={grayscale}
-          setGrayscale={setGrayscale}
-          rotation={rotation}
-          flipH={flipH}
-          flipV={flipV}
-          resetAdjustments={resetAdjustments}
-          resetTransforms={resetTransforms}
-        />
-      ),
-    },
-  ];
-
   return (
     <div style={styles.container}>
       {/* Toolbar */}
       <div style={styles.toolbar}>
-        {/* Drawing Tools (quick access) */}
-        {drawingTools.slice(0, 6).map((tool) => (
-          <button
-            key={tool.id}
-            style={{
-              ...styles.toolbarButton,
-              ...(hoveredButton === tool.id && activeTool !== tool.id ? styles.toolbarButtonHover : {}),
-              ...(activeTool === tool.id ? styles.toolbarButtonActive : {}),
-            }}
-            onClick={() => setActiveTool(tool.id)}
-            onMouseEnter={() => setHoveredButton(tool.id)}
-            onMouseLeave={() => setHoveredButton(null)}
-            title={`${tool.label} (${tool.shortcut})`}
-          >
-            {tool.icon}
-          </button>
-        ))}
+        {/* Select Tool */}
+        <button
+          style={{
+            ...styles.toolbarButton,
+            ...(hoveredButton === "select" && activeTool !== "select" ? styles.toolbarButtonHover : {}),
+            ...(activeTool === "select" ? styles.toolbarButtonActive : {}),
+          }}
+          onClick={() => setActiveTool("select")}
+          onMouseEnter={() => setHoveredButton("select")}
+          onMouseLeave={() => setHoveredButton(null)}
+          title="Select (V)"
+        >
+          ↖
+        </button>
+
+        <div style={styles.toolbarDivider} />
+
+        {/* Pen Tool */}
+        <button
+          style={{
+            ...styles.toolbarButton,
+            ...(hoveredButton === "pen" && activeTool !== "pen" ? styles.toolbarButtonHover : {}),
+            ...(activeTool === "pen" ? styles.toolbarButtonActive : {}),
+          }}
+          onClick={() => setActiveTool("pen")}
+          onMouseEnter={() => setHoveredButton("pen")}
+          onMouseLeave={() => setHoveredButton(null)}
+          title="Pen (P)"
+        >
+          ✎
+        </button>
+
+        {/* Brush Tool */}
+        <button
+          style={{
+            ...styles.toolbarButton,
+            ...(hoveredButton === "brush" && activeTool !== "brush" ? styles.toolbarButtonHover : {}),
+            ...(activeTool === "brush" ? styles.toolbarButtonActive : {}),
+          }}
+          onClick={() => setActiveTool("brush")}
+          onMouseEnter={() => setHoveredButton("brush")}
+          onMouseLeave={() => setHoveredButton(null)}
+          title="Brush (B)"
+        >
+          B
+        </button>
+
+        {/* Eraser Tool */}
+        <button
+          style={{
+            ...styles.toolbarButton,
+            ...(hoveredButton === "eraser" && activeTool !== "eraser" ? styles.toolbarButtonHover : {}),
+            ...(activeTool === "eraser" ? styles.toolbarButtonActive : {}),
+          }}
+          onClick={() => setActiveTool("eraser")}
+          onMouseEnter={() => setHoveredButton("eraser")}
+          onMouseLeave={() => setHoveredButton(null)}
+          title="Eraser (E)"
+        >
+          ⌫
+        </button>
+
+        {/* Shapes Dropdown */}
+        <ShapeDropdown
+          activeTool={activeTool}
+          onSelectShape={setActiveTool}
+          hoveredButton={hoveredButton}
+          setHoveredButton={setHoveredButton}
+        />
+
+        {/* Text Tool */}
+        <button
+          style={{
+            ...styles.toolbarButton,
+            ...(hoveredButton === "text" && activeTool !== "text" ? styles.toolbarButtonHover : {}),
+            ...(activeTool === "text" ? styles.toolbarButtonActive : {}),
+          }}
+          onClick={() => setActiveTool("text")}
+          onMouseEnter={() => setHoveredButton("text")}
+          onMouseLeave={() => setHoveredButton(null)}
+          title="Text (T)"
+        >
+          T
+        </button>
+
+        {/* Eyedropper Tool */}
+        <button
+          style={{
+            ...styles.toolbarButton,
+            ...(hoveredButton === "eyedropper" && activeTool !== "eyedropper" ? styles.toolbarButtonHover : {}),
+            ...(activeTool === "eyedropper" ? styles.toolbarButtonActive : {}),
+          }}
+          onClick={() => setActiveTool("eyedropper")}
+          onMouseEnter={() => setHoveredButton("eyedropper")}
+          onMouseLeave={() => setHoveredButton(null)}
+          title="Eyedropper (I)"
+        >
+          I
+        </button>
 
         <div style={styles.toolbarDivider} />
 
@@ -1117,7 +1191,7 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
           onMouseLeave={() => setHoveredButton(null)}
           title="Zoom Out"
         >
-          −
+          -
         </button>
         <div style={styles.zoomDisplay}>{Math.round(zoom * 100)}%</div>
         <button
@@ -1215,19 +1289,6 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
         >
           ▦
         </button>
-        <button
-          style={{
-            ...styles.toolbarButton,
-            ...(hoveredButton === "sidebar" ? styles.toolbarButtonHover : {}),
-            ...(showSidebar ? styles.toolbarButtonActive : {}),
-          }}
-          onClick={() => setShowSidebar(!showSidebar)}
-          onMouseEnter={() => setHoveredButton("sidebar")}
-          onMouseLeave={() => setHoveredButton(null)}
-          title="Toggle Sidebar"
-        >
-          ◨
-        </button>
 
         <div style={styles.toolbarDivider} />
 
@@ -1254,14 +1315,14 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
           onMouseLeave={() => setHoveredButton(null)}
           title="Download"
         >
-          ⬇ Save
+          Save
         </button>
 
         {/* Info */}
         <div style={styles.info}>
           <span style={styles.formatBadge}>{getImageFormat(imageDoc.mimeType)}</span>
           <span style={styles.infoItem}>
-            {imageSize.width} × {imageSize.height}
+            {imageSize.width} x {imageSize.height}
           </span>
         </div>
       </div>
@@ -1307,9 +1368,25 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
                 height={imageSize.height}
                 strokes={strokes}
                 currentStroke={currentStroke}
+                brushHardness={brushHardness}
               />
             )}
           </div>
+
+          {/* Text Input Overlay */}
+          {textEditPosition && (
+            <TextInputOverlay
+              position={textEditPosition}
+              zoom={zoom}
+              pan={pan}
+              fontSize={fontSize}
+              fontFamily={fontFamily}
+              color={strokeColor}
+              opacity={opacity}
+              onComplete={handleTextComplete}
+              onCancel={() => setTextEditPosition(null)}
+            />
+          )}
 
           {/* Color Info (from eyedropper) */}
           {activeTool === "eyedropper" && pickedColor && (
@@ -1329,16 +1406,6 @@ export function ImageViewer({ document: imageDoc }: ImageViewerProps) {
           )}
         </div>
 
-        {/* Sidebar */}
-        {showSidebar && (
-          <div style={styles.sidebar}>
-            <TabbedSidebar
-              tabs={sidebarTabs}
-              activeTab={sidebarTab}
-              onTabChange={setSidebarTab}
-            />
-          </div>
-        )}
       </div>
     </div>
   );
