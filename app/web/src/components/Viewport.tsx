@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useCadStore } from "../store";
 import { useSettingsStore } from "../store/settings-store";
+import { useDocumentViewStore } from "../store/document-view-store";
 import { loadOcc, getOcc } from "@vibecad/kernel";
 import type { MeshData, OccApi } from "@vibecad/kernel";
 import type { ExportableMesh } from "../utils/stl-export";
@@ -845,6 +846,14 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const selectAllSketchEntities = useCadStore((s) => s.selectAllSketchEntities);
   const cancelSketchDrawing = useCadStore((s) => s.cancelSketchDrawing);
 
+  // Document view store for per-document camera state
+  const activeDocumentId = useDocumentViewStore((s) => s.activeDocumentId);
+  const updateCamera = useDocumentViewStore((s) => s.updateCamera);
+  const getDocumentState = useDocumentViewStore((s) => s.getDocumentState);
+
+  // Track if we've restored camera for the current document
+  const lastRestoredDocIdRef = useRef<string | null>(null);
+
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
     if (!studio || !activeSketchId) return null;
@@ -1101,6 +1110,94 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       }
     })();
   }, []);
+
+  // Flag to skip camera save during restore
+  const isRestoringCameraRef = useRef(false);
+
+  // Save camera state when controls change (debounced)
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls || !activeDocumentId) return;
+
+    let saveTimeout: number | null = null;
+
+    const handleChange = () => {
+      // Skip if we're restoring camera (prevents save-after-restore loop)
+      if (isRestoringCameraRef.current) return;
+
+      // Debounce save to avoid excessive updates
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+      }
+      saveTimeout = window.setTimeout(() => {
+        // Double-check we're not restoring
+        if (isRestoringCameraRef.current) return;
+
+        const camera = cameraRef.current;
+        const target = controls.target;
+        if (camera) {
+          updateCamera({
+            position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+            target: { x: target.x, y: target.y, z: target.z },
+            zoom: camera.zoom,
+            isOrthographic,
+          });
+        }
+      }, 100);
+    };
+
+    controls.addEventListener("change", handleChange);
+    return () => {
+      controls.removeEventListener("change", handleChange);
+      if (saveTimeout) {
+        clearTimeout(saveTimeout);
+      }
+    };
+  }, [activeDocumentId, updateCamera, isOrthographic]);
+
+  // Restore camera state when document changes
+  useEffect(() => {
+    if (!activeDocumentId) return;
+    if (lastRestoredDocIdRef.current === activeDocumentId) return;
+
+    const docState = getDocumentState(activeDocumentId);
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+
+    if (docState && camera && controls) {
+      console.log(`[Viewport] Restoring camera for ${activeDocumentId}`);
+
+      // Set flag to prevent save during restore
+      isRestoringCameraRef.current = true;
+
+      // Restore camera position
+      camera.position.set(
+        docState.camera.position.x,
+        docState.camera.position.y,
+        docState.camera.position.z
+      );
+      controls.target.set(
+        docState.camera.target.x,
+        docState.camera.target.y,
+        docState.camera.target.z
+      );
+      camera.zoom = docState.camera.zoom;
+      camera.updateProjectionMatrix();
+      controls.update();
+
+      // Restore orthographic mode if different
+      if (docState.camera.isOrthographic !== isOrthographic) {
+        setIsOrthographic(docState.camera.isOrthographic);
+      }
+
+      // Clear flag after a short delay to allow change events to settle
+      setTimeout(() => {
+        isRestoringCameraRef.current = false;
+      }, 50);
+    }
+
+    lastRestoredDocIdRef.current = activeDocumentId;
+  }, [activeDocumentId, getDocumentState, isOrthographic]);
 
   // Update grid when unit changes
   useEffect(() => {

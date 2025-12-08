@@ -24,7 +24,8 @@ import {
   type CadDocument,
 } from "./store/tabs-store";
 import { useCadStore } from "./store/cad-store";
-import { createPartStudioWithCube, type PartStudio } from "@vibecad/core";
+import { useDocumentViewStore } from "./store/document-view-store";
+import { createPartStudioWithCube } from "@vibecad/core";
 import type { TabDefinition } from "./components/TabbedSidebar";
 
 // Import viewers
@@ -242,13 +243,14 @@ export const App: React.FC = () => {
   // Get active tab
   const activeTab = activeTabId ? getTab(activeTabId) : null;
 
-  // In-memory cache of open CAD studios (cadDocumentId -> PartStudio)
-  const studiosCache = useRef<Map<string, PartStudio>>(new Map());
+  // Document view store for per-document state
+  const docViewStore = useDocumentViewStore();
+  const activeDocumentId = useDocumentViewStore((s) => s.activeDocumentId);
 
-  // Track which CAD document is currently loaded in cad-store
-  const currentCadDocIdRef = useRef<string | null>(null);
+  // Track the last studio ID we loaded to avoid save-after-load loop
+  const lastLoadedStudioIdRef = useRef<string | null>(null);
 
-  // When active tab changes to a CAD document, switch the studio
+  // When active tab changes to a CAD document, switch the studio and restore view state
   useEffect(() => {
     // Get fresh tab data
     const tab = activeTabId ? getTab(activeTabId) : null;
@@ -258,61 +260,103 @@ export const App: React.FC = () => {
     const cadTab = tab as CadDocument;
     const cadDocId = cadTab.cadDocumentId;
 
-    // If this CAD document is already loaded, no need to switch
-    if (currentCadDocIdRef.current === cadDocId) return;
+    // If this CAD document is already active, no need to switch
+    if (activeDocumentId === cadDocId) return;
 
-    console.log(`[App] Switching from ${currentCadDocIdRef.current} to ${cadDocId}`);
+    console.log(`[App] Switching from ${activeDocumentId} to ${cadDocId}`);
 
-    // Save current studio to cache before switching (if we have one loaded)
-    // Use getState() to get current studio without adding it to dependencies
+    // Save current studio state before switching (if we have one loaded)
     const currentStudio = useCadStore.getState().studio;
-    if (currentCadDocIdRef.current && currentStudio) {
-      console.log(`[App] Saving studio ${currentCadDocIdRef.current} to cache`);
-      studiosCache.current.set(currentCadDocIdRef.current, currentStudio);
+    const cadStore = useCadStore.getState();
+    if (activeDocumentId && currentStudio) {
+      console.log(`[App] Saving document state for ${activeDocumentId}`);
+      docViewStore.updateStudio(activeDocumentId, currentStudio);
+      // Save other cad-store state to document view store
+      docViewStore.updateTimelinePosition(cadStore.timelinePosition);
+      docViewStore.updateEditorMode(cadStore.editorMode);
+      docViewStore.updateActiveSketch(cadStore.activeSketchId);
+      docViewStore.updateObjectSelection(cadStore.objectSelection);
+      docViewStore.updateOpSelection(cadStore.opSelection);
     }
 
-    // Update the current doc ID ref BEFORE loading
-    currentCadDocIdRef.current = cadDocId;
+    // Set the new active document
+    docViewStore.setActiveDocument(cadDocId);
 
-    // Try to load from cache
-    const cachedStudio = studiosCache.current.get(cadDocId);
-    if (cachedStudio) {
-      console.log(`[App] Loading studio ${cadDocId} from cache`);
-      setStudio(cachedStudio);
+    // Try to load from document view store
+    const docState = docViewStore.getDocumentState(cadDocId);
+    if (docState) {
+      console.log(`[App] Loading document state for ${cadDocId}`);
+      // Track that we're loading this studio ID - prevents save-after-load loop
+      lastLoadedStudioIdRef.current = docState.studio.id;
+      setStudio(docState.studio);
+      // Restore view state to cad-store
+      useCadStore.getState().setTimelinePosition(docState.timelinePosition);
+      useCadStore.getState().setEditorMode(docState.editorMode);
+      useCadStore.getState().setActiveSketch(docState.activeSketchId);
+      useCadStore.getState().setObjectSelection(docState.objectSelection);
+      useCadStore.getState().setOpSelection(docState.opSelection);
     } else {
-      // Studio not in cache - this shouldn't happen normally since we add to cache when creating
+      // Document not in store - this shouldn't happen normally since we add when creating
       // But handle it gracefully by creating a new one
-      console.warn(`[App] CAD document ${cadDocId} not found in cache, creating new`);
+      console.warn(`[App] CAD document ${cadDocId} not found in store, creating new`);
       const newStudio = createPartStudioWithCube(cadTab.name);
-      studiosCache.current.set(cadDocId, newStudio);
+      // Track that we're loading this studio ID
+      lastLoadedStudioIdRef.current = newStudio.id;
+      docViewStore.initDocument(cadDocId, newStudio);
       setStudio(newStudio);
     }
-  }, [activeTabId, getTab, setStudio]); // Only depend on activeTabId
+  }, [activeTabId, getTab, setStudio, activeDocumentId, docViewStore]);
 
-  // Keep cache in sync with current studio changes
+  // Keep document view store in sync with current studio changes
+  // Using a ref to track the previous studio to avoid unnecessary updates
+  const prevStudioRef = useRef<{ id: string; modifiedAt: number } | null>(null);
+
   useEffect(() => {
-    if (currentCadDocIdRef.current && studio) {
-      studiosCache.current.set(currentCadDocIdRef.current, studio);
+    if (!activeDocumentId || !studio) return;
+
+    // Skip if we just loaded this studio (prevents infinite loop)
+    if (lastLoadedStudioIdRef.current === studio.id) {
+      lastLoadedStudioIdRef.current = null;
+      prevStudioRef.current = { id: studio.id, modifiedAt: studio.modifiedAt };
+      return;
     }
-  }, [studio]);
+
+    // Only update if the studio actually changed (compare by modifiedAt timestamp)
+    if (
+      prevStudioRef.current &&
+      prevStudioRef.current.id === studio.id &&
+      prevStudioRef.current.modifiedAt === studio.modifiedAt
+    ) {
+      return;
+    }
+
+    prevStudioRef.current = { id: studio.id, modifiedAt: studio.modifiedAt };
+    docViewStore.updateStudio(activeDocumentId, studio);
+  }, [studio, activeDocumentId, docViewStore]);
 
   // Create new CAD document
   const handleNewCadDocument = useCallback(() => {
-    // Save current studio before switching
-    if (currentCadDocIdRef.current && studio) {
-      studiosCache.current.set(currentCadDocIdRef.current, studio);
+    // Save current document state before switching
+    const cadStore = useCadStore.getState();
+    if (activeDocumentId && cadStore.studio) {
+      docViewStore.updateStudio(activeDocumentId, cadStore.studio);
+      docViewStore.updateTimelinePosition(cadStore.timelinePosition);
+      docViewStore.updateEditorMode(cadStore.editorMode);
+      docViewStore.updateActiveSketch(cadStore.activeSketchId);
+      docViewStore.updateObjectSelection(cadStore.objectSelection);
+      docViewStore.updateOpSelection(cadStore.opSelection);
     }
 
     const newStudio = createPartStudioWithCube("Untitled");
     const tab = createCadTab(newStudio.name, newStudio.id);
 
-    // Add to cache and set as current
-    studiosCache.current.set(newStudio.id, newStudio);
-    currentCadDocIdRef.current = newStudio.id;
+    // Initialize document in view store
+    docViewStore.initDocument(newStudio.id, newStudio);
+    docViewStore.setActiveDocument(newStudio.id);
 
     setStudio(newStudio);
     openTab(tab);
-  }, [setStudio, openTab, studio]);
+  }, [setStudio, openTab, activeDocumentId, docViewStore]);
 
   // Open file dialog
   const handleOpenFile = useCallback(async () => {
@@ -341,9 +385,11 @@ export const App: React.FC = () => {
         try {
           switch (docType) {
             case "cad": {
-              // Save current studio before switching
-              if (currentCadDocIdRef.current && studio) {
-                studiosCache.current.set(currentCadDocIdRef.current, studio);
+              // Save current document state before switching
+              const cadStore = useCadStore.getState();
+              const currentActiveDocId = useDocumentViewStore.getState().activeDocumentId;
+              if (currentActiveDocId && cadStore.studio) {
+                useDocumentViewStore.getState().updateStudio(currentActiveDocId, cadStore.studio);
               }
 
               const newStudio = createPartStudioWithCube(
@@ -351,9 +397,9 @@ export const App: React.FC = () => {
               );
               const tab = createCadTab(newStudio.name, newStudio.id);
 
-              // Add to cache and set as current
-              studiosCache.current.set(newStudio.id, newStudio);
-              currentCadDocIdRef.current = newStudio.id;
+              // Initialize document in view store
+              useDocumentViewStore.getState().initDocument(newStudio.id, newStudio);
+              useDocumentViewStore.getState().setActiveDocument(newStudio.id);
 
               setStudio(newStudio);
               openTab(tab);
@@ -427,12 +473,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (tabs.length === 0 && studio) {
       const tab = createCadTab(studio.name, studio.id);
-      // Initialize cache with the initial studio
-      studiosCache.current.set(studio.id, studio);
-      currentCadDocIdRef.current = studio.id;
+      // Initialize document in view store
+      docViewStore.initDocument(studio.id, studio);
+      docViewStore.setActiveDocument(studio.id);
       openTab(tab);
     }
-  }, [tabs.length, studio, openTab]);
+  }, [tabs.length, studio, openTab, docViewStore]);
 
   // Keyboard shortcuts
   useEffect(() => {

@@ -47,3 +47,11 @@ export {
 } from "./tabs-store";
 
 export { useSidebarStore } from "./sidebar-store";
+
+export {
+  useDocumentViewStore,
+  type CameraState,
+  type DocumentViewState,
+  DEFAULT_CAMERA_STATE,
+  createDefaultViewState,
+} from "./document-view-store";
