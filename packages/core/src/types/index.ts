@@ -42,3 +42,16 @@ export * from "./document";
 
 // Drawing
 export * from "./drawing";
+
+// ============================================================================
+// EDA Types
+// ============================================================================
+
+// Schematic types
+export * from "./schematic";
+
+// PCB types
+export * from "./pcb";
+
+// Component Library types
+export * from "./library";
