@@ -18,3 +18,11 @@ export { LeftSidebar } from "./LeftSidebar";
 export { RightSidebar } from "./RightSidebar";
 export { FileExplorer } from "./FileExplorer";
 export { ImageEditorSidebar } from "./ImageEditorSidebar";
+
+// EDA Components
+export { SchematicCanvas } from "./SchematicCanvas";
+export { PcbCanvas } from "./PcbCanvas";
+export { SchematicToolbar } from "./SchematicToolbar";
+export { PcbToolbar } from "./PcbToolbar";
+export { SchematicLeftSidebar, SchematicRightSidebar } from "./SchematicSidebars";
+export { PcbLeftSidebar, PcbRightSidebar } from "./PcbSidebars";

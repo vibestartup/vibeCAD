@@ -16,6 +16,8 @@ import {
   type VideoDocument,
   type AudioDocument,
   type Model3dDocument,
+  type SchematicTabDocument,
+  type PcbTabDocument,
 } from "../store/tabs-store";
 import { ImageViewer } from "./ImageViewer";
 import { RawFileViewer } from "./RawFileViewer";
@@ -26,6 +28,8 @@ import { VideoViewer } from "./VideoViewer";
 import { AudioViewer } from "./AudioViewer";
 import { Model3dViewer } from "./Model3dViewer";
 import { DrawingEditor } from "./drawing";
+import { SchematicEditor } from "../pages/SchematicEditor";
+import { PcbEditor } from "../pages/PcbEditor";
 
 // ============================================================================
 // Styles
@@ -212,6 +216,20 @@ export function DocumentContainer({
       return (
         <div style={styles.container}>
           <DrawingEditor />
+        </div>
+      );
+
+    case "schematic":
+      return (
+        <div style={styles.container}>
+          <SchematicEditor />
+        </div>
+      );
+
+    case "pcb":
+      return (
+        <div style={styles.container}>
+          <PcbEditor />
         </div>
       );
 
