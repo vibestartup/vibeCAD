@@ -8,7 +8,8 @@
     "dev:web": "turbo run dev --filter=@vibecad/web",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "clean": "turbo run clean",
+    "clean": "turbo run clean && rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo",
+    "clean:all": "rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo app/web/dist && turbo run clean",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {

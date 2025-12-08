@@ -441,7 +441,7 @@ export class OccApiImpl implements OccApi {
       }
     }
 
-    loft.Build(new this.oc.Message_ProgressRange_1());
+    loft.Build();
 
     if (!loft.IsDone()) {
       throw new Error("Loft failed");
@@ -457,21 +457,15 @@ export class OccApiImpl implements OccApi {
   fuse(a: ShapeHandle, b: ShapeHandle): ShapeHandle {
     const shapeA = this.store.get(a);
     const shapeB = this.store.get(b);
-    const progress = new this.oc.Message_ProgressRange_1();
 
-    const fuse = new this.oc.BRepAlgoAPI_Fuse_3(shapeA, shapeB, progress);
-    fuse.Build(progress);
+    // OpenCascade.js 1.1.1: Use builder pattern - create, set shapes, build
+    const fuse = new this.oc.BRepAlgoAPI_Fuse_1();
+    fuse.SetArguments(this.makeListOfShape([shapeA]));
+    fuse.SetTools(this.makeListOfShape([shapeB]));
+    fuse.Build();
 
     if (!fuse.IsDone()) {
       throw new Error("Boolean union failed");
-    }
-
-    // Simplify result to clean up topology
-    if (fuse.SimplifyResult) {
-      fuse.SimplifyResult(
-        new this.oc.BRepTools_ReShape(),
-        true
-      );
     }
 
     return this.store.store(fuse.Shape());
@@ -480,10 +474,12 @@ export class OccApiImpl implements OccApi {
   cut(a: ShapeHandle, b: ShapeHandle): ShapeHandle {
     const shapeA = this.store.get(a);
     const shapeB = this.store.get(b);
-    const progress = new this.oc.Message_ProgressRange_1();
 
-    const cut = new this.oc.BRepAlgoAPI_Cut_3(shapeA, shapeB, progress);
-    cut.Build(progress);
+    // OpenCascade.js 1.1.1: Use builder pattern
+    const cut = new this.oc.BRepAlgoAPI_Cut_1();
+    cut.SetArguments(this.makeListOfShape([shapeA]));
+    cut.SetTools(this.makeListOfShape([shapeB]));
+    cut.Build();
 
     if (!cut.IsDone()) {
       throw new Error("Boolean subtraction failed");
@@ -495,16 +491,27 @@ export class OccApiImpl implements OccApi {
   intersect(a: ShapeHandle, b: ShapeHandle): ShapeHandle {
     const shapeA = this.store.get(a);
     const shapeB = this.store.get(b);
-    const progress = new this.oc.Message_ProgressRange_1();
 
-    const common = new this.oc.BRepAlgoAPI_Common_3(shapeA, shapeB, progress);
-    common.Build(progress);
+    // OpenCascade.js 1.1.1: Use builder pattern
+    const common = new this.oc.BRepAlgoAPI_Common_1();
+    common.SetArguments(this.makeListOfShape([shapeA]));
+    common.SetTools(this.makeListOfShape([shapeB]));
+    common.Build();
 
     if (!common.IsDone()) {
       throw new Error("Boolean intersection failed");
     }
 
     return this.store.store(common.Shape());
+  }
+
+  // Helper to create TopTools_ListOfShape
+  private makeListOfShape(shapes: any[]): any {
+    const list = new this.oc.TopTools_ListOfShape_1();
+    for (const shape of shapes) {
+      list.Append_1(shape);
+    }
+    return list;
   }
 
   // ============================================================================
@@ -557,6 +564,7 @@ export class OccApiImpl implements OccApi {
     }
 
     const shell = new this.oc.BRepOffsetAPI_MakeThickSolid();
+    // OpenCascade.js 1.1.1 - use overload without progress range
     shell.MakeThickSolidByJoin(
       shapeObj,
       faceList,
@@ -566,8 +574,7 @@ export class OccApiImpl implements OccApi {
       false, // intersection
       false, // self intersection
       this.oc.GeomAbs_JoinType.GeomAbs_Arc,
-      false, // remove internal edges
-      new this.oc.Message_ProgressRange_1()
+      false // remove internal edges
     );
 
     if (!shell.IsDone()) {
@@ -829,7 +836,6 @@ export class OccApiImpl implements OccApi {
     try {
       // Create STEP writer
       const writer = new this.oc.STEPControl_Writer_1();
-      const progressRange = new this.oc.Message_ProgressRange_1();
 
       if (asCompound && shapes.length > 1) {
         // Export multiple shapes as a compound
@@ -842,12 +848,11 @@ export class OccApiImpl implements OccApi {
           builder.Add(compound, shape);
         }
 
-        // Transfer compound to STEP
+        // Transfer compound to STEP (OpenCascade.js 1.1.1 - no progress range)
         writer.Transfer(
           compound,
           this.oc.STEPControl_StepModelType.STEPControl_AsIs,
-          true,
-          progressRange
+          true
         );
       } else {
         // Export shapes individually
@@ -856,8 +861,7 @@ export class OccApiImpl implements OccApi {
           writer.Transfer(
             shape,
             this.oc.STEPControl_StepModelType.STEPControl_AsIs,
-            true,
-            progressRange
+            true
           );
         }
       }
