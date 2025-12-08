@@ -7,7 +7,6 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useCadStore } from "../store";
 import { useSettingsStore } from "../store/settings-store";
-import { useDocumentViewStore } from "../store/document-view-store";
 import { loadOcc, getOcc } from "@vibecad/kernel";
 import type { MeshData, OccApi } from "@vibecad/kernel";
 import type { ExportableMesh } from "../utils/stl-export";
@@ -784,6 +783,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const extrudePreviewRef = useRef<THREE.Group | null>(null);
   const sketchGizmoGroupRef = useRef<THREE.Group | null>(null);
   const sketchEntityGroupRef = useRef<THREE.Group | null>(null); // Separate group for selectable sketch entities
+  const opShapesRef = useRef<Map<string, number>>(new Map()); // Map opId -> ShapeHandle for face queries
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
@@ -804,6 +804,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const objectSelection = useCadStore((s) => s.objectSelection);
   const setObjectSelection = useCadStore((s) => s.setObjectSelection);
   const createNewSketch = useCadStore((s) => s.createNewSketch);
+  const createNewSketchFromFace = useCadStore((s) => s.createNewSketchFromFace);
   const activeSketchId = useCadStore((s) => s.activeSketchId);
   const setSketchMousePos = useCadStore((s) => s.setSketchMousePos);
   const handleSketchClick = useCadStore((s) => s.handleSketchClick);
@@ -845,14 +846,6 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const duplicateSketchSelection = useCadStore((s) => s.duplicateSketchSelection);
   const selectAllSketchEntities = useCadStore((s) => s.selectAllSketchEntities);
   const cancelSketchDrawing = useCadStore((s) => s.cancelSketchDrawing);
-
-  // Document view store for per-document camera state
-  const activeDocumentId = useDocumentViewStore((s) => s.activeDocumentId);
-  const updateCamera = useDocumentViewStore((s) => s.updateCamera);
-  const getDocumentState = useDocumentViewStore((s) => s.getDocumentState);
-
-  // Track if we've restored camera for the current document
-  const lastRestoredDocIdRef = useRef<string | null>(null);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -1110,94 +1103,6 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       }
     })();
   }, []);
-
-  // Flag to skip camera save during restore
-  const isRestoringCameraRef = useRef(false);
-
-  // Save camera state when controls change (debounced)
-  useEffect(() => {
-    const controls = controlsRef.current;
-    if (!controls || !activeDocumentId) return;
-
-    let saveTimeout: number | null = null;
-
-    const handleChange = () => {
-      // Skip if we're restoring camera (prevents save-after-restore loop)
-      if (isRestoringCameraRef.current) return;
-
-      // Debounce save to avoid excessive updates
-      if (saveTimeout) {
-        clearTimeout(saveTimeout);
-      }
-      saveTimeout = window.setTimeout(() => {
-        // Double-check we're not restoring
-        if (isRestoringCameraRef.current) return;
-
-        const camera = cameraRef.current;
-        const target = controls.target;
-        if (camera) {
-          updateCamera({
-            position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-            target: { x: target.x, y: target.y, z: target.z },
-            zoom: camera.zoom,
-            isOrthographic,
-          });
-        }
-      }, 100);
-    };
-
-    controls.addEventListener("change", handleChange);
-    return () => {
-      controls.removeEventListener("change", handleChange);
-      if (saveTimeout) {
-        clearTimeout(saveTimeout);
-      }
-    };
-  }, [activeDocumentId, updateCamera, isOrthographic]);
-
-  // Restore camera state when document changes
-  useEffect(() => {
-    if (!activeDocumentId) return;
-    if (lastRestoredDocIdRef.current === activeDocumentId) return;
-
-    const docState = getDocumentState(activeDocumentId);
-    const camera = cameraRef.current;
-    const controls = controlsRef.current;
-
-    if (docState && camera && controls) {
-      console.log(`[Viewport] Restoring camera for ${activeDocumentId}`);
-
-      // Set flag to prevent save during restore
-      isRestoringCameraRef.current = true;
-
-      // Restore camera position
-      camera.position.set(
-        docState.camera.position.x,
-        docState.camera.position.y,
-        docState.camera.position.z
-      );
-      controls.target.set(
-        docState.camera.target.x,
-        docState.camera.target.y,
-        docState.camera.target.z
-      );
-      camera.zoom = docState.camera.zoom;
-      camera.updateProjectionMatrix();
-      controls.update();
-
-      // Restore orthographic mode if different
-      if (docState.camera.isOrthographic !== isOrthographic) {
-        setIsOrthographic(docState.camera.isOrthographic);
-      }
-
-      // Clear flag after a short delay to allow change events to settle
-      setTimeout(() => {
-        isRestoringCameraRef.current = false;
-      }, 50);
-    }
-
-    lastRestoredDocIdRef.current = activeDocumentId;
-  }, [activeDocumentId, getDocumentState, isOrthographic]);
 
   // Update grid when unit changes
   useEffect(() => {
@@ -2043,10 +1948,14 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       // Update export data in store
       setExportMeshes(exportableMeshes);
       setExportShapeHandles(exportableShapeHandles);
+
+      // Store shape handles in ref for face queries (used when creating sketch from face)
+      opShapesRef.current = opShapes;
     } catch (err) {
       console.error("Failed to create geometry:", err);
       setExportMeshes([]);
       setExportShapeHandles([]);
+      opShapesRef.current = new Map();
     }
   }, [occApi, studio, timelinePosition, setExportMeshes, setExportShapeHandles]);
 
@@ -2417,8 +2326,8 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       faceHighlightRef.current = null;
     }
 
-    // Only show highlight in face selection mode for body faces
-    if (editorMode !== "select-face" || !hoveredFace || hoveredFace.type !== "body-face") {
+    // Show highlight in face selection mode OR plane selection mode for body faces
+    if ((editorMode !== "select-face" && editorMode !== "select-plane") || !hoveredFace || hoveredFace.type !== "body-face") {
       return;
     }
 
@@ -3248,19 +3157,58 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       return;
     }
 
-    // Handle plane selection mode
+    // Handle plane selection mode - check body faces first, then datum planes
     if (editorMode === "select-plane") {
       const planeGroup = planeGroupRef.current;
-      if (!planeGroup) return;
+      const meshGroup = meshGroupRef.current;
 
-      const intersects = raycaster.intersectObjects(planeGroup.children);
-      if (intersects.length > 0) {
-        const planeId = intersects[0].object.userData.planeId;
-        if (planeId && planeId !== hoveredPlane) {
-          setHoveredPlane(planeId);
+      // First, check for body face intersections (clicking on a face to create sketch)
+      if (meshGroup) {
+        const bodyMeshes: THREE.Mesh[] = [];
+        meshGroup.traverse((obj) => {
+          if (obj instanceof THREE.Mesh && obj.userData.isBody) {
+            bodyMeshes.push(obj);
+          }
+        });
+
+        const bodyIntersects = raycaster.intersectObjects(bodyMeshes, false);
+        if (bodyIntersects.length > 0) {
+          const hit = bodyIntersects[0];
+          const opId = hit.object.userData.opId;
+          const triangleIndex = hit.faceIndex ?? -1;
+          const faceGroups = hit.object.userData.faceGroups;
+
+          // Map triangle index to OCC face index
+          const faceIndex = triangleToFaceIndex(triangleIndex, faceGroups);
+
+          if (opId && faceIndex >= 0) {
+            const newHover = { type: "body-face" as const, opId, faceIndex };
+            if (hoveredFace?.type !== "body-face" ||
+                hoveredFace.opId !== opId ||
+                hoveredFace.faceIndex !== faceIndex) {
+              setHoveredFace(newHover);
+            }
+            // Clear hoveredPlane when hovering body face
+            if (hoveredPlane !== null) setHoveredPlane(null);
+            return;
+          }
         }
-      } else {
-        if (hoveredPlane !== null) setHoveredPlane(null);
+      }
+
+      // Then check datum planes
+      if (planeGroup) {
+        const intersects = raycaster.intersectObjects(planeGroup.children);
+        if (intersects.length > 0) {
+          const planeId = intersects[0].object.userData.planeId;
+          if (planeId && planeId !== hoveredPlane) {
+            setHoveredPlane(planeId);
+          }
+          // Clear hoveredFace when hovering datum plane
+          if (hoveredFace !== null) setHoveredFace(null);
+        } else {
+          if (hoveredPlane !== null) setHoveredPlane(null);
+          if (hoveredFace !== null) setHoveredFace(null);
+        }
       }
       return;
     }
@@ -3403,8 +3351,39 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       return;
     }
 
-    // Handle plane selection mode
+    // Handle plane selection mode - can click on datum planes OR body faces
     if (editorMode === "select-plane") {
+      // First check if we're hovering a body face (from handleMouseMove)
+      if (hoveredFace?.type === "body-face" && occApi) {
+        const { opId, faceIndex } = hoveredFace;
+        const shapeHandle = opShapesRef.current.get(opId);
+
+        if (shapeHandle) {
+          try {
+            // Get face geometry from OCC
+            const faces = occApi.getFaces(shapeHandle);
+            if (faceIndex < faces.length) {
+              const face = faces[faceIndex];
+              const center = occApi.faceCenter(face);
+              const normal = occApi.faceNormal(face);
+
+              console.log("[Viewport iter2] Clicked body face:", opId, "face", faceIndex, "center:", center, "normal:", normal);
+
+              // Create sketch on this face
+              createNewSketchFromFace(
+                { opId, faceIndex },
+                center,
+                normal
+              );
+              return;
+            }
+          } catch (err) {
+            console.error("[Viewport iter2] Failed to get face geometry:", err);
+          }
+        }
+      }
+
+      // Otherwise check datum planes
       const container = containerRef.current;
       const camera = cameraRef.current;
       const planeGroup = planeGroupRef.current;
@@ -3423,7 +3402,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       if (intersects.length > 0) {
         const planeId = intersects[0].object.userData.planeId;
         if (planeId) {
-          console.log("[Viewport] Clicked plane:", planeId);
+          console.log("[Viewport] Clicked datum plane:", planeId);
           // Create sketch on the selected plane
           createNewSketch(planeId);
         }
@@ -3504,7 +3483,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         }
       }
     }
-  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection, activeTool, hoveredSketchEntity, toggleSketchEntitySelected, setSketchSelection, clearSketchSelection, sketchGizmoState.mode]);
+  }, [editorMode, createNewSketch, createNewSketchFromFace, occApi, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection, activeTool, hoveredSketchEntity, toggleSketchEntitySelected, setSketchSelection, clearSketchSelection, sketchGizmoState.mode]);
 
   // Handle mouse up - for ending gizmo drags
   const handleMouseUp = useCallback(() => {

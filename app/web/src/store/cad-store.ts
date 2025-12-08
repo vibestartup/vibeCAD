@@ -25,6 +25,7 @@ import type {
   SphereOp,
   ConeOp,
   TransformOp,
+  TopoRef,
   Vec3,
   PrimitiveId,
   PointPrimitive,
@@ -44,6 +45,7 @@ import {
   DATUM_XY,
   touchPartStudio,
   getReferencedPoints,
+  createPlaneFromNormal,
 } from "@vibecad/core";
 import { history, HistoryState, createHistory, pushState, undo, redo } from "@vibecad/core";
 import { params } from "@vibecad/core";
@@ -289,6 +291,7 @@ interface CadActions {
 
   // Sketch/Operation creation
   createNewSketch: (planeId?: SketchPlaneId) => SketchId | null;
+  createNewSketchFromFace: (faceRef: { opId: string; faceIndex: number }, center: Vec3, normal: Vec3) => SketchId | null;
   createExtrude: (sketchId: SketchId, depth?: number, direction?: "normal" | "reverse" | "symmetric", loopIndex?: number) => OpId | null;
   createExtrudeFromFace: (opId: string, faceIndex: number, depth?: number, direction?: "normal" | "reverse" | "symmetric") => OpId | null;
 
@@ -556,7 +559,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   enterPlaneSelectionMode: () => {
-    console.log("[CAD] enterPlaneSelectionMode");
+    console.log("[CAD iter2] enterPlaneSelectionMode");
     set({
       editorMode: "select-plane",
       activeTool: "sketch",
@@ -797,6 +800,82 @@ export const useCadStore = create<CadStore>((set, get) => ({
     });
 
     console.log("[CAD] createNewSketch:", sketch.id, sketch.name);
+
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+      activeSketchId: sketch.id,
+      editorMode: "sketch",
+      activeTool: "line",
+      timelinePosition: null, // Show all ops
+    });
+
+    return sketch.id;
+  },
+
+  createNewSketchFromFace: (faceRef, center, normal) => {
+    const { studio, historyState } = get();
+
+    // Verify the source operation exists
+    const sourceOp = studio.opGraph.get(faceRef.opId as OpId);
+    if (!sourceOp) {
+      console.error("[CAD] createNewSketchFromFace: source operation not found:", faceRef.opId);
+      return null;
+    }
+
+    // Create a plane from the face center and normal
+    const sketchCount = studio.sketches.size + 1;
+    const planeName = `Face Plane ${sketchCount}`;
+    const plane = createPlaneFromNormal(planeName, center, normal);
+
+    // Create a new empty sketch that references this face
+    const sketch = createSketch(`Sketch ${sketchCount}`, plane.id);
+
+    // Create the sketch operation with a TopoRef to the face
+    const sketchOpId = newId("Op") as OpId;
+    const faceTopoRef: TopoRef = {
+      opId: faceRef.opId as OpId,
+      subType: "face",
+      index: faceRef.faceIndex,
+      signature: {
+        center,
+        normal,
+      },
+    };
+
+    const sketchOp: SketchOp = {
+      id: sketchOpId,
+      type: "sketch",
+      name: sketch.name,
+      suppressed: false,
+      sketchId: sketch.id,
+      planeRef: faceTopoRef,
+    };
+
+    // Update studio with new plane, sketch, and operation
+    const newPlanes = new Map(studio.planes);
+    newPlanes.set(plane.id, plane);
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(sketch.id, sketch);
+
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(sketchOpId, {
+      op: sketchOp,
+      deps: [faceRef.opId as OpId], // Depend on the source operation
+    });
+
+    const newOpOrder = [...studio.opOrder, sketchOpId];
+
+    const newStudio = touchPartStudio({
+      ...studio,
+      planes: newPlanes,
+      sketches: newSketches,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    });
+
+    console.log("[CAD iter2] createNewSketchFromFace:", sketch.id, sketch.name, "on face", faceRef);
 
     set({
       studio: newStudio,

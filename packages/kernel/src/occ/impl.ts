@@ -653,7 +653,8 @@ export class OccApiImpl implements OccApi {
     const faceObj = this.store.get(face);
 
     const props = new this.oc.GProp_GProps_1();
-    this.oc.BRepGProp.SurfaceProperties_1(faceObj, props, false);
+    // OCC.js 1.1.1 requires 4 args: shape, props, useTriangulation, skipShared
+    this.oc.BRepGProp.SurfaceProperties_1(faceObj, props, false, false);
 
     const center = props.CentreOfMass();
     return [center.X(), center.Y(), center.Z()];
