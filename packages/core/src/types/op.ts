@@ -117,16 +117,88 @@ export interface RevolveOp extends OpBase {
   angle: DimValue;
 }
 
+/**
+ * Profile source for sweep - can be from a sketch or an existing face.
+ */
+export type SweepProfile =
+  | {
+      type: "sketch";
+      sketchId: SketchId;
+      profileIndices?: number[];
+    }
+  | {
+      type: "face";
+      faceRef: TopoRef;
+    };
+
+/**
+ * Path source for sweep - can be from a sketch or an edge.
+ */
+export type SweepPath =
+  | {
+      type: "sketch";
+      sketchId: SketchId;
+    }
+  | {
+      type: "edge";
+      edgeRef: TopoRef;
+    };
+
 export interface SweepOp extends OpBase {
   type: "sweep";
-  profileSketchId: SketchId;
-  pathSketchId: SketchId;
+  /** The profile(s) to sweep - from sketch or existing face */
+  profile: SweepProfile;
+  /** The path to sweep along - from sketch or existing edge */
+  path: SweepPath;
+  /** Whether to create a solid (true) or shell (false). Default: true */
+  solid?: boolean;
+  /** Twist angle in radians over the sweep length */
+  twist?: DimValue;
+  /** Scale factor at the end of the sweep (1.0 = no scaling) */
+  endScale?: DimValue;
+  /** Transition mode for corners */
+  transition?: "transformed" | "right" | "round";
 }
+
+/**
+ * Profile source for loft - can be from a sketch or an existing face.
+ */
+export type LoftProfile =
+  | {
+      type: "sketch";
+      sketchId: SketchId;
+      profileIndices?: number[];
+    }
+  | {
+      type: "face";
+      faceRef: TopoRef;
+    };
+
+/**
+ * Guide source for loft - can be from a sketch or an edge.
+ */
+export type LoftGuide =
+  | {
+      type: "sketch";
+      sketchId: SketchId;
+    }
+  | {
+      type: "edge";
+      edgeRef: TopoRef;
+    };
 
 export interface LoftOp extends OpBase {
   type: "loft";
-  profileSketchIds: SketchId[];
-  guideSketchIds?: SketchId[];
+  /** The profiles to loft between - from sketches or existing faces */
+  profiles: LoftProfile[];
+  /** Optional guide curves to control the shape between profiles */
+  guides?: LoftGuide[];
+  /** Whether to create a solid (true) or shell (false). Default: true */
+  solid?: boolean;
+  /** Whether the loft should be ruled (straight lines between profiles). Default: false */
+  ruled?: boolean;
+  /** Whether to close the loft (connect last profile to first). Default: false */
+  closed?: boolean;
 }
 
 export type PrimaryOp = ExtrudeOp | RevolveOp | SweepOp | LoftOp;
@@ -301,6 +373,14 @@ export function isRevolveOp(op: Op): op is RevolveOp {
   return op.type === "revolve";
 }
 
+export function isSweepOp(op: Op): op is SweepOp {
+  return op.type === "sweep";
+}
+
+export function isLoftOp(op: Op): op is LoftOp {
+  return op.type === "loft";
+}
+
 export function isBooleanOp(op: Op): op is BooleanOp {
   return op.type === "boolean";
 }
@@ -393,6 +473,36 @@ export function getOpDependencies(op: Op): OpId[] {
       }
       if (typeof op.axis === "object" && "opId" in op.axis) {
         deps.push(op.axis.opId);
+      }
+      break;
+
+    case "sweep":
+      // If profile is from a face, add dependency on source operation
+      if (op.profile.type === "face") {
+        deps.push(op.profile.faceRef.opId);
+      }
+      // If path is from an edge, add dependency on source operation
+      if (op.path.type === "edge") {
+        if (!deps.includes(op.path.edgeRef.opId)) {
+          deps.push(op.path.edgeRef.opId);
+        }
+      }
+      break;
+
+    case "loft":
+      // Add dependencies for all profiles
+      for (const profile of op.profiles) {
+        if (profile.type === "face" && !deps.includes(profile.faceRef.opId)) {
+          deps.push(profile.faceRef.opId);
+        }
+      }
+      // Add dependencies for guide curves
+      if (op.guides) {
+        for (const guide of op.guides) {
+          if (guide.type === "edge" && !deps.includes(guide.edgeRef.opId)) {
+            deps.push(guide.edgeRef.opId);
+          }
+        }
       }
       break;
 

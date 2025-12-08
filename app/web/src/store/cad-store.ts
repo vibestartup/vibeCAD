@@ -163,8 +163,11 @@ interface CadState {
   // Pending revolve
   pendingRevolve: {
     sketchId: string | null;
+    loopIndex?: number;  // Optional loop index within the sketch (undefined = all loops)
+    bodyFace: { opId: string; faceIndex: number } | null;
     angle: number; // in degrees
-    axis: "x" | "y" | "sketch-x" | "sketch-y";
+    axis: "x" | "y" | "sketch-x" | "sketch-y" | "custom";
+    customAxis?: { origin: [number, number, number]; direction: [number, number, number] };
   } | null;
 
   // Pending fillet
@@ -350,12 +353,15 @@ interface CadActions {
 
   // Revolve workflow
   startRevolve: () => void;
-  setPendingRevolveSketch: (sketchId: string | null) => void;
+  setPendingRevolveSketch: (sketchId: string | null, loopIndex?: number) => void;
+  setPendingRevolveBodyFace: (bodyFace: { opId: string; faceIndex: number } | null) => void;
   setPendingRevolveAngle: (angle: number) => void;
-  setPendingRevolveAxis: (axis: "x" | "y" | "sketch-x" | "sketch-y") => void;
+  setPendingRevolveAxis: (axis: "x" | "y" | "sketch-x" | "sketch-y" | "custom") => void;
+  setPendingRevolveCustomAxis: (origin: [number, number, number], direction: [number, number, number]) => void;
   confirmRevolve: () => void;
   cancelRevolve: () => void;
-  createRevolve: (sketchId: SketchId, angle?: number, axis?: "x" | "y" | "sketch-x" | "sketch-y") => OpId | null;
+  createRevolve: (sketchId: SketchId, angle?: number, axis?: "x" | "y" | "sketch-x" | "sketch-y" | "custom", customAxis?: { origin: [number, number, number]; direction: [number, number, number] }) => OpId | null;
+  createRevolveFromFace: (opId: string, faceIndex: number, angle?: number, axis?: { origin: [number, number, number]; direction: [number, number, number] }) => OpId | null;
 
   // Fillet workflow
   startFillet: () => void;
@@ -2050,12 +2056,12 @@ export const useCadStore = create<CadStore>((set, get) => ({
     const { activeSketchId } = get();
     if (activeSketchId) {
       set({
-        pendingRevolve: { sketchId: activeSketchId, angle: 360, axis: "sketch-x" },
+        pendingRevolve: { sketchId: activeSketchId, bodyFace: null, angle: 360, axis: "sketch-x" },
         activeTool: "revolve",
       });
     } else {
       set({
-        pendingRevolve: { sketchId: null, angle: 360, axis: "sketch-x" },
+        pendingRevolve: { sketchId: null, bodyFace: null, angle: 360, axis: "sketch-x" },
         activeTool: "revolve",
         editorMode: "select-face",
         faceSelectionTarget: { type: "extrude-profile" },
@@ -2063,15 +2069,27 @@ export const useCadStore = create<CadStore>((set, get) => ({
     }
   },
 
-  setPendingRevolveSketch: (sketchId) => {
+  setPendingRevolveSketch: (sketchId, loopIndex) => {
     const { pendingRevolve } = get();
     if (pendingRevolve) {
-      // Exit face selection mode when sketch is selected
+      // Exit face selection mode when sketch is selected, clear body face
       set({
-        pendingRevolve: { ...pendingRevolve, sketchId },
+        pendingRevolve: { ...pendingRevolve, sketchId, loopIndex, bodyFace: null },
         editorMode: "object",
         faceSelectionTarget: null,
-        selectedFace: sketchId ? { type: "sketch-profile", sketchId } : null,
+        selectedFace: sketchId ? { type: "sketch-profile", sketchId, loopIndex } : null,
+      });
+    }
+  },
+
+  setPendingRevolveBodyFace: (bodyFace) => {
+    const { pendingRevolve } = get();
+    if (pendingRevolve) {
+      // Clear sketch when setting body face
+      set({
+        pendingRevolve: { ...pendingRevolve, bodyFace, sketchId: null },
+        editorMode: "object",
+        faceSelectionTarget: null,
       });
     }
   },
@@ -2090,10 +2108,26 @@ export const useCadStore = create<CadStore>((set, get) => ({
     }
   },
 
+  setPendingRevolveCustomAxis: (origin, direction) => {
+    const { pendingRevolve } = get();
+    if (pendingRevolve) {
+      set({ pendingRevolve: { ...pendingRevolve, axis: "custom", customAxis: { origin, direction } } });
+    }
+  },
+
   confirmRevolve: () => {
-    const { pendingRevolve, createRevolve } = get();
+    const { pendingRevolve, createRevolve, createRevolveFromFace } = get();
     if (pendingRevolve?.sketchId) {
-      createRevolve(pendingRevolve.sketchId as any, pendingRevolve.angle, pendingRevolve.axis);
+      createRevolve(pendingRevolve.sketchId as any, pendingRevolve.angle, pendingRevolve.axis, pendingRevolve.customAxis);
+    } else if (pendingRevolve?.bodyFace) {
+      // For body face revolve, derive axis from pending state or use default
+      const axis = pendingRevolve.customAxis || { origin: [0, 0, 0] as [number, number, number], direction: [0, 0, 1] as [number, number, number] };
+      createRevolveFromFace(
+        pendingRevolve.bodyFace.opId,
+        pendingRevolve.bodyFace.faceIndex,
+        pendingRevolve.angle,
+        axis
+      );
     }
     set({
       pendingRevolve: null,
@@ -2114,7 +2148,7 @@ export const useCadStore = create<CadStore>((set, get) => ({
     });
   },
 
-  createRevolve: (sketchId, angle = 360, axis = "sketch-x") => {
+  createRevolve: (sketchId, angle = 360, axis = "sketch-x", customAxis) => {
     const { studio, historyState } = get();
 
     const sketch = studio.sketches.get(sketchId);
@@ -2151,6 +2185,17 @@ export const useCadStore = create<CadStore>((set, get) => ({
         axisDir = plane.axisY as [number, number, number];
         axisOrigin = plane.origin as [number, number, number];
         break;
+      case "custom":
+        if (customAxis) {
+          axisOrigin = customAxis.origin;
+          axisDir = customAxis.direction;
+        } else {
+          axisDir = [0, 0, 1];
+        }
+        break;
+      default:
+        axisDir = plane.axisX as [number, number, number];
+        axisOrigin = plane.origin as [number, number, number];
     }
 
     const revolveOpId = newId("Op") as OpId;
@@ -2171,6 +2216,56 @@ export const useCadStore = create<CadStore>((set, get) => ({
     newOpGraph.set(revolveOpId, {
       op: revolveOp,
       deps: sketchOpId ? [sketchOpId] : [],
+    });
+
+    const newOpOrder = [...studio.opOrder, revolveOpId];
+
+    const newStudio = touchPartStudio({
+      ...studio,
+      opGraph: newOpGraph,
+      opOrder: newOpOrder,
+    });
+
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+      timelinePosition: null,
+    });
+
+    return revolveOpId;
+  },
+
+  createRevolveFromFace: (opId, faceIndex, angle = 360, axis = { origin: [0, 0, 0] as [number, number, number], direction: [0, 0, 1] as [number, number, number] }) => {
+    const { studio, historyState } = get();
+
+    // Verify the source operation exists
+    const sourceOp = studio.opGraph.get(opId as OpId);
+    if (!sourceOp) return null;
+
+    // Create revolve operation with unified profile abstraction (face type)
+    const revolveOpId = newId("Op") as OpId;
+    const revolveOp: RevolveOp = {
+      id: revolveOpId,
+      type: "revolve",
+      name: `Revolve from ${sourceOp.op.name}`,
+      suppressed: false,
+      profile: {
+        type: "face",
+        faceRef: {
+          opId: opId as OpId,
+          subType: "face",
+          index: faceIndex,
+        },
+      },
+      axis: { origin: axis.origin, direction: axis.direction },
+      angle: dimLiteral(angle * Math.PI / 180), // Convert to radians
+    };
+
+    // Update studio
+    const newOpGraph = new Map(studio.opGraph);
+    newOpGraph.set(revolveOpId, {
+      op: revolveOp,
+      deps: [opId as OpId],
     });
 
     const newOpOrder = [...studio.opOrder, revolveOpId];

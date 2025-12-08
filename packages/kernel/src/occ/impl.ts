@@ -450,6 +450,126 @@ export class OccApiImpl implements OccApi {
     return this.store.store(loft.Shape());
   }
 
+  sweepWithOptions(
+    profile: ShapeHandle,
+    path: ShapeHandle,
+    options?: {
+      solid?: boolean;
+      transition?: "transformed" | "right" | "round";
+    }
+  ): ShapeHandle {
+    const profileObj = this.store.get(profile);
+    const pathObj = this.store.get(path);
+
+    // Default options
+    const solid = options?.solid ?? true;
+    const transition = options?.transition ?? "transformed";
+
+    // Map transition mode to OCC enum
+    let occTransition;
+    switch (transition) {
+      case "right":
+        occTransition = this.oc.BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RightCorner;
+        break;
+      case "round":
+        occTransition = this.oc.BRepBuilderAPI_TransitionMode.BRepBuilderAPI_RoundCorner;
+        break;
+      case "transformed":
+      default:
+        occTransition = this.oc.BRepBuilderAPI_TransitionMode.BRepBuilderAPI_Transformed;
+        break;
+    }
+
+    // Use BRepOffsetAPI_MakePipeShell for more options
+    const pipeShell = new this.oc.BRepOffsetAPI_MakePipeShell(pathObj);
+    pipeShell.SetTransitionMode(occTransition);
+    pipeShell.SetMode_5(false); // Frenet trihedron
+
+    // Add the profile
+    if (profileObj.ShapeType() === this.oc.TopAbs_ShapeEnum.TopAbs_WIRE) {
+      pipeShell.Add_1(this.oc.TopoDS.Wire_1(profileObj), false, false);
+    } else if (profileObj.ShapeType() === this.oc.TopAbs_ShapeEnum.TopAbs_FACE) {
+      // Get outer wire of the face
+      const outerWire = this.oc.BRepTools.OuterWire(this.oc.TopoDS.Face_1(profileObj));
+      pipeShell.Add_1(outerWire, false, false);
+    } else {
+      throw new Error("Profile must be a wire or face");
+    }
+
+    pipeShell.Build();
+
+    if (!pipeShell.IsDone()) {
+      throw new Error("Sweep with options failed");
+    }
+
+    let result = pipeShell.Shape();
+
+    // If solid is requested and the shape is a shell, try to make it solid
+    if (solid && result.ShapeType() === this.oc.TopAbs_ShapeEnum.TopAbs_SHELL) {
+      try {
+        const solidMaker = new this.oc.BRepBuilderAPI_MakeSolid_2(this.oc.TopoDS.Shell_1(result));
+        if (solidMaker.IsDone()) {
+          result = solidMaker.Shape();
+        }
+      } catch {
+        // If solid making fails, return the shell
+      }
+    }
+
+    return this.store.store(result);
+  }
+
+  loftWithOptions(
+    profiles: ShapeHandle[],
+    options?: {
+      solid?: boolean;
+      ruled?: boolean;
+      closed?: boolean;
+      guides?: ShapeHandle[];
+    }
+  ): ShapeHandle {
+    // Default options
+    const solid = options?.solid ?? true;
+    const ruled = options?.ruled ?? false;
+    const closed = options?.closed ?? false;
+
+    const loft = new this.oc.BRepOffsetAPI_ThruSections(solid, ruled);
+
+    // Set if the loft should be closed (periodic)
+    if (closed) {
+      loft.SetSmoothing(true);
+    }
+
+    for (const profileHandle of profiles) {
+      const profile = this.store.get(profileHandle);
+      // Check shape type and add appropriately
+      const shapeType = profile.ShapeType();
+      if (shapeType === this.oc.TopAbs_ShapeEnum.TopAbs_WIRE) {
+        loft.AddWire(this.oc.TopoDS.Wire_1(profile));
+      } else if (shapeType === this.oc.TopAbs_ShapeEnum.TopAbs_VERTEX) {
+        loft.AddVertex(this.oc.TopoDS.Vertex_1(profile));
+      } else if (shapeType === this.oc.TopAbs_ShapeEnum.TopAbs_FACE) {
+        // Extract outer wire from face
+        const outerWire = this.oc.BRepTools.OuterWire(this.oc.TopoDS.Face_1(profile));
+        loft.AddWire(outerWire);
+      } else if (shapeType === this.oc.TopAbs_ShapeEnum.TopAbs_EDGE) {
+        // Convert edge to wire
+        const wireMaker = new this.oc.BRepBuilderAPI_MakeWire_2(this.oc.TopoDS.Edge_1(profile));
+        if (wireMaker.IsDone()) {
+          loft.AddWire(wireMaker.Wire());
+        }
+      }
+    }
+
+    loft.Build();
+
+    if (!loft.IsDone()) {
+      throw new Error("Loft with options failed");
+    }
+
+    return this.store.store(loft.Shape());
+  }
+
   // ============================================================================
   // Boolean Operations
   // ============================================================================

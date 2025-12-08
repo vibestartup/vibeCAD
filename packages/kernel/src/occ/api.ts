@@ -107,8 +107,44 @@ export interface OccApi {
   /** Sweep a profile along a path */
   sweep(profile: ShapeHandle, path: ShapeHandle): ShapeHandle;
 
+  /**
+   * Enhanced sweep with additional options.
+   * @param profile - The profile (face or wire) to sweep
+   * @param path - The path (wire or edge) to sweep along
+   * @param options - Optional parameters for the sweep
+   */
+  sweepWithOptions(
+    profile: ShapeHandle,
+    path: ShapeHandle,
+    options?: {
+      /** Create solid (true) or shell (false). Default: true */
+      solid?: boolean;
+      /** Transition mode for corners: "transformed", "right", or "round" */
+      transition?: "transformed" | "right" | "round";
+    }
+  ): ShapeHandle;
+
   /** Loft between multiple profiles */
   loft(profiles: ShapeHandle[]): ShapeHandle;
+
+  /**
+   * Enhanced loft with additional options.
+   * @param profiles - The profiles (wires or faces) to loft between
+   * @param options - Optional parameters for the loft
+   */
+  loftWithOptions(
+    profiles: ShapeHandle[],
+    options?: {
+      /** Create solid (true) or shell (false). Default: true */
+      solid?: boolean;
+      /** Use ruled surfaces (straight lines between profiles). Default: false */
+      ruled?: boolean;
+      /** Close the loft (connect last to first). Default: false */
+      closed?: boolean;
+      /** Guide curves to control the loft shape */
+      guides?: ShapeHandle[];
+    }
+  ): ShapeHandle;
 
   // ============================================================================
   // Boolean Operations
