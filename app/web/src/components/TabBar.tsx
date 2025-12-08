@@ -16,7 +16,7 @@ const styles = {
     height: 36,
     backgroundColor: "#0f0f1a",
     borderTop: "1px solid #333",
-    overflow: "hidden",
+    overflow: "visible",
     flexShrink: 0,
   } as React.CSSProperties,
 
@@ -111,6 +111,7 @@ const styles = {
     padding: "0 8px",
     borderLeft: "1px solid #333",
     position: "relative" as const,
+    overflow: "visible",
   } as React.CSSProperties,
 
   actionButton: {
@@ -248,6 +249,18 @@ function getDocumentIcon(type: DocumentType): string {
       return "\u2B22"; // Hexagon
     case "image":
       return "\u{1F5BC}"; // Frame with picture
+    case "text":
+      return "\u{1F4DD}"; // Memo / text file
+    case "pdf":
+      return "\u{1F4D1}"; // Bookmark tabs / PDF
+    case "markdown":
+      return "\u24C2"; // M in circle for markdown
+    case "video":
+      return "\u{1F3AC}"; // Clapper board
+    case "audio":
+      return "\u{1F3B5}"; // Musical note
+    case "model3d":
+      return "\u{1F4E6}"; // Package / 3D box
     case "raw":
       return "\u{1F4C4}"; // Page facing up
     default:
