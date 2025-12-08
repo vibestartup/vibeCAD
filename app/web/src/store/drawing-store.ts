@@ -12,26 +12,16 @@ import type {
   PartStudio,
   DrawingSheetSize,
 } from "@vibecad/core";
-import {
-  createDrawing,
-  createDrawingView,
-  addView,
-  updateView,
-  removeView,
-  addDimension,
-  removeDimension,
-  addAnnotation,
-  removeAnnotation,
-  touchDrawing,
-  createTextAnnotation,
-  createLinearDimension,
-} from "@vibecad/core";
 import type {
   Drawing,
   DrawingView,
   DrawingDimension,
   DrawingAnnotation,
 } from "@vibecad/core";
+
+// Import functions dynamically to avoid module initialization timing issues
+// These will be accessed only when needed, not at import time
+import * as coreFunctions from "@vibecad/core";
 
 // Use DrawingSheetSize (renamed to avoid conflict with schematic sheet)
 type SheetSize = DrawingSheetSize;
@@ -196,9 +186,12 @@ type DrawingStore = DrawingState & DrawingActions;
 // Store Implementation
 // ============================================================================
 
+// Create initial drawing lazily to avoid module initialization issues
+const getInitialDrawing = (): Drawing => coreFunctions.createDrawing("Untitled Drawing");
+
 export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // Initial state
-  drawing: createDrawing("Untitled Drawing"),
+  drawing: getInitialDrawing(),
   sourceCache: new Map(),
   editorMode: "select",
   activeTool: "select",
@@ -220,7 +213,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 
   newDrawing: (name = "Untitled Drawing", sheetSize = "A3") => {
     set({
-      drawing: createDrawing(name, sheetSize),
+      drawing: coreFunctions.createDrawing(name, sheetSize),
       sourceCache: new Map(),
       selectedViews: new Set(),
       selectedDimensions: new Set(),
@@ -245,7 +238,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
       const dims = SHEET_SIZES[size] || { width: 297, height: 420 };
       const isLandscape = sheet.orientation === "landscape";
       return {
-        drawing: touchDrawing({
+        drawing: coreFunctions.touchDrawing({
           ...state.drawing,
           sheet: {
             ...sheet,
@@ -261,19 +254,19 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // View management
   addView: (view) => {
     set((state) => ({
-      drawing: addView(state.drawing, view),
+      drawing: coreFunctions.addView(state.drawing, view),
     }));
   },
 
   updateView: (viewId, updates) => {
     set((state) => ({
-      drawing: updateView(state.drawing, viewId, updates),
+      drawing: coreFunctions.updateView(state.drawing, viewId, updates),
     }));
   },
 
   removeView: (viewId) => {
     set((state) => ({
-      drawing: removeView(state.drawing, viewId),
+      drawing: coreFunctions.removeView(state.drawing, viewId),
       selectedViews: new Set([...state.selectedViews].filter((id) => id !== viewId)),
     }));
   },
@@ -293,7 +286,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // Dimension management
   addDimension: (dim) => {
     set((state) => ({
-      drawing: addDimension(state.drawing, dim),
+      drawing: coreFunctions.addDimension(state.drawing, dim),
     }));
   },
 
@@ -304,14 +297,14 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
       const newDims = new Map(state.drawing.dimensions);
       newDims.set(dimId, { ...dim, ...updates } as DrawingDimension);
       return {
-        drawing: touchDrawing({ ...state.drawing, dimensions: newDims }),
+        drawing: coreFunctions.touchDrawing({ ...state.drawing, dimensions: newDims }),
       };
     });
   },
 
   removeDimension: (dimId) => {
     set((state) => ({
-      drawing: removeDimension(state.drawing, dimId),
+      drawing: coreFunctions.removeDimension(state.drawing, dimId),
       selectedDimensions: new Set([...state.selectedDimensions].filter((id) => id !== dimId)),
     }));
   },
@@ -319,13 +312,13 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // Annotation management
   addAnnotation: (ann) => {
     set((state) => ({
-      drawing: addAnnotation(state.drawing, ann),
+      drawing: coreFunctions.addAnnotation(state.drawing, ann),
     }));
   },
 
   removeAnnotation: (annId) => {
     set((state) => ({
-      drawing: removeAnnotation(state.drawing, annId),
+      drawing: coreFunctions.removeAnnotation(state.drawing, annId),
       selectedAnnotations: new Set([...state.selectedAnnotations].filter((id) => id !== annId)),
     }));
   },
@@ -383,17 +376,17 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     // Delete selected views
     let drawing = state.drawing;
     for (const viewId of state.selectedViews) {
-      drawing = removeView(drawing, viewId);
+      drawing = coreFunctions.removeView(drawing, viewId);
     }
 
     // Delete selected dimensions
     for (const dimId of state.selectedDimensions) {
-      drawing = removeDimension(drawing, dimId);
+      drawing = coreFunctions.removeDimension(drawing, dimId);
     }
 
     // Delete selected annotations
     for (const annId of state.selectedAnnotations) {
-      drawing = removeAnnotation(drawing, annId);
+      drawing = coreFunctions.removeAnnotation(drawing, annId);
     }
 
     set({
@@ -462,10 +455,10 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     if (!state.pendingViewPlacement) return;
 
     const { sourcePath, projection, scale } = state.pendingViewPlacement;
-    const view = createDrawingView(`View ${state.drawing.views.size + 1}`, sourcePath, projection, position, scale);
+    const view = coreFunctions.createDrawingView(`View ${state.drawing.views.size + 1}`, sourcePath, projection, position, scale);
 
     set((s) => ({
-      drawing: addView(s.drawing, view),
+      drawing: coreFunctions.addView(s.drawing, view),
       pendingViewPlacement: null,
       editorMode: "select",
       activeTool: "select",
@@ -502,7 +495,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     const { type, firstPoint } = state.pendingDimension;
 
     if (type === "linear") {
-      const dim = createLinearDimension(
+      const dim = coreFunctions.createLinearDimension(
         {
           viewId: firstPoint.viewId,
           type: "explicit",
