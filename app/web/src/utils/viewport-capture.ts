@@ -36,17 +36,15 @@ export function captureViewport(
 ): CaptureResult | null {
   const opts = { ...DEFAULT_CAPTURE_OPTIONS, ...options };
 
-  // Find the WebGL canvas (Three.js renderer)
-  const canvas = document.querySelector(
-    'canvas[data-engine="three.js"]'
-  ) as HTMLCanvasElement | null;
+  // Find all Three.js canvases and select the largest (main viewport, not ViewCube)
+  const allCanvases = document.querySelectorAll("canvas");
+  const threeCanvases = Array.from(allCanvases).filter(
+    (c) => c.getAttribute("data-engine")?.startsWith("three.js")
+  ) as HTMLCanvasElement[];
 
-  // Fallback: find any canvas in the viewport area
-  const fallbackCanvas = document.querySelector(
-    ".viewport canvas, [class*='viewport'] canvas, canvas"
-  ) as HTMLCanvasElement | null;
-
-  const targetCanvas = canvas || fallbackCanvas;
+  // Sort by size (width * height) descending and pick the largest
+  threeCanvases.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+  const targetCanvas = threeCanvases[0] || null;
 
   if (!targetCanvas) {
     console.error("[Capture] No canvas found in viewport");
@@ -54,8 +52,9 @@ export function captureViewport(
   }
 
   try {
-    // For simple capture, just grab the current canvas state
     const dataUrl = targetCanvas.toDataURL("image/png", 1.0);
+
+    console.log("[Capture] Captured viewport:", targetCanvas.width, "x", targetCanvas.height);
 
     return {
       dataUrl,
