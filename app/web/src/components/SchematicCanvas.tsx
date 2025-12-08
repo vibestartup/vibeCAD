@@ -5,15 +5,15 @@
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useSchematicStore } from "../store/schematic-store";
-import type {
-  Symbol,
-  SymbolInstance,
-  Wire,
-  NetLabel,
-  SchematicPoint,
-  SymbolPrimitive,
-  PinId,
-} from "@vibecad/core";
+import type { PinId } from "@vibecad/core";
+import { Schematic } from "@vibecad/core";
+
+type Symbol = Schematic.Symbol;
+type SymbolInstance = Schematic.SymbolInstance;
+type Wire = Schematic.Wire;
+type NetLabel = Schematic.NetLabel;
+type SchematicPoint = Schematic.SchematicPoint;
+type SymbolPrimitive = Schematic.SymbolPrimitive;
 
 // ============================================================================
 // Constants

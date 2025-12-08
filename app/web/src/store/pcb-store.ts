@@ -4,7 +4,6 @@
 
 import { create } from "zustand";
 import type {
-  PcbDocument,
   LayerId,
   FootprintId,
   FootprintInstanceId,
@@ -13,19 +12,24 @@ import type {
   CopperPourId,
   NetId,
   PadId,
-  Footprint,
-  FootprintInstance,
-  Trace,
-  Via,
-  CopperPour,
-  DesignRules,
-  DrcViolation,
-  PcbNet,
-  PcbNetClass,
   NetClassId,
 } from "@vibecad/core";
-import { Vec2 } from "@vibecad/core";
-import {
+import { Vec2, Pcb } from "@vibecad/core";
+
+// Re-export types from Pcb namespace for convenience
+type PcbDocument = Pcb.PcbDocument;
+type Footprint = Pcb.Footprint;
+type FootprintInstance = Pcb.FootprintInstance;
+type Trace = Pcb.Trace;
+type Via = Pcb.Via;
+type CopperPour = Pcb.CopperPour;
+type DesignRules = Pcb.DesignRules;
+type DrcViolation = Pcb.DrcViolation;
+type PcbNet = Pcb.PcbNet;
+type PcbNetClass = Pcb.PcbNetClass;
+
+// Destructure functions from Pcb namespace
+const {
   createPcbDocument,
   createPcbDocumentWithBoard,
   addFootprint,
@@ -48,20 +52,16 @@ import {
   getTopCopperLayer,
   getBottomCopperLayer,
   getBoardBounds,
-} from "@vibecad/core";
-import {
   createFootprintInstance,
   moveFootprintInstance,
   rotateFootprintInstance,
   flipFootprintInstance,
   setFootprintInstanceLocked,
-} from "@vibecad/core";
-import {
   createTrace,
   createTraceFromPoints,
   createThroughVia,
   extendTrace,
-} from "@vibecad/core";
+} = Pcb;
 import { HistoryState, createHistory, pushState, undo as historyUndo, redo as historyRedo } from "@vibecad/core";
 
 // ============================================================================

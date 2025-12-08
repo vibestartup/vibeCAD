@@ -6,7 +6,11 @@ import React, { useState } from "react";
 import { TabbedSidebar, type TabDefinition } from "./TabbedSidebar";
 import { useSchematicStore } from "../store/schematic-store";
 import { useLibraryStore } from "../store/library-store";
-import type { SymbolInstance, Symbol, ComponentCategory } from "@vibecad/core";
+import type { ComponentCategory } from "@vibecad/core";
+import { Schematic } from "@vibecad/core";
+
+type SymbolInstance = Schematic.SymbolInstance;
+type Symbol = Schematic.Symbol;
 
 // ============================================================================
 // Styles

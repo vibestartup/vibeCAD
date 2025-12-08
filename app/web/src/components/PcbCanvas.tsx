@@ -5,17 +5,16 @@
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { usePcbStore } from "../store/pcb-store";
-import type {
-  FootprintInstance,
-  Footprint,
-  Trace,
-  Via,
-  CopperPour,
-  Layer,
-  LayerId,
-  Vec2,
-  DrcViolation,
-} from "@vibecad/core";
+import type { LayerId, Vec2 } from "@vibecad/core";
+import { Pcb } from "@vibecad/core";
+
+type FootprintInstance = Pcb.FootprintInstance;
+type Footprint = Pcb.Footprint;
+type Trace = Pcb.Trace;
+type Via = Pcb.Via;
+type CopperPour = Pcb.CopperPour;
+type Layer = Pcb.Layer;
+type DrcViolation = Pcb.DrcViolation;
 
 // ============================================================================
 // Constants

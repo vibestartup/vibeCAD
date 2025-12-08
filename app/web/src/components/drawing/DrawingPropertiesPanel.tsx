@@ -6,7 +6,7 @@
 
 import React, { useState } from "react";
 import { useDrawingStore } from "../../store/drawing-store";
-import type { ViewProjection, SheetSize } from "@vibecad/core";
+import type { ViewProjection, DrawingSheetSize as SheetSize } from "@vibecad/core";
 
 // ============================================================================
 // Styles

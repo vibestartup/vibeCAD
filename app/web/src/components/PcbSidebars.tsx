@@ -5,7 +5,13 @@
 import React, { useState } from "react";
 import { TabbedSidebar, type TabDefinition } from "./TabbedSidebar";
 import { usePcbStore } from "../store/pcb-store";
-import type { FootprintInstance, Footprint, Layer, LayerId, DrcViolation } from "@vibecad/core";
+import type { LayerId } from "@vibecad/core";
+import { Pcb } from "@vibecad/core";
+
+type FootprintInstance = Pcb.FootprintInstance;
+type Footprint = Pcb.Footprint;
+type Layer = Pcb.Layer;
+type DrcViolation = Pcb.DrcViolation;
 
 // ============================================================================
 // Styles

@@ -4,7 +4,6 @@
 
 import { create } from "zustand";
 import type {
-  SchematicDocument,
   SheetId,
   SymbolId,
   SymbolInstanceId,
@@ -12,16 +11,22 @@ import type {
   NetId,
   NetLabelId,
   PinId,
-  Symbol,
-  SymbolInstance,
-  Wire,
-  Net,
-  NetLabel,
-  SchematicPoint,
-  NetClass,
   NetClassId,
 } from "@vibecad/core";
-import {
+import { Schematic } from "@vibecad/core";
+
+// Re-export types from Schematic namespace for convenience
+type SchematicDocument = Schematic.SchematicDocument;
+type Symbol = Schematic.Symbol;
+type SymbolInstance = Schematic.SymbolInstance;
+type Wire = Schematic.Wire;
+type Net = Schematic.Net;
+type NetLabel = Schematic.NetLabel;
+type SchematicPoint = Schematic.SchematicPoint;
+type NetClass = Schematic.NetClass;
+
+// Destructure functions from Schematic namespace
+const {
   createSchematicDocument,
   addSymbolInstance,
   updateSymbolInstance,
@@ -47,7 +52,7 @@ import {
   setInstanceRefDes,
   setInstanceValue,
   snapToGrid,
-} from "@vibecad/core";
+} = Schematic;
 import { HistoryState, createHistory, pushState, undo as historyUndo, redo as historyRedo } from "@vibecad/core";
 
 // ============================================================================

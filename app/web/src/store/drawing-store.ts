@@ -4,17 +4,13 @@
 
 import { create } from "zustand";
 import type {
-  Drawing,
-  DrawingView,
   DrawingViewId,
-  DrawingDimension,
   DrawingDimId,
-  DrawingAnnotation,
   DrawingAnnotationId,
-  SheetSize,
   ViewProjection,
   Vec2,
   PartStudio,
+  DrawingSheetSize,
 } from "@vibecad/core";
 import {
   createDrawing,
@@ -30,6 +26,15 @@ import {
   createTextAnnotation,
   createLinearDimension,
 } from "@vibecad/core";
+import type {
+  Drawing,
+  DrawingView,
+  DrawingDimension,
+  DrawingAnnotation,
+} from "@vibecad/core";
+
+// Use DrawingSheetSize (renamed to avoid conflict with schematic sheet)
+type SheetSize = DrawingSheetSize;
 import type { Kernel } from "@vibecad/kernel";
 
 // ============================================================================

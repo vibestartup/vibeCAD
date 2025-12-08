@@ -12,8 +12,6 @@ import type {
   ComponentCategory,
   SymbolId,
   FootprintId,
-  Symbol,
-  Footprint,
   LayerId,
 } from "@vibecad/core";
 import {
@@ -29,8 +27,13 @@ import {
   getUsedCategories,
   serializeLibrary,
   deserializeLibrary,
+  createBuiltinBasicsLibrary,
+  Schematic,
+  Pcb,
 } from "@vibecad/core";
-import { createBuiltinBasicsLibrary } from "@vibecad/core";
+
+type Symbol = Schematic.Symbol;
+type Footprint = Pcb.Footprint;
 
 // ============================================================================
 // Types

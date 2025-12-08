@@ -27,8 +27,8 @@ import {
 export interface EvalContext {
   /** OpenCascade API */
   occ: OccApi;
-  /** SolveSpace API */
-  slvs: SlvsApi;
+  /** Geometric Constraint Solver API (PlaneGCS) */
+  gcs: GcsApi;
   /** Global parameters */
   params: ParamEnv;
   /** Current part studio state */
@@ -68,22 +68,39 @@ export interface OccApi {
 }
 
 /**
- * Minimal SLVS API interface (implemented in @vibecad/kernel).
+ * GCS API interface (implemented in @vibecad/kernel via PlaneGCS).
+ * Full interface required by sketch constraint solver.
  */
-export interface SlvsApi {
+export interface GcsApi {
   createGroup(): number;
   freeGroup(groupId: number): void;
+  // Primitives
   addPoint2d(groupId: number, x: number, y: number): number;
   getPoint2d(pointId: number): { x: number; y: number };
   addLine2d(groupId: number, p1: number, p2: number): number;
+  addCircle2d(groupId: number, center: number, radius: number): number;
+  addArc2d(groupId: number, center: number, start: number, end: number): number;
+  // Geometric constraints
   addCoincident(groupId: number, p1: number, p2: number): number;
-  addDistance(groupId: number, p1: number, p2: number, dist: number): number;
   addHorizontal(groupId: number, line: number): number;
   addVertical(groupId: number, line: number): number;
+  addParallel(groupId: number, l1: number, l2: number): number;
+  addPerpendicular(groupId: number, l1: number, l2: number): number;
+  addTangent(groupId: number, e1: number, e2: number): number;
+  addEqual(groupId: number, e1: number, e2: number): number;
+  addPointOnLine(groupId: number, pt: number, line: number): number;
+  addMidpoint(groupId: number, pt: number, line: number): number;
+  // Dimensional constraints
+  addDistance(groupId: number, p1: number, p2: number, dist: number): number;
+  addAngle(groupId: number, l1: number, l2: number, angleRad: number): number;
+  addRadius(groupId: number, circle: number, radius: number): number;
+  addHorizontalDistance(groupId: number, p1: number, p2: number, dist: number): number;
+  addVerticalDistance(groupId: number, p1: number, p2: number, dist: number): number;
+  // Solve
   solve(groupId: number): {
     ok: boolean;
     dof: number;
-    status: "ok" | "over" | "under" | "inconsistent";
+    status: string;
   };
 }
 
