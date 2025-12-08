@@ -141,6 +141,24 @@ const styles = {
     marginTop: 4,
   },
 
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  checkbox: {
+    width: 16,
+    height: 16,
+    cursor: "pointer",
+  },
+
+  checkboxLabel: {
+    fontSize: 13,
+    color: "#ccc",
+    cursor: "pointer",
+  },
+
   footer: {
     display: "flex",
     justifyContent: "flex-end",
@@ -187,6 +205,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [unitSystem, setUnitSystem] = useState(settings.unitSystem);
   const [lengthUnit, setLengthUnit] = useState(settings.lengthUnit);
   const [angleUnit, setAngleUnit] = useState(settings.angleUnit);
+  const [showSketchCursor, setShowSketchCursor] = useState(settings.showSketchCursor);
   const [openaiApiKey, setOpenaiApiKey] = useState(settings.openaiApiKey);
   const [openaiProjectId, setOpenaiProjectId] = useState(settings.openaiProjectId);
   const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey);
@@ -199,6 +218,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setUnitSystem(settings.unitSystem);
       setLengthUnit(settings.lengthUnit);
       setAngleUnit(settings.angleUnit);
+      setShowSketchCursor(settings.showSketchCursor);
       setOpenaiApiKey(settings.openaiApiKey);
       setOpenaiProjectId(settings.openaiProjectId);
       setGeminiApiKey(settings.geminiApiKey);
@@ -218,6 +238,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     settings.setUnitSystem(unitSystem);
     settings.setLengthUnit(lengthUnit);
     settings.setAngleUnit(angleUnit);
+    settings.setShowSketchCursor(showSketchCursor);
     settings.setOpenaiApiKey(openaiApiKey);
     settings.setOpenaiProjectId(openaiProjectId);
     settings.setGeminiApiKey(geminiApiKey);
@@ -315,6 +336,25 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <option value="deg">Degrees</option>
                 <option value="rad">Radians</option>
               </select>
+            </div>
+          </div>
+
+          {/* Sketch Section */}
+          <div style={styles.section}>
+            <div style={styles.sectionTitle}>Sketch</div>
+            <div style={styles.field}>
+              <label style={styles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  style={styles.checkbox}
+                  checked={showSketchCursor}
+                  onChange={(e) => setShowSketchCursor(e.target.checked)}
+                />
+                <span style={styles.checkboxLabel}>Show sketch cursor</span>
+              </label>
+              <p style={styles.hint}>
+                Show a semi-transparent dot at the mouse position in sketch mode
+              </p>
             </div>
           </div>
 

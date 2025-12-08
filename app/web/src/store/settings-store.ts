@@ -22,6 +22,9 @@ export interface UserSettings {
   lengthUnit: LengthUnit;
   angleUnit: AngleUnit;
 
+  // Sketch settings
+  showSketchCursor: boolean;
+
   // API Keys
   openaiApiKey: string;
   openaiProjectId: string;
@@ -35,6 +38,7 @@ interface SettingsState extends UserSettings {
   setUnitSystem: (system: UnitSystem) => void;
   setLengthUnit: (unit: LengthUnit) => void;
   setAngleUnit: (unit: AngleUnit) => void;
+  setShowSketchCursor: (show: boolean) => void;
   setOpenaiApiKey: (key: string) => void;
   setOpenaiProjectId: (id: string) => void;
   setGeminiApiKey: (key: string) => void;
@@ -51,6 +55,7 @@ const defaultSettings: UserSettings = {
   unitSystem: "metric",
   lengthUnit: "mm",
   angleUnit: "deg",
+  showSketchCursor: false,
   openaiApiKey: "",
   openaiProjectId: "",
   geminiApiKey: "",
@@ -74,6 +79,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
       setLengthUnit: (lengthUnit) => set({ lengthUnit }),
       setAngleUnit: (angleUnit) => set({ angleUnit }),
+      setShowSketchCursor: (showSketchCursor) => set({ showSketchCursor }),
       setOpenaiApiKey: (openaiApiKey) => set({ openaiApiKey }),
       setOpenaiProjectId: (openaiProjectId) => set({ openaiProjectId }),
       setGeminiApiKey: (geminiApiKey) => set({ geminiApiKey }),
