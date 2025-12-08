@@ -18,6 +18,7 @@ import {
   DATUM_XZ,
   DATUM_YZ,
   getPointPosition,
+  getReferencedPoints,
 } from "@vibecad/core";
 import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, Vec2, Vec3, PrimitiveId } from "@vibecad/core";
 import {
@@ -688,6 +689,8 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const faceHighlightRef = useRef<THREE.Mesh | null>(null);
   const selectionHighlightGroupRef = useRef<THREE.Group | null>(null);
   const extrudePreviewRef = useRef<THREE.Group | null>(null);
+  const sketchGizmoGroupRef = useRef<THREE.Group | null>(null);
+  const sketchEntityGroupRef = useRef<THREE.Group | null>(null); // Separate group for selectable sketch entities
 
   const [isOccLoading, setIsOccLoading] = useState(true);
   const [occError, setOccError] = useState<string | null>(null);
@@ -698,8 +701,9 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const [showAxes, setShowAxes] = useState(true);
   const [renderMode, setRenderMode] = useState<RenderMode>("solid");
 
-  // Get length unit from settings
+  // Get settings
   const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const showSketchCursor = useSettingsStore((s) => s.showSketchCursor);
 
   const studio = useCadStore((s) => s.studio);
   const timelinePosition = useCadStore((s) => s.timelinePosition);
@@ -725,6 +729,29 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const selectFace = useCadStore((s) => s.selectFace);
   const setExportMeshes = useCadStore((s) => s.setExportMeshes);
   const setExportShapeHandles = useCadStore((s) => s.setExportShapeHandles);
+
+  // Sketch selection state
+  const sketchSelection = useCadStore((s) => s.sketchSelection);
+  const hoveredSketchEntity = useCadStore((s) => s.hoveredSketchEntity);
+  const setHoveredSketchEntity = useCadStore((s) => s.setHoveredSketchEntity);
+  const toggleSketchEntitySelected = useCadStore((s) => s.toggleSketchEntitySelected);
+  const setSketchSelection = useCadStore((s) => s.setSketchSelection);
+  const clearSketchSelection = useCadStore((s) => s.clearSketchSelection);
+  const sketchGizmoState = useCadStore((s) => s.sketchGizmoState);
+  const startSketchGizmoDrag = useCadStore((s) => s.startSketchGizmoDrag);
+  const updateSketchGizmoDrag = useCadStore((s) => s.updateSketchGizmoDrag);
+  const endSketchGizmoDrag = useCadStore((s) => s.endSketchGizmoDrag);
+  const getMaterializedSelectionPoints = useCadStore((s) => s.getMaterializedSelectionPoints);
+  const activeTool = useCadStore((s) => s.activeTool);
+
+  // Clipboard actions
+  const deleteSketchSelection = useCadStore((s) => s.deleteSketchSelection);
+  const copySketchSelection = useCadStore((s) => s.copySketchSelection);
+  const cutSketchSelection = useCadStore((s) => s.cutSketchSelection);
+  const pasteSketchClipboard = useCadStore((s) => s.pasteSketchClipboard);
+  const duplicateSketchSelection = useCadStore((s) => s.duplicateSketchSelection);
+  const selectAllSketchEntities = useCadStore((s) => s.selectAllSketchEntities);
+  const cancelSketchDrawing = useCadStore((s) => s.cancelSketchDrawing);
 
   // Get the active sketch and its plane for raycasting
   const activeSketch = React.useMemo(() => {
@@ -778,6 +805,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
+      preserveDrawingBuffer: true, // Required for canvas capture/toDataURL
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -848,11 +876,27 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     scene.add(extrudePreviewGroup);
     extrudePreviewRef.current = extrudePreviewGroup;
 
-    // Cursor point (constant screen size)
+    // Sketch entity group for selectable sketch primitives (separate from sketchGroup for hit testing)
+    const sketchEntityGroup = new THREE.Group();
+    scene.add(sketchEntityGroup);
+    sketchEntityGroupRef.current = sketchEntityGroup;
+
+    // Sketch gizmo group for transform gizmo
+    const sketchGizmoGroup = new THREE.Group();
+    scene.add(sketchGizmoGroup);
+    sketchGizmoGroupRef.current = sketchGizmoGroup;
+
+    // Cursor point (constant screen size, semi-transparent)
     const cursorGeometry = new THREE.SphereGeometry(1, 16, 16);
-    const cursorMaterial = new THREE.MeshBasicMaterial({ color: 0x69db7c });
+    const cursorMaterial = new THREE.MeshBasicMaterial({
+      color: 0x69db7c,
+      transparent: true,
+      opacity: 0.5,
+      depthTest: false,
+    });
     const cursorPoint = new THREE.Mesh(cursorGeometry, cursorMaterial);
     cursorPoint.visible = false;
+    cursorPoint.renderOrder = 999;
     scene.add(cursorPoint);
     cursorPointRef.current = cursorPoint;
 
@@ -999,6 +1043,84 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       lastGridSpacingRef.current = spacing.major;
     }
   }, [lengthUnit]);
+
+  // Handle keyboard shortcuts for sketch mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle shortcuts in sketch mode
+      if (editorMode !== "sketch") return;
+
+      // Escape to cancel drawing or clear selection
+      if (e.key === "Escape") {
+        if (sketchDrawingState.type !== "idle") {
+          cancelSketchDrawing();
+        } else if (sketchSelection.size > 0) {
+          clearSketchSelection();
+        }
+        return;
+      }
+
+      // Delete or Backspace to delete selection
+      if ((e.key === "Delete" || e.key === "Backspace") && sketchSelection.size > 0) {
+        e.preventDefault();
+        deleteSketchSelection();
+        return;
+      }
+
+      // Command/Ctrl key shortcuts
+      const isMod = e.ctrlKey || e.metaKey;
+      if (!isMod) return;
+
+      switch (e.key.toLowerCase()) {
+        case "c":
+          // Copy
+          if (sketchSelection.size > 0) {
+            e.preventDefault();
+            copySketchSelection();
+          }
+          break;
+        case "x":
+          // Cut
+          if (sketchSelection.size > 0) {
+            e.preventDefault();
+            cutSketchSelection();
+          }
+          break;
+        case "v":
+          // Paste
+          e.preventDefault();
+          pasteSketchClipboard();
+          break;
+        case "d":
+          // Duplicate
+          if (sketchSelection.size > 0) {
+            e.preventDefault();
+            duplicateSketchSelection();
+          }
+          break;
+        case "a":
+          // Select all
+          e.preventDefault();
+          selectAllSketchEntities();
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    editorMode,
+    sketchDrawingState,
+    sketchSelection,
+    cancelSketchDrawing,
+    clearSketchSelection,
+    deleteSketchSelection,
+    copySketchSelection,
+    cutSketchSelection,
+    pasteSketchClipboard,
+    duplicateSketchSelection,
+    selectAllSketchEntities,
+  ]);
 
   // Build and render geometry from the part studio operations
   useEffect(() => {
@@ -1532,6 +1654,292 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     }
   }, [studio, timelinePosition, hoveredFace, selectedFace]);
 
+  // Render selectable sketch entities in sketch mode (for hit testing)
+  useEffect(() => {
+    const entityGroup = sketchEntityGroupRef.current;
+    if (!entityGroup) return;
+
+    // Clear existing
+    while (entityGroup.children.length > 0) {
+      const child = entityGroup.children[0];
+      entityGroup.remove(child);
+      if (child instanceof THREE.Line || child instanceof THREE.Mesh || child instanceof THREE.Points) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose());
+        } else {
+          (child.material as THREE.Material).dispose();
+        }
+      }
+    }
+
+    // Only render in sketch mode with active sketch
+    if (editorMode !== "sketch" || !activeSketch || !activeSketchPlane) return;
+
+    const sketch = activeSketch;
+    const plane = activeSketchPlane;
+
+    // Helper to convert sketch 2D to Three.js 3D
+    const sketchTo3D = (x: number, y: number): THREE.Vector3 => {
+      const world = sketchUtils.sketchToWorld([x, y], plane);
+      return new THREE.Vector3(world[0], world[2], world[1]); // Swap Y/Z
+    };
+
+    const getPos = (id: PrimitiveId): [number, number] | null => {
+      const solved = sketch.solvedPositions?.get(id);
+      if (solved) return [solved[0], solved[1]];
+      const prim = sketch.primitives.get(id);
+      if (prim?.type === "point") return [prim.x, prim.y];
+      return null;
+    };
+
+    // Render each primitive as a selectable entity
+    for (const [primId, prim] of sketch.primitives) {
+      const isSelected = sketchSelection.has(primId);
+      const isHovered = hoveredSketchEntity === primId;
+
+      // Determine colors based on state
+      const normalColor = 0x4dabf7;
+      const selectedColor = 0xffd43b;
+      const hoverColor = 0x69db7c;
+      const color = isSelected ? selectedColor : (isHovered ? hoverColor : normalColor);
+
+      if (prim.type === "point") {
+        // Render point as a sphere
+        const pos = getPos(primId);
+        if (!pos) continue;
+
+        const geo = new THREE.SphereGeometry(2, 12, 12);
+        const mat = new THREE.MeshBasicMaterial({ color, depthTest: false });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(sketchTo3D(pos[0], pos[1]));
+        mesh.userData.primitiveId = primId;
+        mesh.userData.primitiveType = "point";
+        mesh.renderOrder = 1000;
+        entityGroup.add(mesh);
+      } else if (prim.type === "line") {
+        // Render line
+        const startPos = getPos(prim.start);
+        const endPos = getPos(prim.end);
+        if (!startPos || !endPos) continue;
+
+        const geo = new THREE.BufferGeometry().setFromPoints([
+          sketchTo3D(startPos[0], startPos[1]),
+          sketchTo3D(endPos[0], endPos[1]),
+        ]);
+        const mat = new THREE.LineBasicMaterial({ color, linewidth: 2, depthTest: false });
+        const line = new THREE.Line(geo, mat);
+        line.userData.primitiveId = primId;
+        line.userData.primitiveType = "line";
+        line.renderOrder = 999;
+        entityGroup.add(line);
+      } else if (prim.type === "circle") {
+        // Render circle
+        const centerPos = getPos(prim.center);
+        if (!centerPos) continue;
+
+        const segments = 64;
+        const points: THREE.Vector3[] = [];
+        for (let i = 0; i <= segments; i++) {
+          const angle = (i / segments) * Math.PI * 2;
+          const x = centerPos[0] + Math.cos(angle) * prim.radius;
+          const y = centerPos[1] + Math.sin(angle) * prim.radius;
+          points.push(sketchTo3D(x, y));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({ color, linewidth: 2, depthTest: false });
+        const line = new THREE.Line(geo, mat);
+        line.userData.primitiveId = primId;
+        line.userData.primitiveType = "circle";
+        line.renderOrder = 999;
+        entityGroup.add(line);
+      } else if (prim.type === "arc") {
+        // Render arc
+        const centerPos = getPos(prim.center);
+        const startPos = getPos(prim.start);
+        const endPos = getPos(prim.end);
+        if (!centerPos || !startPos || !endPos) continue;
+
+        const dx1 = startPos[0] - centerPos[0];
+        const dy1 = startPos[1] - centerPos[1];
+        const radius = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+        const startAngle = Math.atan2(dy1, dx1);
+        const dx2 = endPos[0] - centerPos[0];
+        const dy2 = endPos[1] - centerPos[1];
+        const endAngle = Math.atan2(dy2, dx2);
+
+        let sweep = endAngle - startAngle;
+        if (prim.clockwise) {
+          if (sweep > 0) sweep -= Math.PI * 2;
+        } else {
+          if (sweep < 0) sweep += Math.PI * 2;
+        }
+
+        const segments = 32;
+        const points: THREE.Vector3[] = [];
+        for (let i = 0; i <= segments; i++) {
+          const t = i / segments;
+          const angle = startAngle + sweep * t;
+          const x = centerPos[0] + Math.cos(angle) * radius;
+          const y = centerPos[1] + Math.sin(angle) * radius;
+          points.push(sketchTo3D(x, y));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(points);
+        const mat = new THREE.LineBasicMaterial({ color, linewidth: 2, depthTest: false });
+        const line = new THREE.Line(geo, mat);
+        line.userData.primitiveId = primId;
+        line.userData.primitiveType = "arc";
+        line.renderOrder = 999;
+        entityGroup.add(line);
+      }
+    }
+  }, [editorMode, activeSketch, activeSketchPlane, sketchSelection, hoveredSketchEntity]);
+
+  // Render sketch transform gizmo
+  useEffect(() => {
+    const gizmoGroup = sketchGizmoGroupRef.current;
+    if (!gizmoGroup) return;
+
+    // Clear existing
+    while (gizmoGroup.children.length > 0) {
+      const child = gizmoGroup.children[0];
+      gizmoGroup.remove(child);
+      if (child instanceof THREE.Line || child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+        if (Array.isArray(child.material)) {
+          child.material.forEach(m => m.dispose());
+        } else {
+          (child.material as THREE.Material).dispose();
+        }
+      }
+    }
+
+    // Only show gizmo when there's a selection in sketch mode with select tool
+    if (editorMode !== "sketch" || activeTool !== "select" || sketchSelection.size === 0) return;
+    if (!activeSketch || !activeSketchPlane) return;
+
+    const sketch = activeSketch;
+    const plane = activeSketchPlane;
+
+    // Calculate centroid of selection
+    const pointIds = getMaterializedSelectionPoints();
+    if (pointIds.length === 0) return;
+
+    let cx = 0, cy = 0;
+    for (const pointId of pointIds) {
+      const solved = sketch.solvedPositions?.get(pointId);
+      if (solved) {
+        cx += solved[0];
+        cy += solved[1];
+      } else {
+        const prim = sketch.primitives.get(pointId);
+        if (prim?.type === "point") {
+          cx += prim.x;
+          cy += prim.y;
+        }
+      }
+    }
+    cx /= pointIds.length;
+    cy /= pointIds.length;
+
+    // Helper to convert sketch 2D to Three.js 3D
+    const sketchTo3D = (x: number, y: number): THREE.Vector3 => {
+      const world = sketchUtils.sketchToWorld([x, y], plane);
+      return new THREE.Vector3(world[0], world[2], world[1]); // Swap Y/Z
+    };
+
+    const gizmoSize = 30; // Size in sketch units (mm)
+    const centerPos = sketchTo3D(cx, cy);
+
+    // X axis arrow (red)
+    const xEndPos = sketchTo3D(cx + gizmoSize, cy);
+    const xGeo = new THREE.BufferGeometry().setFromPoints([centerPos, xEndPos]);
+    const xMat = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 3, depthTest: false });
+    const xLine = new THREE.Line(xGeo, xMat);
+    xLine.userData.gizmoHandle = "translate-x";
+    xLine.renderOrder = 2000;
+    gizmoGroup.add(xLine);
+
+    // X arrow head
+    const xHeadGeo = new THREE.ConeGeometry(2, 6, 8);
+    const xHeadMat = new THREE.MeshBasicMaterial({ color: 0xff4444, depthTest: false });
+    const xHead = new THREE.Mesh(xHeadGeo, xHeadMat);
+    xHead.position.copy(xEndPos);
+    // Rotate to point along X axis in sketch plane
+    const xDir = new THREE.Vector3().subVectors(xEndPos, centerPos).normalize();
+    xHead.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), xDir);
+    xHead.userData.gizmoHandle = "translate-x";
+    xHead.renderOrder = 2000;
+    gizmoGroup.add(xHead);
+
+    // Y axis arrow (green)
+    const yEndPos = sketchTo3D(cx, cy + gizmoSize);
+    const yGeo = new THREE.BufferGeometry().setFromPoints([centerPos, yEndPos]);
+    const yMat = new THREE.LineBasicMaterial({ color: 0x44ff44, linewidth: 3, depthTest: false });
+    const yLine = new THREE.Line(yGeo, yMat);
+    yLine.userData.gizmoHandle = "translate-y";
+    yLine.renderOrder = 2000;
+    gizmoGroup.add(yLine);
+
+    // Y arrow head
+    const yHeadGeo = new THREE.ConeGeometry(2, 6, 8);
+    const yHeadMat = new THREE.MeshBasicMaterial({ color: 0x44ff44, depthTest: false });
+    const yHead = new THREE.Mesh(yHeadGeo, yHeadMat);
+    yHead.position.copy(yEndPos);
+    const yDir = new THREE.Vector3().subVectors(yEndPos, centerPos).normalize();
+    yHead.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), yDir);
+    yHead.userData.gizmoHandle = "translate-y";
+    yHead.renderOrder = 2000;
+    gizmoGroup.add(yHead);
+
+    // Center square for free translate (XY)
+    const squareSize = 6;
+    const s1 = sketchTo3D(cx - squareSize/2, cy - squareSize/2);
+    const s2 = sketchTo3D(cx + squareSize/2, cy - squareSize/2);
+    const s3 = sketchTo3D(cx + squareSize/2, cy + squareSize/2);
+    const s4 = sketchTo3D(cx - squareSize/2, cy + squareSize/2);
+
+    const squareGeo = new THREE.BufferGeometry();
+    const squareVerts = new Float32Array([
+      s1.x, s1.y, s1.z,
+      s2.x, s2.y, s2.z,
+      s3.x, s3.y, s3.z,
+      s1.x, s1.y, s1.z,
+      s3.x, s3.y, s3.z,
+      s4.x, s4.y, s4.z,
+    ]);
+    squareGeo.setAttribute("position", new THREE.BufferAttribute(squareVerts, 3));
+    const squareMat = new THREE.MeshBasicMaterial({
+      color: 0xffff44,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.5,
+      depthTest: false,
+    });
+    const squareMesh = new THREE.Mesh(squareGeo, squareMat);
+    squareMesh.userData.gizmoHandle = "translate-xy";
+    squareMesh.renderOrder = 2000;
+    gizmoGroup.add(squareMesh);
+
+    // Rotation ring (blue)
+    const ringRadius = gizmoSize * 0.8;
+    const ringSegments = 48;
+    const ringPoints: THREE.Vector3[] = [];
+    for (let i = 0; i <= ringSegments; i++) {
+      const angle = (i / ringSegments) * Math.PI * 2;
+      const x = cx + Math.cos(angle) * ringRadius;
+      const y = cy + Math.sin(angle) * ringRadius;
+      ringPoints.push(sketchTo3D(x, y));
+    }
+    const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPoints);
+    const ringMat = new THREE.LineBasicMaterial({ color: 0x4444ff, linewidth: 2, depthTest: false });
+    const ringLine = new THREE.Line(ringGeo, ringMat);
+    ringLine.userData.gizmoHandle = "rotate";
+    ringLine.renderOrder = 2000;
+    gizmoGroup.add(ringLine);
+
+  }, [editorMode, activeTool, activeSketch, activeSketchPlane, sketchSelection, getMaterializedSelectionPoints]);
+
   // Update body face highlight
   useEffect(() => {
     const scene = sceneRef.current;
@@ -1991,7 +2399,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       }
     }
 
-    // Hide cursor if not in sketch mode or no mouse position
+    // Hide cursor and exit if not in sketch mode or no mouse/plane
     if (editorMode !== "sketch" || !sketchMousePos || !activeSketchPlane) {
       cursorPoint.visible = false;
       return;
@@ -2008,10 +2416,10 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
       return new THREE.Vector3(worldX, worldZ, worldY);
     };
 
-    // Update cursor position
+    // Update cursor position (but only show if setting enabled)
     const cursorPos = sketchTo3D(sketchMousePos.x, sketchMousePos.y);
     cursorPoint.position.copy(cursorPos);
-    cursorPoint.visible = true;
+    cursorPoint.visible = showSketchCursor; // Only show cursor dot if setting is enabled
 
     // Scale cursor for constant screen size (target ~6 pixels)
     const distToCamera = cursorPoint.position.distanceTo(camera.position);
@@ -2140,7 +2548,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         }
       }
     }
-  }, [editorMode, sketchMousePos, sketchDrawingState, activeSketchPlane]);
+  }, [editorMode, sketchMousePos, sketchDrawingState, activeSketchPlane, showSketchCursor]);
 
   // Show/hide datum planes based on editor mode
   useEffect(() => {
@@ -2239,6 +2647,18 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     });
   }, [renderMode]);
 
+  // Disable orbit controls while dragging sketch gizmo
+  useEffect(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    if (sketchGizmoState.mode !== "idle") {
+      controls.enabled = false;
+    } else {
+      controls.enabled = true;
+    }
+  }, [sketchGizmoState.mode]);
+
   // Handle mouse events for plane selection and sketch mode raycasting
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     const container = containerRef.current;
@@ -2254,7 +2674,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
 
-    // Handle sketch mode - raycast onto sketch plane
+    // Handle sketch mode - raycast onto sketch plane + entity hit testing
     if (editorMode === "sketch" && activeSketchPlane) {
       // Create a Three.js plane from the sketch plane
       // Note: In our coordinate system, Y and Z are swapped for Three.js
@@ -2293,14 +2713,65 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         const sketchX = relativePoint.dot(axisX);
         const sketchY = relativePoint.dot(axisY);
 
-        // Conditionally snap to grid (10mm)
-        if (gridSnappingEnabled) {
+        // Conditionally snap to grid (10mm) - but only for drawing, not for selection
+        const isDrawingTool = ["line", "rect", "circle", "arc"].includes(activeTool);
+        if (gridSnappingEnabled && isDrawingTool) {
           const gridSize = 10;
           const snappedX = Math.round(sketchX / gridSize) * gridSize;
           const snappedY = Math.round(sketchY / gridSize) * gridSize;
           setSketchMousePos({ x: snappedX, y: snappedY });
         } else {
           setSketchMousePos({ x: sketchX, y: sketchY });
+        }
+
+        // Handle gizmo dragging
+        if (sketchGizmoState.mode !== "idle") {
+          updateSketchGizmoDrag({ x: sketchX, y: sketchY });
+          return;
+        }
+
+        // If in select mode, check for entity hits
+        if (activeTool === "select" && activeSketch) {
+          // Check for gizmo hits first
+          const gizmoGroup = sketchGizmoGroupRef.current;
+          if (gizmoGroup && gizmoGroup.children.length > 0) {
+            raycaster.params.Line = { threshold: 5 }; // Increase line threshold for gizmo
+            const gizmoIntersects = raycaster.intersectObjects(gizmoGroup.children, true);
+            if (gizmoIntersects.length > 0) {
+              // Hovering over gizmo - don't change entity hover
+              return;
+            }
+          }
+
+          // Check for entity hits
+          const entityGroup = sketchEntityGroupRef.current;
+          if (entityGroup) {
+            raycaster.params.Line = { threshold: 5 }; // Increase threshold for easier selection
+            raycaster.params.Points = { threshold: 8 };
+            const intersects = raycaster.intersectObjects(entityGroup.children, true);
+
+            if (intersects.length > 0) {
+              // Find the closest hit with a primitiveId
+              for (const hit of intersects) {
+                let obj: THREE.Object3D | null = hit.object;
+                while (obj) {
+                  if (obj.userData.primitiveId) {
+                    const primId = obj.userData.primitiveId as PrimitiveId;
+                    if (primId !== hoveredSketchEntity) {
+                      setHoveredSketchEntity(primId);
+                    }
+                    return;
+                  }
+                  obj = obj.parent;
+                }
+              }
+            }
+          }
+
+          // No hit - clear hover
+          if (hoveredSketchEntity !== null) {
+            setHoveredSketchEntity(null);
+          }
         }
       }
       return;
@@ -2425,11 +2896,38 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     // Clear sketch mouse pos and hovered plane/face in other modes
     if (hoveredPlane !== null) setHoveredPlane(null);
     if (hoveredFace !== null) setHoveredFace(null);
-  }, [editorMode, hoveredPlane, hoveredFace, activeSketchPlane, setSketchMousePos, faceSelectionTarget, setHoveredFace]);
+  }, [editorMode, hoveredPlane, hoveredFace, activeSketchPlane, setSketchMousePos, faceSelectionTarget, setHoveredFace, activeTool, activeSketch, hoveredSketchEntity, setHoveredSketchEntity, sketchGizmoState, updateSketchGizmoDrag, gridSnappingEnabled]);
 
   const handleClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     // Handle sketch mode clicks
     if (editorMode === "sketch") {
+      // If currently dragging gizmo, don't process click (mouseUp handles it)
+      if (sketchGizmoState.mode !== "idle") {
+        return;
+      }
+
+      // If in select mode with select tool, handle entity selection
+      if (activeTool === "select") {
+        // If we have a hovered entity, toggle its selection
+        if (hoveredSketchEntity) {
+          if (e.ctrlKey || e.metaKey) {
+            // Toggle selection
+            toggleSketchEntitySelected(hoveredSketchEntity);
+          } else {
+            // Replace selection
+            setSketchSelection(new Set([hoveredSketchEntity]));
+          }
+          return;
+        }
+
+        // Clicked on empty space - clear selection (unless holding ctrl/cmd)
+        if (!e.ctrlKey && !e.metaKey) {
+          clearSketchSelection();
+        }
+        return;
+      }
+
+      // Otherwise, use the drawing tools
       handleSketchClick();
       return;
     }
@@ -2535,7 +3033,62 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         }
       }
     }
-  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection]);
+  }, [editorMode, createNewSketch, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection, activeTool, hoveredSketchEntity, toggleSketchEntitySelected, setSketchSelection, clearSketchSelection, sketchGizmoState.mode]);
+
+  // Handle mouse up - for ending gizmo drags
+  const handleMouseUp = useCallback(() => {
+    if (sketchGizmoState.mode !== "idle") {
+      endSketchGizmoDrag();
+    }
+  }, [sketchGizmoState.mode, endSketchGizmoDrag]);
+
+  // Handle mouse down - for starting gizmo drags
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only handle in sketch mode with select tool
+    if (editorMode !== "sketch" || activeTool !== "select") return;
+
+    const container = containerRef.current;
+    const camera = cameraRef.current;
+    const gizmoGroup = sketchGizmoGroupRef.current;
+
+    if (!container || !camera || !gizmoGroup || !sketchMousePos || !activeSketchPlane) return;
+    if (gizmoGroup.children.length === 0) return;
+
+    const rect = container.getBoundingClientRect();
+    const mouse = new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1,
+      -((e.clientY - rect.top) / rect.height) * 2 + 1
+    );
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(mouse, camera);
+    raycaster.params.Line = { threshold: 5 };
+
+    const gizmoIntersects = raycaster.intersectObjects(gizmoGroup.children, true);
+    if (gizmoIntersects.length > 0) {
+      // Find gizmo handle type
+      for (const hit of gizmoIntersects) {
+        let obj: THREE.Object3D | null = hit.object;
+        while (obj) {
+          if (obj.userData.gizmoHandle) {
+            const handleType = obj.userData.gizmoHandle as string;
+            if (handleType === "translate-x") {
+              startSketchGizmoDrag("translate-x", sketchMousePos);
+            } else if (handleType === "translate-y") {
+              startSketchGizmoDrag("translate-y", sketchMousePos);
+            } else if (handleType === "translate-xy") {
+              startSketchGizmoDrag("translate-xy", sketchMousePos);
+            } else if (handleType === "rotate") {
+              startSketchGizmoDrag("rotate", sketchMousePos);
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          obj = obj.parent;
+        }
+      }
+    }
+  }, [editorMode, activeTool, sketchMousePos, activeSketchPlane, startSketchGizmoDrag]);
 
   // View controls
   const handleResetView = useCallback(() => {
@@ -2697,7 +3250,9 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         cursor: cursorStyle,
       }}
       onMouseMove={handleMouseMove}
+      onMouseDown={handleMouseDown}
       onClick={handleClick}
+      onMouseUp={handleMouseUp}
     >
       {isOccLoading && (
         <div style={styles.loading}>
