@@ -39,3 +39,6 @@ export * from "./assembly";
 
 // Document
 export * from "./document";
+
+// Drawing
+export * from "./drawing";

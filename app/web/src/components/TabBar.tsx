@@ -247,6 +247,8 @@ function getDocumentIcon(type: DocumentType): string {
   switch (type) {
     case "cad":
       return "\u2B22"; // Hexagon
+    case "drawing":
+      return "\u{1F4D0}"; // Triangular ruler (for technical drawing)
     case "image":
       return "\u{1F5BC}"; // Frame with picture
     case "text":
@@ -511,11 +513,12 @@ function ContextMenu({ x, y, tabId, onClose, onRename }: ContextMenuProps) {
 interface AddMenuProps {
   onClose: () => void;
   onNewPartStudio: () => void;
+  onNewDrawing: () => void;
   onUploadFile: () => void;
   onOpenLibrary: () => void;
 }
 
-function AddMenu({ onClose, onNewPartStudio, onUploadFile, onOpenLibrary }: AddMenuProps) {
+function AddMenu({ onClose, onNewPartStudio, onNewDrawing, onUploadFile, onOpenLibrary }: AddMenuProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
 
   // Close on click outside
@@ -548,6 +551,21 @@ function AddMenu({ onClose, onNewPartStudio, onUploadFile, onOpenLibrary }: AddM
       >
         <span style={styles.menuItemIcon}>&#x2B22;</span>
         <span>New Part Studio</span>
+      </button>
+      <button
+        style={{
+          ...styles.menuItem,
+          ...(hoveredItem === "newDrawing" ? styles.menuItemHover : {}),
+        }}
+        onClick={() => {
+          onNewDrawing();
+          onClose();
+        }}
+        onMouseEnter={() => setHoveredItem("newDrawing")}
+        onMouseLeave={() => setHoveredItem(null)}
+      >
+        <span style={styles.menuItemIcon}>&#x1F4D0;</span>
+        <span>New Drawing</span>
       </button>
       <button
         style={{
@@ -590,6 +608,7 @@ function AddMenu({ onClose, onNewPartStudio, onUploadFile, onOpenLibrary }: AddM
 
 interface TabBarProps {
   onNewPartStudio?: () => void;
+  onNewDrawing?: () => void;
   onUploadFile?: () => void;
   onOpenLibrary?: () => void;
   // Legacy props for backwards compatibility
@@ -599,6 +618,7 @@ interface TabBarProps {
 
 export function TabBar({
   onNewPartStudio,
+  onNewDrawing,
   onUploadFile,
   onOpenLibrary,
   onNewCadDocument,
@@ -692,6 +712,7 @@ export function TabBar({
           <AddMenu
             onClose={() => setShowAddMenu(false)}
             onNewPartStudio={handleNewPartStudio}
+            onNewDrawing={onNewDrawing || (() => {})}
             onUploadFile={handleUploadFile}
             onOpenLibrary={onOpenLibrary || (() => {})}
           />

@@ -7,6 +7,7 @@ import {
   useTabsStore,
   type TabDocument,
   type CadDocument,
+  type DrawingDocument,
   type ImageDocument,
   type RawDocument,
   type TextDocument,
@@ -24,6 +25,7 @@ import { MarkdownViewer } from "./MarkdownViewer";
 import { VideoViewer } from "./VideoViewer";
 import { AudioViewer } from "./AudioViewer";
 import { Model3dViewer } from "./Model3dViewer";
+import { DrawingEditor } from "./drawing";
 
 // ============================================================================
 // Styles
@@ -203,6 +205,13 @@ export function DocumentContainer({
               onOpenFile={onOpenFile}
             />
           )}
+        </div>
+      );
+
+    case "drawing":
+      return (
+        <div style={styles.container}>
+          <DrawingEditor />
         </div>
       );
 

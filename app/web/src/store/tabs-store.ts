@@ -9,7 +9,7 @@ import { persist } from "zustand/middleware";
 // Types
 // ============================================================================
 
-export type DocumentType = "cad" | "image" | "raw" | "text" | "pdf" | "markdown" | "video" | "audio" | "model3d";
+export type DocumentType = "cad" | "drawing" | "image" | "raw" | "text" | "pdf" | "markdown" | "video" | "audio" | "model3d";
 
 interface DocumentBase {
   id: string;
@@ -90,8 +90,17 @@ export interface Model3dDocument extends DocumentBase {
   originalFilename: string;
 }
 
+export interface DrawingDocument extends DocumentBase {
+  type: "drawing";
+  // Reference to the drawing in drawing-store
+  drawingId: string;
+  // Relative paths to source .vibecad files (for reference)
+  sourcePaths: string[];
+}
+
 export type TabDocument =
   | CadDocument
+  | DrawingDocument
   | ImageDocument
   | RawDocument
   | TextDocument
@@ -241,7 +250,7 @@ export const useTabsStore = create<TabsState>()(
             src: t.type === "image" ? undefined : undefined,
             data: t.type === "raw" ? undefined : undefined,
           };
-        }).filter((t) => t.type === "cad"), // Only persist CAD tabs
+        }).filter((t) => t.type === "cad" || t.type === "drawing"), // Only persist CAD and Drawing tabs
         activeTabId: state.activeTabId,
       }),
     }
@@ -262,6 +271,20 @@ export function createCadTab(name: string, cadDocumentId: string): CadDocument {
     type: "cad",
     cadDocumentId,
     icon: "cube",
+  };
+}
+
+/**
+ * Create a new Drawing document tab
+ */
+export function createDrawingTab(name: string, drawingId: string, sourcePaths: string[] = []): DrawingDocument {
+  return {
+    id: generateTabId(),
+    name,
+    type: "drawing",
+    drawingId,
+    sourcePaths,
+    icon: "drawing",
   };
 }
 

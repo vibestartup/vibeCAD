@@ -4,6 +4,7 @@ import { AppLayout } from "./layouts/AppLayout";
 import {
   useTabsStore,
   createCadTab,
+  createDrawingTab,
   createImageTabFromFile,
   createRawTabFromFile,
   createTextTabFromFile,
@@ -22,10 +23,12 @@ import {
   type Model3dDocument,
   type RawDocument,
   type CadDocument,
+  type DrawingDocument,
 } from "./store/tabs-store";
 import { useCadStore } from "./store/cad-store";
+import { useDrawingStore } from "./store/drawing-store";
 import { useDocumentViewStore } from "./store/document-view-store";
-import { createPartStudioWithCube } from "@vibecad/core";
+import { createPartStudioWithCube, createDrawing } from "@vibecad/core";
 import type { TabDefinition } from "./components/TabbedSidebar";
 
 // Import viewers
@@ -46,6 +49,7 @@ import { MyLibrary } from "./components/MyLibrary";
 import { OpTimelineContent } from "./components/OpTimeline";
 import { PropertiesContent, ParametersContent, RenderContent } from "./components/PropertiesPanel";
 import { ImageEditorSidebar } from "./components/ImageEditorSidebar";
+import { DrawingEditor } from "./components/drawing";
 import { captureThumbnail } from "./utils/viewport-capture";
 import { serializeDocument, downloadFile, useFileStore } from "./store/file-store";
 
@@ -358,6 +362,17 @@ export const App: React.FC = () => {
     openTab(tab);
   }, [setStudio, openTab, activeDocumentId, docViewStore]);
 
+  // Create new Drawing
+  const handleNewDrawing = useCallback(() => {
+    const newDrawing = createDrawing("Untitled Drawing");
+    const tab = createDrawingTab(newDrawing.name, newDrawing.id, []);
+
+    // Set drawing in drawing store
+    useDrawingStore.getState().setDrawing(newDrawing);
+
+    openTab(tab);
+  }, [openTab]);
+
   // Open file dialog
   const handleOpenFile = useCallback(async () => {
     const input = window.document.createElement("input");
@@ -583,6 +598,8 @@ export const App: React.FC = () => {
             <SketchCanvas />
           </>
         );
+      case "drawing":
+        return <DrawingEditor />;
       case "image":
         return <ImageViewer document={activeTab as ImageDocument} />;
       case "text":
@@ -673,7 +690,12 @@ export const App: React.FC = () => {
       </div>
 
       {/* Tab bar at bottom */}
-      <TabBar onNewCadDocument={handleNewCadDocument} onOpenFile={handleOpenFile} />
+      <TabBar
+        onNewPartStudio={handleNewCadDocument}
+        onNewDrawing={handleNewDrawing}
+        onUploadFile={handleOpenFile}
+        onOpenLibrary={() => setLibraryOpen(true)}
+      />
 
       {/* Modals */}
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />

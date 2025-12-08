@@ -18,6 +18,53 @@ export type AssemblyConstraintId = Id<"AssemblyConstraint">;
 export type ParamId = Id<"Param">;
 export type DocumentId = Id<"Document">;
 
+// Drawing IDs
+export type DrawingId = Id<"Drawing">;
+export type DrawingViewId = Id<"DrawingView">;
+export type DrawingDimId = Id<"DrawingDim">;
+export type DrawingAnnotationId = Id<"DrawingAnnotation">;
+
+// ============================================================================
+// EDA - Schematic IDs
+// ============================================================================
+
+export type SchematicDocId = Id<"SchematicDoc">;
+export type SymbolId = Id<"Symbol">;
+export type SymbolInstanceId = Id<"SymbolInstance">;
+export type NetId = Id<"Net">;
+export type PinId = Id<"Pin">;
+export type WireId = Id<"Wire">;
+export type BusId = Id<"Bus">;
+export type SheetId = Id<"Sheet">;
+export type PortId = Id<"Port">;
+export type NetLabelId = Id<"NetLabel">;
+export type NetClassId = Id<"NetClass">;
+export type JunctionId = Id<"Junction">;
+
+// ============================================================================
+// EDA - PCB IDs
+// ============================================================================
+
+export type PcbDocId = Id<"PcbDoc">;
+export type FootprintId = Id<"Footprint">;
+export type FootprintInstanceId = Id<"FootprintInstance">;
+export type PadId = Id<"Pad">;
+export type TraceId = Id<"Trace">;
+export type ViaId = Id<"Via">;
+export type CopperPourId = Id<"CopperPour">;
+export type LayerId = Id<"Layer">;
+export type DrillId = Id<"Drill">;
+export type ZoneId = Id<"Zone">;
+export type KeepoutId = Id<"Keepout">;
+
+// ============================================================================
+// EDA - Component Library IDs
+// ============================================================================
+
+export type ComponentId = Id<"Component">;
+export type ComponentLibraryId = Id<"ComponentLibrary">;
+export type Model3dRefId = Id<"Model3dRef">;
+
 let idCounter = 0;
 
 /**
