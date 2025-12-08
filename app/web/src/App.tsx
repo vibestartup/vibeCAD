@@ -7,6 +7,12 @@ import {
   createCadTab,
   createImageTabFromFile,
   createRawTabFromFile,
+  createTextTabFromFile,
+  createPdfTabFromFile,
+  createMarkdownTabFromFile,
+  createVideoTabFromFile,
+  createAudioTabFromFile,
+  createModel3dTabFromFile,
   getDocumentTypeFromFile,
   type CadDocument,
 } from "./store/tabs-store";
@@ -66,7 +72,27 @@ export const App: React.FC = () => {
     const input = window.document.createElement("input");
     input.type = "file";
     input.multiple = true;
-    input.accept = ".vibecad.json,.json,.png,.jpg,.jpeg,.gif,.webp,.svg,.step,.stp,.iges,.igs,*";
+    // Accept all common file types for the various viewers
+    input.accept = [
+      // CAD files
+      ".vibecad,.vibecad.json",
+      // Images
+      ".png,.jpg,.jpeg,.gif,.webp,.svg,.bmp",
+      // Text/Code
+      ".txt,.js,.jsx,.ts,.tsx,.json,.xml,.html,.htm,.css,.scss,.less,.py,.rb,.rs,.go,.java,.c,.cpp,.h,.hpp,.cs,.php,.sh,.yaml,.yml,.toml,.ini,.conf,.sql,.graphql,.gql,.svelte,.vue",
+      // PDF
+      ".pdf",
+      // Markdown
+      ".md,.markdown,.mdown,.mkd",
+      // Video
+      ".mp4,.webm,.ogg,.ogv,.mov,.avi,.mkv",
+      // Audio
+      ".mp3,.wav,.ogg,.oga,.aac,.flac,.m4a",
+      // 3D Models
+      ".stl,.obj,.gltf,.glb",
+      // Fallback
+      "*",
+    ].join(",");
 
     input.onchange = async (e) => {
       const files = (e.target as HTMLInputElement).files;
@@ -76,22 +102,60 @@ export const App: React.FC = () => {
         const docType = getDocumentTypeFromFile(file);
 
         try {
-          if (docType === "cad") {
-            // Load CAD file as PartStudio
-            const text = await file.text();
-            const data = JSON.parse(text);
-            // TODO: Use deserializePartStudio from file-store for proper loading
-            // For now, create a new studio with the file name
-            const newStudio = createPartStudioWithCube(file.name.replace(/\.vibecad\.json$/, "").replace(/\.json$/, "").replace(/\.vibecad$/, ""));
-            setStudio(newStudio);
-            const tab = createCadTab(newStudio.name, newStudio.id);
-            openTab(tab);
-          } else if (docType === "image") {
-            const tab = await createImageTabFromFile(file);
-            openTab(tab);
-          } else {
-            const tab = await createRawTabFromFile(file);
-            openTab(tab);
+          switch (docType) {
+            case "cad": {
+              // Load CAD file as PartStudio
+              const text = await file.text();
+              const data = JSON.parse(text);
+              // TODO: Use deserializePartStudio from file-store for proper loading
+              // For now, create a new studio with the file name
+              const newStudio = createPartStudioWithCube(file.name.replace(/\.vibecad\.json$/, "").replace(/\.json$/, "").replace(/\.vibecad$/, ""));
+              setStudio(newStudio);
+              const tab = createCadTab(newStudio.name, newStudio.id);
+              openTab(tab);
+              break;
+            }
+            case "image": {
+              const tab = await createImageTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "text": {
+              const tab = await createTextTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "pdf": {
+              const tab = await createPdfTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "markdown": {
+              const tab = await createMarkdownTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "video": {
+              const tab = await createVideoTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "audio": {
+              const tab = await createAudioTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "model3d": {
+              const tab = await createModel3dTabFromFile(file);
+              openTab(tab);
+              break;
+            }
+            case "raw":
+            default: {
+              const tab = await createRawTabFromFile(file);
+              openTab(tab);
+              break;
+            }
           }
         } catch (err) {
           console.error("Failed to open file:", file.name, err);

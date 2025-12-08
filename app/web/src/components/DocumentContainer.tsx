@@ -3,9 +3,27 @@
  */
 
 import React from "react";
-import { useTabsStore, type TabDocument, type CadDocument, type ImageDocument, type RawDocument } from "../store/tabs-store";
+import {
+  useTabsStore,
+  type TabDocument,
+  type CadDocument,
+  type ImageDocument,
+  type RawDocument,
+  type TextDocument,
+  type PdfDocument,
+  type MarkdownDocument,
+  type VideoDocument,
+  type AudioDocument,
+  type Model3dDocument,
+} from "../store/tabs-store";
 import { ImageViewer } from "./ImageViewer";
 import { RawFileViewer } from "./RawFileViewer";
+import { TextViewer } from "./TextViewer";
+import { PdfViewer } from "./PdfViewer";
+import { MarkdownViewer } from "./MarkdownViewer";
+import { VideoViewer } from "./VideoViewer";
+import { AudioViewer } from "./AudioViewer";
+import { Model3dViewer } from "./Model3dViewer";
 
 // ============================================================================
 // Styles
@@ -192,6 +210,48 @@ export function DocumentContainer({
       return (
         <div style={styles.container}>
           <ImageViewer document={activeTab as ImageDocument} />
+        </div>
+      );
+
+    case "text":
+      return (
+        <div style={styles.container}>
+          <TextViewer document={activeTab as TextDocument} />
+        </div>
+      );
+
+    case "pdf":
+      return (
+        <div style={styles.container}>
+          <PdfViewer document={activeTab as PdfDocument} />
+        </div>
+      );
+
+    case "markdown":
+      return (
+        <div style={styles.container}>
+          <MarkdownViewer document={activeTab as MarkdownDocument} />
+        </div>
+      );
+
+    case "video":
+      return (
+        <div style={styles.container}>
+          <VideoViewer document={activeTab as VideoDocument} />
+        </div>
+      );
+
+    case "audio":
+      return (
+        <div style={styles.container}>
+          <AudioViewer document={activeTab as AudioDocument} />
+        </div>
+      );
+
+    case "model3d":
+      return (
+        <div style={styles.container}>
+          <Model3dViewer document={activeTab as Model3dDocument} />
         </div>
       );
 
