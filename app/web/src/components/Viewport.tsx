@@ -20,7 +20,7 @@ import {
   getPointPosition,
   getReferencedPoints,
 } from "@vibecad/core";
-import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, Vec2, Vec3, PrimitiveId } from "@vibecad/core";
+import type { Sketch, SketchPlane, SketchPlaneId, SketchOp, RevolveOp, Vec2, Vec3, PrimitiveId } from "@vibecad/core";
 import {
   calculateGridSpacing as calcGridSpacing,
   formatTickLabel as formatTick,
@@ -397,6 +397,56 @@ function getPlaneById(planeId: SketchPlaneId, customPlanes?: Map<SketchPlaneId, 
   return DATUM_XY;
 }
 
+/**
+ * Profile represents an extrudable region in a sketch.
+ * Profiles are assigned stable indices based on extraction order:
+ *   - Index 0..N-1: rect primitives (in iteration order)
+ *   - Index N..N+M-1: circle primitives (in iteration order)
+ *   - Index N+M..end: edge-based loops from findClosedLoops
+ */
+interface SketchProfile {
+  index: number;
+  type: "rect" | "circle" | "loop";
+  primitiveId?: PrimitiveId; // For rect/circle
+  loop?: ReturnType<typeof sketchUtils.findClosedLoops>[number]; // For edge-based loops
+}
+
+/**
+ * Extract all extrudable profiles from a sketch with consistent indices.
+ * This provides a unified indexing scheme for profile selection.
+ */
+function getSketchProfiles(sketch: Sketch): SketchProfile[] {
+  const profiles: SketchProfile[] = [];
+  let idx = 0;
+
+  // 1. Rect primitives (first)
+  for (const [primId, prim] of sketch.primitives) {
+    if (prim.type === "rect" && !prim.construction) {
+      profiles.push({ index: idx++, type: "rect", primitiveId: primId });
+    }
+  }
+
+  // 2. Circle primitives (second)
+  for (const [primId, prim] of sketch.primitives) {
+    if (prim.type === "circle" && !prim.construction) {
+      profiles.push({ index: idx++, type: "circle", primitiveId: primId });
+    }
+  }
+
+  // 3. Edge-based loops (last)
+  const loops = sketchUtils.findClosedLoops(sketch);
+  for (const loop of loops) {
+    // Skip circle loops (already handled above)
+    if (loop.primitiveIds.length === 1) {
+      const prim = sketch.primitives.get(loop.primitiveIds[0]);
+      if (prim?.type === "circle") continue;
+    }
+    profiles.push({ index: idx++, type: "loop", loop });
+  }
+
+  return profiles;
+}
+
 // Convert sketch 2D point to 3D world coordinates using plane
 function sketchPointTo3D(point: Vec2, plane: SketchPlane): THREE.Vector3 {
   const world = sketchUtils.sketchToWorld(point, plane);
@@ -517,6 +567,22 @@ function createSketchLines(
         const line = new THREE.Line(geometry, lineMaterial);
         group.add(line);
       }
+    } else if (prim.type === "rect") {
+      // Draw rect outline
+      const c1 = getPointPos(prim.corner1);
+      const c2 = getPointPos(prim.corner2);
+      if (c1 && c2) {
+        const corners = [
+          sketchPointTo3D([c1[0], c1[1]], plane),
+          sketchPointTo3D([c2[0], c1[1]], plane),
+          sketchPointTo3D([c2[0], c2[1]], plane),
+          sketchPointTo3D([c1[0], c2[1]], plane),
+          sketchPointTo3D([c1[0], c1[1]], plane), // close the loop
+        ];
+        const geometry = new THREE.BufferGeometry().setFromPoints(corners);
+        const line = new THREE.Line(geometry, lineMaterial);
+        group.add(line);
+      }
     } else if (prim.type === "circle") {
       const centerPos = getPointPos(prim.center);
       if (centerPos) {
@@ -533,42 +599,7 @@ function createSketchLines(
         const line = new THREE.Line(geometry, lineMaterial);
         group.add(line);
 
-        // Add filled circle mesh using proper 3D transformation
-        const fillSegments = 32;
-        const centerPoint3D = sketchPointTo3D(centerPos, plane);
-        const circlePoints3D: THREE.Vector3[] = [];
-
-        for (let i = 0; i < fillSegments; i++) {
-          const angle = (i / fillSegments) * Math.PI * 2;
-          const x = centerPos[0] + Math.cos(angle) * prim.radius;
-          const y = centerPos[1] + Math.sin(angle) * prim.radius;
-          circlePoints3D.push(sketchPointTo3D([x, y], plane));
-        }
-
-        // Create triangulated geometry with center point
-        const vertices: number[] = [];
-        const indices: number[] = [];
-
-        // Add center point first
-        vertices.push(centerPoint3D.x, centerPoint3D.y, centerPoint3D.z);
-
-        // Add circle perimeter points
-        for (const p of circlePoints3D) {
-          vertices.push(p.x, p.y, p.z);
-        }
-
-        // Create triangle fan from center
-        for (let i = 0; i < fillSegments; i++) {
-          indices.push(0, i + 1, ((i + 1) % fillSegments) + 1);
-        }
-
-        const fillGeometry = new THREE.BufferGeometry();
-        fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-        fillGeometry.setIndex(indices);
-        fillGeometry.computeVertexNormals();
-
-        const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
-        group.add(fillMesh);
+        // Note: filled circle meshes are created below with profile indexing
       }
     } else if (prim.type === "arc") {
       const centerPos = getPointPos(prim.center);
@@ -619,42 +650,103 @@ function createSketchLines(
     }
   }
 
-  // Find and fill closed loops from line segments
-  if (lineSegments.length >= 3) {
-    const loops = findClosedLoops(lineSegments);
-    for (let loopIndex = 0; loopIndex < loops.length; loopIndex++) {
-      const loop = loops[loopIndex];
-      if (loop.length < 3) continue;
+  // Create filled meshes for all profiles using unified indexing
+  // This ensures loopIndex matches getSketchProfiles() for correct selection
+  const profiles = getSketchProfiles(sketch);
 
-      // Transform all loop points to 3D using the same method as lines
-      const points3D: THREE.Vector3[] = loop.map(p => sketchPointTo3D(p, plane));
+  for (const profile of profiles) {
+    let fillMesh: THREE.Mesh | null = null;
 
-      // Create triangulated geometry from the 3D polygon
-      // Use earcut-style fan triangulation from first vertex
-      const vertices: number[] = [];
-      const indices: number[] = [];
-
-      // Add all vertices
-      for (const p of points3D) {
-        vertices.push(p.x, p.y, p.z);
+    if (profile.type === "rect" && profile.primitiveId) {
+      // Create filled rect mesh
+      const prim = sketch.primitives.get(profile.primitiveId);
+      if (prim?.type === "rect") {
+        const c1 = getPointPos(prim.corner1);
+        const c2 = getPointPos(prim.corner2);
+        if (c1 && c2) {
+          const corners = [
+            sketchPointTo3D([c1[0], c1[1]], plane),
+            sketchPointTo3D([c2[0], c1[1]], plane),
+            sketchPointTo3D([c2[0], c2[1]], plane),
+            sketchPointTo3D([c1[0], c2[1]], plane),
+          ];
+          const vertices: number[] = [];
+          const indices: number[] = [];
+          for (const p of corners) {
+            vertices.push(p.x, p.y, p.z);
+          }
+          indices.push(0, 1, 2, 0, 2, 3);
+          const fillGeometry = new THREE.BufferGeometry();
+          fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+          fillGeometry.setIndex(indices);
+          fillGeometry.computeVertexNormals();
+          fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
+        }
       }
-
-      // Create triangle fan from first vertex
-      for (let i = 1; i < points3D.length - 1; i++) {
-        indices.push(0, i, i + 1);
+    } else if (profile.type === "circle" && profile.primitiveId) {
+      // Create filled circle mesh
+      const prim = sketch.primitives.get(profile.primitiveId);
+      if (prim?.type === "circle") {
+        const centerPos = getPointPos(prim.center);
+        if (centerPos) {
+          const fillSegments = 32;
+          const centerPoint3D = sketchPointTo3D(centerPos, plane);
+          const circlePoints3D: THREE.Vector3[] = [];
+          for (let i = 0; i < fillSegments; i++) {
+            const angle = (i / fillSegments) * Math.PI * 2;
+            const x = centerPos[0] + Math.cos(angle) * prim.radius;
+            const y = centerPos[1] + Math.sin(angle) * prim.radius;
+            circlePoints3D.push(sketchPointTo3D([x, y], plane));
+          }
+          const vertices: number[] = [];
+          const indices: number[] = [];
+          vertices.push(centerPoint3D.x, centerPoint3D.y, centerPoint3D.z);
+          for (const p of circlePoints3D) {
+            vertices.push(p.x, p.y, p.z);
+          }
+          for (let i = 0; i < fillSegments; i++) {
+            indices.push(0, i + 1, ((i + 1) % fillSegments) + 1);
+          }
+          const fillGeometry = new THREE.BufferGeometry();
+          fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+          fillGeometry.setIndex(indices);
+          fillGeometry.computeVertexNormals();
+          fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
+        }
       }
+    } else if (profile.type === "loop" && profile.loop) {
+      // Create filled mesh from edge-based loop
+      const loop = profile.loop;
+      if (loop.pointIds.length >= 3) {
+        const points3D: THREE.Vector3[] = [];
+        for (const pointId of loop.pointIds) {
+          const pos = getPointPos(pointId);
+          if (pos) {
+            points3D.push(sketchPointTo3D(pos, plane));
+          }
+        }
+        if (points3D.length >= 3) {
+          const vertices: number[] = [];
+          const indices: number[] = [];
+          for (const p of points3D) {
+            vertices.push(p.x, p.y, p.z);
+          }
+          for (let i = 1; i < points3D.length - 1; i++) {
+            indices.push(0, i, i + 1);
+          }
+          const fillGeometry = new THREE.BufferGeometry();
+          fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+          fillGeometry.setIndex(indices);
+          fillGeometry.computeVertexNormals();
+          fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
+        }
+      }
+    }
 
-      const fillGeometry = new THREE.BufferGeometry();
-      fillGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-      fillGeometry.setIndex(indices);
-      fillGeometry.computeVertexNormals();
-
-      const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial.clone());
-
-      // Tag mesh with loop index for hit detection
+    if (fillMesh) {
+      // Tag mesh with profile index for hit detection (loopIndex = profile.index)
       fillMesh.userData.isSketchLoop = true;
-      fillMesh.userData.loopIndex = loopIndex;
-
+      fillMesh.userData.loopIndex = profile.index;
       group.add(fillMesh);
     }
   }
@@ -1212,133 +1304,111 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
             return sketchUtils.sketchToWorld(pos2d, plane);
           };
 
-          // Build wires for each extrudable shape
+          // Build wires for each extrudable shape using unified profile indexing
           const wires: number[] = [];
           const wiresCreated: number[] = [];
 
-          // Log all primitives
-          console.log("[Extrude] Primitives in sketch:");
-          for (const [primId, prim] of sketch.primitives) {
-            console.log(`  - ${primId}: ${prim.type}`, prim);
-          }
+          // Get all profiles with consistent indices
+          const allProfiles = getSketchProfiles(sketch);
+          console.log("[Extrude] All profiles:", allProfiles.length, allProfiles.map(p => ({ index: p.index, type: p.type })));
 
-          // First, handle rect primitives directly (they're not detected by loop detection)
-          for (const [primId, prim] of sketch.primitives) {
-            if (prim.type === "rect" && !prim.construction) {
-              console.log("[Extrude] Found rect primitive:", primId);
-              const c1 = getPos2D(prim.corner1);
-              const c2 = getPos2D(prim.corner2);
-              console.log("[Extrude] Rect corners:", c1, c2);
-              if (!c1 || !c2) continue;
+          // Filter to selected profiles (if profileIndices specified, otherwise all)
+          const selectedIndices = op.profile.profileIndices;
+          const profilesToExtrude = selectedIndices !== undefined
+            ? allProfiles.filter(p => selectedIndices.includes(p.index))
+            : allProfiles;
 
-              // Create 4 corners of the rectangle
-              const corners: Vec3[] = [
-                toWorld([c1[0], c1[1]]),
-                toWorld([c2[0], c1[1]]),
-                toWorld([c2[0], c2[1]]),
-                toWorld([c1[0], c2[1]]),
-              ];
-              console.log("[Extrude] Rect world corners:", corners);
+          console.log("[Extrude] profileIndices:", selectedIndices, "extruding profiles:", profilesToExtrude.map(p => p.index));
 
-              try {
-                const wire = occApi.makePolygon(corners);
-                console.log("[Extrude] Created rect wire:", wire);
-                wires.push(wire);
-                wiresCreated.push(wire);
-              } catch (err) {
-                console.error("[Extrude] Failed to create rect wire:", err);
-              }
-            }
-          }
+          // Create wires for selected profiles
+          for (const profile of profilesToExtrude) {
+            try {
+              if (profile.type === "rect" && profile.primitiveId) {
+                const prim = sketch.primitives.get(profile.primitiveId);
+                if (prim?.type === "rect") {
+                  const c1 = getPos2D(prim.corner1);
+                  const c2 = getPos2D(prim.corner2);
+                  if (!c1 || !c2) continue;
 
-          // Next, handle circles directly
-          for (const [primId, prim] of sketch.primitives) {
-            if (prim.type === "circle" && !prim.construction) {
-              console.log("[Extrude] Found circle primitive:", primId);
-              const centerPos = getPos2D(prim.center);
-              console.log("[Extrude] Circle center:", centerPos);
-              if (!centerPos) continue;
-
-              const centerWorld = toWorld(centerPos);
-              console.log("[Extrude] Circle world center:", centerWorld, "radius:", prim.radius);
-              try {
-                const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
-                console.log("[Extrude] Created circle wire:", wire);
-                wires.push(wire);
-                wiresCreated.push(wire);
-              } catch (err) {
-                console.error("[Extrude] Failed to create circle wire:", err);
-              }
-            }
-          }
-
-          // Use loop detection for edges (lines, arcs)
-          const loops = sketchUtils.findClosedLoops(sketch);
-          console.log("[Extrude] Found loops:", loops.length, loops);
-
-          // Filter to only loops that are made of edges (not circles, which we already handled)
-          for (const loop of loops) {
-            // Skip if this is a circle loop (already handled above)
-            if (loop.primitiveIds.length === 1) {
-              const prim = sketch.primitives.get(loop.primitiveIds[0]);
-              if (prim?.type === "circle") continue;
-            }
-
-            // For loops made of multiple edges (lines, arcs)
-            const edges: number[] = [];
-
-            for (const primId of loop.primitiveIds) {
-              const prim = sketch.primitives.get(primId);
-              if (!prim) continue;
-
-              if (prim.type === "line") {
-                const startPos = getPos2D(prim.start);
-                const endPos = getPos2D(prim.end);
-                if (!startPos || !endPos) continue;
-
-                const startWorld = toWorld(startPos);
-                const endWorld = toWorld(endPos);
-                const edge = occApi.makeLineEdge(startWorld, endWorld);
-                edges.push(edge);
-              } else if (prim.type === "arc") {
-                const centerPos = getPos2D(prim.center);
-                const startPos = getPos2D(prim.start);
-                const endPos = getPos2D(prim.end);
-                if (!centerPos || !startPos || !endPos) continue;
-
-                const centerWorld = toWorld(centerPos);
-                const startWorld = toWorld(startPos);
-                const endWorld = toWorld(endPos);
-                const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
-                edges.push(edge);
-              }
-            }
-
-            if (edges.length === 0) {
-              // Fallback: if we have point IDs, create polygon from points
-              if (loop.pointIds.length >= 3) {
-                const worldPoints: Vec3[] = [];
-                for (const pointId of loop.pointIds) {
-                  const pos2d = getPos2D(pointId);
-                  if (pos2d) {
-                    worldPoints.push(toWorld(pos2d));
-                  }
-                }
-                if (worldPoints.length >= 3) {
-                  const wire = occApi.makePolygon(worldPoints);
+                  const corners: Vec3[] = [
+                    toWorld([c1[0], c1[1]]),
+                    toWorld([c2[0], c1[1]]),
+                    toWorld([c2[0], c2[1]]),
+                    toWorld([c1[0], c2[1]]),
+                  ];
+                  const wire = occApi.makePolygon(corners);
                   wires.push(wire);
                   wiresCreated.push(wire);
                 }
+              } else if (profile.type === "circle" && profile.primitiveId) {
+                const prim = sketch.primitives.get(profile.primitiveId);
+                if (prim?.type === "circle") {
+                  const centerPos = getPos2D(prim.center);
+                  if (!centerPos) continue;
+
+                  const centerWorld = toWorld(centerPos);
+                  const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
+                  wires.push(wire);
+                  wiresCreated.push(wire);
+                }
+              } else if (profile.type === "loop" && profile.loop) {
+                const loop = profile.loop;
+                const edges: number[] = [];
+
+                for (const primId of loop.primitiveIds) {
+                  const prim = sketch.primitives.get(primId);
+                  if (!prim) continue;
+
+                  if (prim.type === "line") {
+                    const startPos = getPos2D(prim.start);
+                    const endPos = getPos2D(prim.end);
+                    if (!startPos || !endPos) continue;
+
+                    const startWorld = toWorld(startPos);
+                    const endWorld = toWorld(endPos);
+                    const edge = occApi.makeLineEdge(startWorld, endWorld);
+                    edges.push(edge);
+                  } else if (prim.type === "arc") {
+                    const centerPos = getPos2D(prim.center);
+                    const startPos = getPos2D(prim.start);
+                    const endPos = getPos2D(prim.end);
+                    if (!centerPos || !startPos || !endPos) continue;
+
+                    const centerWorld = toWorld(centerPos);
+                    const startWorld = toWorld(startPos);
+                    const endWorld = toWorld(endPos);
+                    const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
+                    edges.push(edge);
+                  }
+                }
+
+                if (edges.length === 0) {
+                  // Fallback: create polygon from points
+                  if (loop.pointIds.length >= 3) {
+                    const worldPoints: Vec3[] = [];
+                    for (const pointId of loop.pointIds) {
+                      const pos2d = getPos2D(pointId);
+                      if (pos2d) {
+                        worldPoints.push(toWorld(pos2d));
+                      }
+                    }
+                    if (worldPoints.length >= 3) {
+                      const wire = occApi.makePolygon(worldPoints);
+                      wires.push(wire);
+                      wiresCreated.push(wire);
+                    }
+                  }
+                } else {
+                  const wire = occApi.makeWire(edges);
+                  wires.push(wire);
+                  wiresCreated.push(wire);
+                  for (const edge of edges) {
+                    occApi.freeShape(edge);
+                  }
+                }
               }
-            } else {
-              // Create wire from edges
-              const wire = occApi.makeWire(edges);
-              wires.push(wire);
-              wiresCreated.push(wire);
-              // Free individual edges
-              for (const edge of edges) {
-                occApi.freeShape(edge);
-              }
+            } catch (err) {
+              console.error("[Extrude] Failed to create wire for profile:", profile.index, err);
             }
           }
 
@@ -1406,6 +1476,253 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
           mesh.userData.opType = op.type;
           mesh.userData.isBody = true;
           // Store face groups for proper face selection (maps OCC face index to triangle range)
+          mesh.userData.faceGroups = meshData.faceGroups;
+
+          // Add edges
+          const edges = createEdges(mesh.geometry);
+          edges.userData.opId = opId;
+
+          meshGroup.add(mesh);
+          meshGroup.add(edges);
+        }
+
+        // Handle revolve operations
+        else if (op.type === "revolve") {
+          console.log("[Revolve] Processing revolve op:", op.name, op);
+          const revolveOp = op as RevolveOp;
+
+          // Only handle sketch profiles for now
+          if (revolveOp.profile.type !== "sketch") {
+            console.log("[Revolve] Skipping - profile type is not sketch:", revolveOp.profile.type);
+            continue;
+          }
+
+          const revolveSketchId = revolveOp.profile.sketchId;
+          const sketch = studio.sketches.get(revolveSketchId);
+          if (!sketch) {
+            console.log("[Revolve] Skipping - sketch not found:", revolveSketchId);
+            continue;
+          }
+          console.log("[Revolve] Found sketch:", sketch.name, "primitives:", sketch.primitives.size);
+
+          // Check if the source sketch operation is suppressed
+          const sketchOpNode = Array.from(studio.opGraph.values()).find(
+            (node) => node.op.type === "sketch" && (node.op as SketchOp).sketchId === revolveSketchId
+          );
+          if (sketchOpNode?.op.suppressed) continue;
+
+          // Get the plane for this sketch
+          const plane = getPlaneById(sketch.planeId, studio.planes);
+          if (!plane) continue;
+
+          // Calculate plane normal: cross(axisX, axisY)
+          const nx = plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1];
+          const ny = plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2];
+          const nz = plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0];
+          const planeNormal: [number, number, number] = [nx, ny, nz];
+
+          // Get revolve axis
+          let axisOrigin: Vec3;
+          let axisDir: Vec3;
+          if ("origin" in revolveOp.axis && "direction" in revolveOp.axis) {
+            // Explicit axis
+            axisOrigin = revolveOp.axis.origin;
+            axisDir = revolveOp.axis.direction;
+          } else {
+            // TopoRef - not supported yet
+            console.log("[Revolve] TopoRef axis not supported yet");
+            continue;
+          }
+
+          // Get angle in radians
+          const angleRad = revolveOp.angle.value;
+          console.log("[Revolve] Axis origin:", axisOrigin, "direction:", axisDir, "angle:", angleRad);
+
+          // Helper to get point position in 2D
+          const getPos2D = (pointId: PrimitiveId): Vec2 | null => {
+            const pos = getPointPosition(sketch, pointId);
+            return pos || null;
+          };
+
+          // Helper to transform 2D to 3D world coordinates
+          const toWorld = (pos2d: Vec2): Vec3 => {
+            return sketchUtils.sketchToWorld(pos2d, plane);
+          };
+
+          // Build wires for each shape (same logic as extrude)
+          const wires: number[] = [];
+          const wiresCreated: number[] = [];
+
+          // Handle rect primitives directly
+          for (const [primId, prim] of sketch.primitives) {
+            if (prim.type === "rect" && !prim.construction) {
+              console.log("[Revolve] Found rect primitive:", primId);
+              const c1 = getPos2D(prim.corner1);
+              const c2 = getPos2D(prim.corner2);
+              if (!c1 || !c2) continue;
+
+              const corners: Vec3[] = [
+                toWorld([c1[0], c1[1]]),
+                toWorld([c2[0], c1[1]]),
+                toWorld([c2[0], c2[1]]),
+                toWorld([c1[0], c2[1]]),
+              ];
+
+              try {
+                const wire = occApi.makePolygon(corners);
+                wires.push(wire);
+                wiresCreated.push(wire);
+              } catch (err) {
+                console.error("[Revolve] Failed to create rect wire:", err);
+              }
+            }
+          }
+
+          // Handle circles directly
+          for (const [primId, prim] of sketch.primitives) {
+            if (prim.type === "circle" && !prim.construction) {
+              console.log("[Revolve] Found circle primitive:", primId);
+              const centerPos = getPos2D(prim.center);
+              if (!centerPos) continue;
+
+              const centerWorld = toWorld(centerPos);
+              try {
+                const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
+                wires.push(wire);
+                wiresCreated.push(wire);
+              } catch (err) {
+                console.error("[Revolve] Failed to create circle wire:", err);
+              }
+            }
+          }
+
+          // Use loop detection for edges (lines, arcs)
+          const loops = sketchUtils.findClosedLoops(sketch);
+          console.log("[Revolve] Found loops:", loops.length, loops);
+
+          for (const loop of loops) {
+            // Skip if this is a circle loop (already handled above)
+            if (loop.primitiveIds.length === 1) {
+              const prim = sketch.primitives.get(loop.primitiveIds[0]);
+              if (prim?.type === "circle") continue;
+            }
+
+            const edges: number[] = [];
+
+            for (const primId of loop.primitiveIds) {
+              const prim = sketch.primitives.get(primId);
+              if (!prim) continue;
+
+              if (prim.type === "line") {
+                const startPos = getPos2D(prim.start);
+                const endPos = getPos2D(prim.end);
+                if (!startPos || !endPos) continue;
+
+                const startWorld = toWorld(startPos);
+                const endWorld = toWorld(endPos);
+                const edge = occApi.makeLineEdge(startWorld, endWorld);
+                edges.push(edge);
+              } else if (prim.type === "arc") {
+                const centerPos = getPos2D(prim.center);
+                const startPos = getPos2D(prim.start);
+                const endPos = getPos2D(prim.end);
+                if (!centerPos || !startPos || !endPos) continue;
+
+                const centerWorld = toWorld(centerPos);
+                const startWorld = toWorld(startPos);
+                const endWorld = toWorld(endPos);
+                const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
+                edges.push(edge);
+              }
+            }
+
+            if (edges.length === 0) {
+              // Fallback: create polygon from points
+              if (loop.pointIds.length >= 3) {
+                const worldPoints: Vec3[] = [];
+                for (const pointId of loop.pointIds) {
+                  const pos2d = getPos2D(pointId);
+                  if (pos2d) {
+                    worldPoints.push(toWorld(pos2d));
+                  }
+                }
+                if (worldPoints.length >= 3) {
+                  const wire = occApi.makePolygon(worldPoints);
+                  wires.push(wire);
+                  wiresCreated.push(wire);
+                }
+              }
+            } else {
+              const wire = occApi.makeWire(edges);
+              wires.push(wire);
+              wiresCreated.push(wire);
+              for (const edge of edges) {
+                occApi.freeShape(edge);
+              }
+            }
+          }
+
+          console.log("[Revolve] Total wires created:", wires.length);
+          if (wires.length === 0) {
+            console.log("[Revolve] No wires - skipping revolve");
+            continue;
+          }
+
+          // Create faces from wires and revolve
+          let resultSolid: number | null = null;
+          const shapesToFree: number[] = [];
+
+          for (const wire of wires) {
+            try {
+              const face = occApi.makeFace(wire);
+              shapesToFree.push(face);
+
+              const solid = occApi.revolve(face, axisOrigin, axisDir, angleRad);
+
+              if (resultSolid === null) {
+                resultSolid = solid;
+              } else {
+                // Fuse multiple solids together
+                const fused: number = occApi.fuse(resultSolid, solid);
+                shapesToFree.push(resultSolid);
+                shapesToFree.push(solid);
+                resultSolid = fused;
+              }
+            } catch (err) {
+              console.error("[Revolve] Failed to revolve loop:", err);
+            }
+          }
+
+          // Free wires
+          for (const wire of wiresCreated) {
+            occApi.freeShape(wire);
+          }
+          // Free intermediate shapes (but not the final solid)
+          for (const shape of shapesToFree) {
+            occApi.freeShape(shape);
+          }
+
+          if (resultSolid === null) continue;
+
+          // Mesh the shape
+          const meshData = occApi.mesh(resultSolid, 0.5);
+
+          // Store mesh data for export
+          exportableMeshes.push({
+            positions: new Float32Array(meshData.positions),
+            normals: new Float32Array(meshData.normals),
+            indices: new Uint32Array(meshData.indices),
+            name: op.name,
+          });
+
+          // Store shape handle for STEP export
+          exportableShapeHandles.push(resultSolid);
+
+          // Create Three.js mesh
+          const mesh = createMeshFromData(meshData);
+          mesh.userData.opId = opId;
+          mesh.userData.opType = op.type;
+          mesh.userData.isBody = true;
           mesh.userData.faceGroups = meshData.faceGroups;
 
           // Add edges
@@ -2191,110 +2508,107 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         return sketchUtils.sketchToWorld(pos2d, plane);
       };
 
-      // Build wires for each extrudable shape
+      // Build wires using unified profile indexing (same as extrude execution)
       const wires: number[] = [];
       const wiresCreated: number[] = [];
 
-      // First, handle rect primitives directly (they're not detected by loop detection)
-      for (const [primId, prim] of sketch.primitives) {
-        if (prim.type === "rect" && !prim.construction) {
-          const c1 = getPos2D(prim.corner1);
-          const c2 = getPos2D(prim.corner2);
-          if (!c1 || !c2) continue;
+      // Get all profiles with consistent indices
+      const allProfiles = getSketchProfiles(sketch);
 
-          // Create 4 corners of the rectangle
-          const corners: Vec3[] = [
-            toWorld([c1[0], c1[1]]),
-            toWorld([c2[0], c1[1]]),
-            toWorld([c2[0], c2[1]]),
-            toWorld([c1[0], c2[1]]),
-          ];
+      // Filter to selected profile if loopIndex is specified
+      const selectedLoopIndex = pendingExtrude.loopIndex;
+      const profilesToPreview = selectedLoopIndex !== undefined
+        ? allProfiles.filter(p => p.index === selectedLoopIndex)
+        : allProfiles;
 
-          const wire = occApi.makePolygon(corners);
-          wires.push(wire);
-          wiresCreated.push(wire);
-        }
-      }
+      // Create wires for selected profiles
+      for (const profile of profilesToPreview) {
+        try {
+          if (profile.type === "rect" && profile.primitiveId) {
+            const prim = sketch.primitives.get(profile.primitiveId);
+            if (prim?.type === "rect") {
+              const c1 = getPos2D(prim.corner1);
+              const c2 = getPos2D(prim.corner2);
+              if (!c1 || !c2) continue;
 
-      // Next, handle circles directly
-      for (const [primId, prim] of sketch.primitives) {
-        if (prim.type === "circle" && !prim.construction) {
-          const centerPos = getPos2D(prim.center);
-          if (!centerPos) continue;
-
-          const centerWorld = toWorld(centerPos);
-          const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
-          wires.push(wire);
-          wiresCreated.push(wire);
-        }
-      }
-
-      // Use loop detection for edges (lines, arcs)
-      const loops = sketchUtils.findClosedLoops(sketch);
-
-      // Filter to only loops that are made of edges (not circles, which we already handled)
-      for (const loop of loops) {
-        // Skip if this is a circle loop (already handled above)
-        if (loop.primitiveIds.length === 1) {
-          const prim = sketch.primitives.get(loop.primitiveIds[0]);
-          if (prim?.type === "circle") continue;
-        }
-
-        // For loops made of multiple edges (lines, arcs)
-        const edges: number[] = [];
-
-        for (const primId of loop.primitiveIds) {
-          const prim = sketch.primitives.get(primId);
-          if (!prim) continue;
-
-          if (prim.type === "line") {
-            const startPos = getPos2D(prim.start);
-            const endPos = getPos2D(prim.end);
-            if (!startPos || !endPos) continue;
-
-            const startWorld = toWorld(startPos);
-            const endWorld = toWorld(endPos);
-            const edge = occApi.makeLineEdge(startWorld, endWorld);
-            edges.push(edge);
-          } else if (prim.type === "arc") {
-            const centerPos = getPos2D(prim.center);
-            const startPos = getPos2D(prim.start);
-            const endPos = getPos2D(prim.end);
-            if (!centerPos || !startPos || !endPos) continue;
-
-            const centerWorld = toWorld(centerPos);
-            const startWorld = toWorld(startPos);
-            const endWorld = toWorld(endPos);
-            const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
-            edges.push(edge);
-          }
-        }
-
-        if (edges.length === 0) {
-          // Fallback: if we have point IDs, create polygon from points
-          if (loop.pointIds.length >= 3) {
-            const worldPoints: Vec3[] = [];
-            for (const pointId of loop.pointIds) {
-              const pos2d = getPos2D(pointId);
-              if (pos2d) {
-                worldPoints.push(toWorld(pos2d));
-              }
-            }
-            if (worldPoints.length >= 3) {
-              const wire = occApi.makePolygon(worldPoints);
+              const corners: Vec3[] = [
+                toWorld([c1[0], c1[1]]),
+                toWorld([c2[0], c1[1]]),
+                toWorld([c2[0], c2[1]]),
+                toWorld([c1[0], c2[1]]),
+              ];
+              const wire = occApi.makePolygon(corners);
               wires.push(wire);
               wiresCreated.push(wire);
             }
+          } else if (profile.type === "circle" && profile.primitiveId) {
+            const prim = sketch.primitives.get(profile.primitiveId);
+            if (prim?.type === "circle") {
+              const centerPos = getPos2D(prim.center);
+              if (!centerPos) continue;
+
+              const centerWorld = toWorld(centerPos);
+              const wire = occApi.makeCircleWire(centerWorld, planeNormal, prim.radius);
+              wires.push(wire);
+              wiresCreated.push(wire);
+            }
+          } else if (profile.type === "loop" && profile.loop) {
+            const loop = profile.loop;
+            const edges: number[] = [];
+
+            for (const primId of loop.primitiveIds) {
+              const prim = sketch.primitives.get(primId);
+              if (!prim) continue;
+
+              if (prim.type === "line") {
+                const startPos = getPos2D(prim.start);
+                const endPos = getPos2D(prim.end);
+                if (!startPos || !endPos) continue;
+
+                const startWorld = toWorld(startPos);
+                const endWorld = toWorld(endPos);
+                const edge = occApi.makeLineEdge(startWorld, endWorld);
+                edges.push(edge);
+              } else if (prim.type === "arc") {
+                const centerPos = getPos2D(prim.center);
+                const startPos = getPos2D(prim.start);
+                const endPos = getPos2D(prim.end);
+                if (!centerPos || !startPos || !endPos) continue;
+
+                const centerWorld = toWorld(centerPos);
+                const startWorld = toWorld(startPos);
+                const endWorld = toWorld(endPos);
+                const edge = occApi.makeArcEdge(centerWorld, startWorld, endWorld, planeNormal);
+                edges.push(edge);
+              }
+            }
+
+            if (edges.length === 0) {
+              if (loop.pointIds.length >= 3) {
+                const worldPoints: Vec3[] = [];
+                for (const pointId of loop.pointIds) {
+                  const pos2d = getPos2D(pointId);
+                  if (pos2d) {
+                    worldPoints.push(toWorld(pos2d));
+                  }
+                }
+                if (worldPoints.length >= 3) {
+                  const wire = occApi.makePolygon(worldPoints);
+                  wires.push(wire);
+                  wiresCreated.push(wire);
+                }
+              }
+            } else {
+              const wire = occApi.makeWire(edges);
+              wires.push(wire);
+              wiresCreated.push(wire);
+              for (const edge of edges) {
+                occApi.freeShape(edge);
+              }
+            }
           }
-        } else {
-          // Create wire from edges
-          const wire = occApi.makeWire(edges);
-          wires.push(wire);
-          wiresCreated.push(wire);
-          // Free individual edges
-          for (const edge of edges) {
-            occApi.freeShape(edge);
-          }
+        } catch (err) {
+          console.error("[ExtrudePreview] Failed to create wire for profile:", profile.index, err);
         }
       }
 
