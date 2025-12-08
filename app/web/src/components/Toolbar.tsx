@@ -1150,19 +1150,15 @@ export function Toolbar({
             {/* Grid Snap Toggle */}
             <button
               style={{
-                ...styles.iconButton,
-                backgroundColor: gridSnappingEnabled ? "#4dabf7" : "#333",
-                color: gridSnappingEnabled ? "#000" : "#888",
-                padding: "4px 12px",
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 500,
-                width: "auto",
+                ...styles.toolButton,
+                backgroundColor: gridSnappingEnabled ? "#646cff" : "transparent",
+                color: gridSnappingEnabled ? "#fff" : "#aaa",
               }}
               onClick={toggleGridSnapping}
               title={`Grid Snapping: ${gridSnappingEnabled ? "ON" : "OFF"}`}
             >
-              ⊞ Snap
+              <span style={{ fontSize: 18 }}>⌗</span>
+              <span style={styles.toolLabel}>Snap</span>
             </button>
             <button
               style={{
