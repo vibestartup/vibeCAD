@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist",
+    "clean": "rimraf dist",
     "typecheck": "tsc --noEmit",
     "lint": "echo 'lint script not configured'"
   },

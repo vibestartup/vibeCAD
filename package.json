@@ -13,14 +13,16 @@
     "index-libraries": "pnpm --filter=@vibecad/server index-libraries",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "clean": "turbo run clean && rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo",
-    "clean:deep": "rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo app/web/dist && turbo run clean",
-    "clean:libraries": "rimraf libraries/kicad-symbols libraries/kicad-footprints app/libraries/kicad app/data/library-index.json",
+    "clean": "turbo run clean && del-cli .turbo node_modules/.cache app/web/node_modules/.vite \"packages/*/dist\" \"packages/*/.turbo\"",
+    "clean:deep": "del-cli .turbo node_modules/.cache app/web/node_modules/.vite \"packages/*/dist\" \"packages/*/.turbo\" app/web/dist && turbo run clean",
+    "clean:libraries": "del-cli libraries/kicad-symbols libraries/kicad-footprints app/libraries/kicad app/data/library-index.json",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
+    "del-cli": "^6.0.0",
     "playwright": "^1.57.0",
     "prettier": "^3.0.0",
+    "rimraf": "^6.0.0",
     "turbo": "^2.0.0",
     "typescript": "^5.0.0"
   },
