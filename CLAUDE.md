@@ -6,7 +6,7 @@ You are the implementation agent for **vibeCAD**, a browser-native parametric CA
 
 - **Frontend:** React 18, TypeScript 5, Zustand (state), Three.js (3D rendering)
 - **CAD Kernel:** OpenCascade.js 1.1.1 (WASM) - solid modeling
-- **Constraint Solver:** PlaneGCS via @salusoft89/planegcs (WASM) - 2D sketch constraints
+- **Constraint Solver:** PlaneGCS via @salusoft89/planegcs (WASM) - 2D sketch constraints (see Constraint Solver Strategy below)
 - **Build:** Vite 6, pnpm workspace (monorepo), Turbo
 - **Deployment:** Vercel-ready
 
@@ -52,10 +52,10 @@ You are the implementation agent for **vibeCAD**, a browser-native parametric CA
 │   │       │   ├── impl.ts         # Full OCC implementation
 │   │       │   ├── loader.ts       # WASM loader
 │   │       │   └── opencascade.d.ts
-│   │       ├── slvs/
-│   │       │   ├── api.ts          # SlvsApi interface
+│   │       ├── gcs/
+│   │       │   ├── api.ts          # GcsApi interface
 │   │       │   ├── impl.ts         # PlaneGCS implementation
-│   │       │   └── loader.ts
+│   │       │   └── index.ts        # Loader
 │   │       └── index.ts        # Combined kernel loader
 │   │
 │   ├── react/          # React component library
@@ -120,10 +120,11 @@ You are the implementation agent for **vibeCAD**, a browser-native parametric CA
 - Meshing with face groups for face selection
 - **STEP export** (exportSTEP, exportShapeToSTEP)
 
-**PlaneGCS Integration** (`packages/kernel/src/slvs/`)
-- 2D constraint solver API
+**PlaneGCS Integration** (`packages/kernel/src/gcs/`)
+- 2D constraint solver API wrapper (`GcsApi` interface)
 - Point, line, arc, circle entities
 - All geometric and dimensional constraints
+- **Note:** API is implemented but NOT yet wired to UI - see `PLAN-SKETCH-CONSTRAINTS.md`
 
 **Parameter System** (`packages/core/src/params/`)
 - Expression parsing (numbers, operators, identifiers, function calls)
@@ -172,7 +173,7 @@ You are the implementation agent for **vibeCAD**, a browser-native parametric CA
 
 ### Partially Implemented
 
-- **Constraint solving integration** - API ready, needs full UI connection
+- **Constraint solving integration** - PlaneGCS API implemented in `gcs/impl.ts`, but `evalSketchOp()` in rebuild.ts is a no-op. See `PLAN-SKETCH-CONSTRAINTS.md` for full implementation plan.
 - **Revolve/Sweep/Loft** - Types + UI exist, OCC execution needs completion
 - **Boolean operations** - Framework in place, needs full integration
 - **File model refactor** - Currently uses Document→PartStudios structure, needs simplification to 1 file = 1 OpGraph (see "File & Data Model" section)
@@ -293,13 +294,51 @@ Setting a position shows geometry up to that operation index.
 
 ---
 
+## Constraint Solver Strategy
+
+### Current State
+
+- **PlaneGCS** (`@salusoft89/planegcs`) is integrated for 2D sketch constraints
+- The `GcsApi` interface and implementation exist in `packages/kernel/src/gcs/`
+- **NOT YET WIRED UP** - `evalSketchOp()` returns null, no constraint UI exists
+
+### Why PlaneGCS for Sketches
+
+PlaneGCS (from FreeCAD) is purpose-built for 2D parametric sketch solving:
+- Actively maintained npm package
+- Proven in production (powers FreeCAD Sketcher)
+- All standard sketch constraints supported
+- 2D-only scope matches our sketch needs
+
+### Assembly Constraints (Future)
+
+For 3D assembly constraints (mate, axis alignment, etc.), we'll need a different approach since PlaneGCS is 2D-only. Options being evaluated:
+
+1. **libslvs WASM** - Build SolveSpace's constraint solver to WASM (no production npm package exists)
+2. **Custom 3D solver** - Implement basic rigid body positioning
+3. **Physics-based** - Use rigid body simulation
+
+Decision deferred until assembly implementation begins. See `PLAN-SKETCH-CONSTRAINTS.md` for detailed analysis.
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `packages/kernel/src/gcs/api.ts` | `GcsApi` interface |
+| `packages/kernel/src/gcs/impl.ts` | PlaneGCS implementation |
+| `packages/core/src/types/constraint.ts` | Constraint type definitions |
+| `packages/core/src/types/sketch.ts` | Sketch with solver output fields |
+| `PLAN-SKETCH-CONSTRAINTS.md` | Full implementation plan |
+
+---
+
 ## Coding Standards
 
 - **TypeScript strict mode** everywhere
 - **Immutable updates**: functions return new objects, don't mutate
 - **No `any`** except at WASM boundaries (wrap immediately)
 - **Small, focused functions** with clear inputs/outputs
-- **Dependency injection** for OCC/SLVS APIs
+- **Dependency injection** for OCC/GCS APIs
 
 ---
 
@@ -312,8 +351,10 @@ Setting a position shows geometry up to that operation index.
 | Sketch UI | `app/web/src/components/SketchCanvas.tsx` |
 | Operation types | `packages/core/src/types/op.ts` |
 | OCC bindings | `packages/kernel/src/occ/impl.ts` |
-| Constraint solver | `packages/kernel/src/slvs/impl.ts` |
+| Constraint solver | `packages/kernel/src/gcs/impl.ts` |
+| Constraint types | `packages/core/src/types/constraint.ts` |
 | STEP export | `app/web/src/utils/step-export.ts` |
+| **Constraint plan** | `PLAN-SKETCH-CONSTRAINTS.md` |
 
 ---
 
