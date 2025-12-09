@@ -65,6 +65,8 @@ import {
   DrawingSheetContent,
   DrawingPropertiesContent,
 } from "./components/drawing/DrawingSidebars";
+import { CURRENT_PART_PATH } from "./store/drawing-store";
+import type { ViewProjection } from "@vibecad/core";
 
 // Import Schematic components
 import { SchematicCanvas } from "./components/SchematicCanvas";
@@ -72,7 +74,6 @@ import { SchematicToolbar } from "./components/SchematicToolbar";
 import {
   SchematicComponentsContent,
   SchematicNetsContent,
-  SchematicSheetsContent,
   SchematicPropertiesContent,
   SchematicLibraryContent,
   SchematicInfoContent,
@@ -313,6 +314,334 @@ function DrawingStatusBar() {
 }
 
 // ============================================================================
+// Add View Modal (for Drawing mode)
+// ============================================================================
+
+const addViewModalStyles = {
+  overlay: {
+    position: "fixed" as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1000,
+  },
+  content: {
+    backgroundColor: "#1a1a2e",
+    border: "1px solid #444",
+    borderRadius: 8,
+    padding: 24,
+    minWidth: 360,
+    maxWidth: 480,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: 600,
+    color: "#fff",
+    marginBottom: 16,
+  },
+  field: {
+    marginBottom: 16,
+  },
+  label: {
+    display: "block",
+    fontSize: 12,
+    color: "#888",
+    marginBottom: 4,
+  },
+  input: {
+    width: "100%",
+    padding: "8px 12px",
+    backgroundColor: "#252545",
+    border: "1px solid #333",
+    borderRadius: 4,
+    color: "#fff",
+    fontSize: 13,
+    outline: "none",
+    boxSizing: "border-box" as const,
+  },
+  select: {
+    width: "100%",
+    padding: "8px 12px",
+    backgroundColor: "#252545",
+    border: "1px solid #333",
+    borderRadius: 4,
+    color: "#fff",
+    fontSize: 13,
+    outline: "none",
+  },
+  buttons: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 8,
+    marginTop: 20,
+  },
+  button: {
+    padding: "8px 16px",
+    borderRadius: 4,
+    fontSize: 13,
+    cursor: "pointer",
+    border: "none",
+  },
+  buttonPrimary: {
+    backgroundColor: "#646cff",
+    color: "#fff",
+  },
+  buttonSecondary: {
+    backgroundColor: "#333",
+    color: "#ccc",
+  },
+};
+
+interface AddViewModalProps {
+  onClose: () => void;
+  onConfirm: (
+    sourcePath: string,
+    projection: ViewProjection,
+    scale: number,
+    options?: {
+      showHiddenLines: boolean;
+      showCenterLines: boolean;
+      sectionPlane?: {
+        origin: [number, number, number];
+        normal: [number, number, number];
+      };
+    }
+  ) => void;
+}
+
+function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
+  const [sourceType, setSourceType] = React.useState<"current" | "file">("current");
+  const [sourcePath, setSourcePath] = React.useState("./part.vibecad");
+  const [projection, setProjection] = React.useState<ViewProjection>("front");
+  const [scale, setScale] = React.useState(1);
+  const [showHiddenLines, setShowHiddenLines] = React.useState(false);
+  const [showCenterLines, setShowCenterLines] = React.useState(true);
+
+  // Section view configuration
+  const [isSectionView, setIsSectionView] = React.useState(false);
+  const [sectionNormal, setSectionNormal] = React.useState<[number, number, number]>([1, 0, 0]);
+
+  const standardProjections: ViewProjection[] = [
+    "front", "back", "top", "bottom", "left", "right",
+  ];
+
+  const pictorialProjections: ViewProjection[] = [
+    "isometric", "dimetric", "trimetric",
+  ];
+
+  const handleConfirm = () => {
+    const finalPath = sourceType === "current" ? CURRENT_PART_PATH : sourcePath;
+    const finalProjection = isSectionView ? "section" as ViewProjection : projection;
+    const options: {
+      showHiddenLines: boolean;
+      showCenterLines: boolean;
+      sectionPlane?: {
+        origin: [number, number, number];
+        normal: [number, number, number];
+      };
+    } = {
+      showHiddenLines,
+      showCenterLines,
+    };
+    if (isSectionView) {
+      options.sectionPlane = {
+        origin: [0, 0, 0],
+        normal: sectionNormal,
+      };
+    }
+    onConfirm(finalPath, finalProjection, scale, options);
+    onClose();
+  };
+
+  return (
+    <div style={addViewModalStyles.overlay} onClick={onClose}>
+      <div style={addViewModalStyles.content} onClick={(e) => e.stopPropagation()}>
+        <div style={addViewModalStyles.title as React.CSSProperties}>Add View</div>
+
+        {/* Source Selection */}
+        <div style={addViewModalStyles.field}>
+          <label style={addViewModalStyles.label as React.CSSProperties}>Source</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button
+              style={{
+                ...addViewModalStyles.button,
+                flex: 1,
+                ...(sourceType === "current" ? addViewModalStyles.buttonPrimary : addViewModalStyles.buttonSecondary),
+              }}
+              onClick={() => setSourceType("current")}
+            >
+              Current Part
+            </button>
+            <button
+              style={{
+                ...addViewModalStyles.button,
+                flex: 1,
+                ...(sourceType === "file" ? addViewModalStyles.buttonPrimary : addViewModalStyles.buttonSecondary),
+              }}
+              onClick={() => setSourceType("file")}
+            >
+              File Path
+            </button>
+          </div>
+          {sourceType === "file" && (
+            <input
+              style={addViewModalStyles.input}
+              type="text"
+              value={sourcePath}
+              onChange={(e) => setSourcePath((e.target as HTMLInputElement).value)}
+              placeholder="./part.vibecad"
+            />
+          )}
+          {sourceType === "current" && (
+            <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
+              Uses the currently open CAD part
+            </div>
+          )}
+        </div>
+
+        {/* View Type */}
+        <div style={addViewModalStyles.field}>
+          <label style={addViewModalStyles.label as React.CSSProperties}>View Type</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button
+              style={{
+                ...addViewModalStyles.button,
+                flex: 1,
+                ...(!isSectionView ? addViewModalStyles.buttonPrimary : addViewModalStyles.buttonSecondary),
+              }}
+              onClick={() => setIsSectionView(false)}
+            >
+              Standard
+            </button>
+            <button
+              style={{
+                ...addViewModalStyles.button,
+                flex: 1,
+                ...(isSectionView ? addViewModalStyles.buttonPrimary : addViewModalStyles.buttonSecondary),
+              }}
+              onClick={() => setIsSectionView(true)}
+            >
+              Section
+            </button>
+          </div>
+        </div>
+
+        {/* Projection (for standard views) */}
+        {!isSectionView && (
+          <div style={addViewModalStyles.field}>
+            <label style={addViewModalStyles.label as React.CSSProperties}>Projection</label>
+            <select
+              style={addViewModalStyles.select}
+              value={projection}
+              onChange={(e) => setProjection((e.target as HTMLSelectElement).value as ViewProjection)}
+            >
+              <optgroup label="Orthographic">
+                {standardProjections.map((p) => (
+                  <option key={p} value={p}>
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Pictorial">
+                {pictorialProjections.map((p) => (
+                  <option key={p} value={p}>
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+        )}
+
+        {/* Section Plane (for section views) */}
+        {isSectionView && (
+          <div style={addViewModalStyles.field}>
+            <label style={addViewModalStyles.label as React.CSSProperties}>Section Plane Normal</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {(["X", "Y", "Z"] as const).map((axis, i) => (
+                <button
+                  key={axis}
+                  style={{
+                    ...addViewModalStyles.button,
+                    flex: 1,
+                    ...(sectionNormal[i] !== 0 ? addViewModalStyles.buttonPrimary : addViewModalStyles.buttonSecondary),
+                  }}
+                  onClick={() => {
+                    const newNormal: [number, number, number] = [0, 0, 0];
+                    newNormal[i] = 1;
+                    setSectionNormal(newNormal);
+                  }}
+                >
+                  {axis}
+                </button>
+              ))}
+            </div>
+            <div style={{ color: "#888", fontSize: 11, marginTop: 4 }}>
+              Section plane passes through origin, perpendicular to {sectionNormal[0] ? "X" : sectionNormal[1] ? "Y" : "Z"} axis
+            </div>
+          </div>
+        )}
+
+        {/* Scale */}
+        <div style={addViewModalStyles.field}>
+          <label style={addViewModalStyles.label as React.CSSProperties}>Scale (1:X)</label>
+          <input
+            style={addViewModalStyles.input}
+            type="number"
+            step={0.5}
+            min={0.1}
+            max={100}
+            value={1 / scale}
+            onChange={(e) => {
+              const val = parseFloat((e.target as HTMLInputElement).value);
+              if (val > 0) setScale(1 / val);
+            }}
+          />
+        </div>
+
+        {/* Display Options */}
+        <div style={addViewModalStyles.field}>
+          <label style={addViewModalStyles.label as React.CSSProperties}>Display Options</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#ccc", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showHiddenLines}
+                onChange={(e) => setShowHiddenLines((e.target as HTMLInputElement).checked)}
+              />
+              Show hidden lines
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#ccc", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showCenterLines}
+                onChange={(e) => setShowCenterLines((e.target as HTMLInputElement).checked)}
+              />
+              Show center lines
+            </label>
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div style={addViewModalStyles.buttons}>
+          <button style={{ ...addViewModalStyles.button, ...addViewModalStyles.buttonSecondary }} onClick={onClose}>
+            Cancel
+          </button>
+          <button style={{ ...addViewModalStyles.button, ...addViewModalStyles.buttonPrimary }} onClick={handleConfirm}>
+            Add View
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Empty State
 // ============================================================================
 
@@ -405,6 +734,7 @@ export const App: React.FC = () => {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [libraryOpen, setLibraryOpen] = React.useState(false);
   const [aboutOpen, setAboutOpen] = React.useState(false);
+  const [addViewModalOpen, setAddViewModalOpen] = React.useState(false);
 
   // Sidebar collapse state (for ViewCube positioning)
   const [rightCollapsed, setRightCollapsed] = React.useState(false);
@@ -620,6 +950,27 @@ export const App: React.FC = () => {
     }
   }, [openTab]);
 
+  // Handle Add View in Drawing mode
+  const handleConfirmAddView = useCallback(
+    (
+      sourcePath: string,
+      projection: ViewProjection,
+      scale: number,
+      options?: {
+        showHiddenLines: boolean;
+        showCenterLines: boolean;
+        sectionPlane?: {
+          origin: [number, number, number];
+          normal: [number, number, number];
+        };
+      }
+    ) => {
+      // Start the view placement workflow in the drawing store
+      useDrawingStore.getState().startViewPlacement(sourcePath, projection, scale, options);
+    },
+    []
+  );
+
   // Open file dialog
   const handleOpenFile = useCallback(async () => {
     const input = window.document.createElement("input");
@@ -809,7 +1160,6 @@ export const App: React.FC = () => {
         return [
           { id: "sch-components", label: "Components", content: <SchematicComponentsContent /> },
           { id: "sch-nets", label: "Nets", content: <SchematicNetsContent /> },
-          { id: "sch-sheets", label: "Sheets", content: <SchematicSheetsContent /> },
         ];
       case "pcb":
         return [
@@ -968,10 +1318,7 @@ export const App: React.FC = () => {
       case "drawing":
         return (
           <DrawingToolbar
-            onAddView={() => {
-              // TODO: Open add view modal
-              alert("Add view modal not yet integrated");
-            }}
+            onAddView={() => setAddViewModalOpen(true)}
             onRecompute={() => useDrawingStore.getState().recomputeViews()}
           />
         );
@@ -1046,6 +1393,14 @@ export const App: React.FC = () => {
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <MyLibrary isOpen={libraryOpen} onClose={() => setLibraryOpen(false)} />
       <AboutModal isOpen={aboutOpen} onClose={() => setAboutOpen(false)} />
+
+      {/* Add View Modal (for Drawing mode) */}
+      {addViewModalOpen && isDrawingDocument && (
+        <AddViewModal
+          onClose={() => setAddViewModalOpen(false)}
+          onConfirm={handleConfirmAddView}
+        />
+      )}
     </div>
   );
 };

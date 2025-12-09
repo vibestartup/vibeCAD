@@ -5,7 +5,10 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "dev:web": "turbo run dev --filter=@vibecad/web",
+    "dev:web": "turbo run dev --filter=@vibecad/web --filter=@vibecad/server",
+    "dev:web-only": "turbo run dev --filter=@vibecad/web",
+    "dev:server": "turbo run dev --filter=@vibecad/server",
+    "index-libraries": "pnpm --filter=@vibecad/server index-libraries",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo",

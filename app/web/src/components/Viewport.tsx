@@ -7,8 +7,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useCadStore } from "../store";
 import { useSettingsStore } from "../store/settings-store";
-import { loadOcc, getOcc } from "@vibecad/kernel";
-import type { MeshData, OccApi } from "@vibecad/kernel";
+import { loadKernel, getKernel } from "@vibecad/kernel";
+import type { MeshData, OccApi, Kernel } from "@vibecad/kernel";
 import type { ExportableMesh } from "../utils/stl-export";
 import { ViewCube, type RenderMode } from "./ViewCube";
 import {
@@ -841,6 +841,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   // Constraint actions
   const pendingConstraint = useCadStore((s) => s.pendingConstraint);
   const addConstraintEntity = useCadStore((s) => s.addConstraintEntity);
+  const setKernel = useCadStore((s) => s.setKernel);
 
   // Clipboard actions
   const deleteSketchSelection = useCadStore((s) => s.deleteSketchSelection);
@@ -1094,19 +1095,20 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     };
   }, []);
 
-  // Load OpenCascade.js
+  // Load kernel (OCC + GCS)
   useEffect(() => {
     (async () => {
       try {
-        const occ = await loadOcc();
-        setOccApi(occ);
+        const kernel = await loadKernel();
+        setOccApi(kernel.occ);
+        setKernel(kernel); // Store full kernel in CAD store for constraint solving
         setIsOccLoading(false);
       } catch (err) {
         setOccError(err instanceof Error ? err.message : String(err));
         setIsOccLoading(false);
       }
     })();
-  }, []);
+  }, [setKernel]);
 
   // Update grid when unit changes
   useEffect(() => {
@@ -3617,8 +3619,8 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
           return;
         }
 
-        // If in select mode, check for entity hits
-        if (activeTool === "select" && activeSketch) {
+        // If in select mode or constraint mode, check for entity hits
+        if ((activeTool === "select" || pendingConstraint) && activeSketch) {
           // Check for gizmo hits first
           const gizmoGroup = sketchGizmoGroupRef.current;
           if (gizmoGroup && gizmoGroup.children.length > 0) {

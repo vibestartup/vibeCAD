@@ -181,7 +181,8 @@ interface LibraryActions {
   getComponent: (componentId: ComponentId) => { component: Component; library: ComponentLibrary } | undefined;
   getSymbol: (symbolId: SymbolId) => Symbol | undefined;
   getFootprint: (footprintId: FootprintId) => Footprint | undefined;
-  getAllComponents: () => Array<{ component: Component; libraryId: ComponentLibraryId }>;
+  getAllComponents: () => Array<{ component: Component; libraryId: ComponentLibraryId; library: ComponentLibrary }>;
+  searchComponents: (query: string) => Array<{ component: Component; libraryId: ComponentLibraryId }>;
   getComponentsInCategory: (category: ComponentCategory) => Array<{ component: Component; libraryId: ComponentLibraryId }>;
   getCategories: () => ComponentCategory[];
   getRecentComponents: () => Array<{ component: Component; library: ComponentLibrary }>;
@@ -688,13 +689,45 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
       },
 
       getAllComponents: () => {
-        const result: Array<{ component: Component; libraryId: ComponentLibraryId }> = [];
+        const result: Array<{ component: Component; libraryId: ComponentLibraryId; library: ComponentLibrary }> = [];
         for (const [libraryId, library] of get().libraries) {
           for (const component of library.components.values()) {
-            result.push({ component, libraryId });
+            result.push({ component, libraryId, library });
           }
         }
         return result;
+      },
+
+      searchComponents: (query) => {
+        const result: Array<{ component: Component; libraryId: ComponentLibraryId }> = [];
+        const lowerQuery = query.toLowerCase();
+        for (const [libraryId, library] of get().libraries) {
+          const matches = searchComponents(library, query);
+          for (const component of matches) {
+            if (result.length < 20) {
+              result.push({ component, libraryId });
+            }
+          }
+        }
+        // Also do a simple name search if searchComponents doesn't find much
+        if (result.length < 5) {
+          for (const [libraryId, library] of get().libraries) {
+            for (const component of library.components.values()) {
+              const name = component.name.toLowerCase();
+              const keywords = component.keywords.map(k => k.toLowerCase());
+              if (
+                name.includes(lowerQuery) ||
+                keywords.some(k => k.includes(lowerQuery))
+              ) {
+                // Avoid duplicates
+                if (!result.some(r => r.component.id === component.id)) {
+                  result.push({ component, libraryId });
+                }
+              }
+            }
+          }
+        }
+        return result.slice(0, 20);
       },
 
       getComponentsInCategory: (category) => {

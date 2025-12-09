@@ -2,11 +2,11 @@
  * Schematic Sidebars - left and right sidebars for schematic editor.
  */
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { TabbedSidebar, type TabDefinition } from "./TabbedSidebar";
 import { useSchematicStore } from "../store/schematic-store";
 import { useLibraryStore } from "../store/library-store";
-import type { ComponentCategory } from "@vibecad/core";
+import type { ComponentCategory, Component, ComponentId } from "@vibecad/core";
 import { Schematic } from "@vibecad/core";
 
 type SymbolInstance = Schematic.SymbolInstance;
@@ -257,41 +257,6 @@ function NetsListContent() {
 }
 
 // ============================================================================
-// Sheets List (Left Sidebar)
-// ============================================================================
-
-function SheetsListContent() {
-  const schematic = useSchematicStore((s) => s.schematic);
-  const setActiveSheet = useSchematicStore((s) => s.setActiveSheet);
-
-  if (!schematic) return null;
-
-  const sheets = Array.from(schematic.sheets.values());
-
-  return (
-    <div>
-      {sheets.map((sheet) => {
-        const isActive = sheet.id === schematic.activeSheetId;
-        return (
-          <div
-            key={sheet.id}
-            style={{
-              ...styles.listItem,
-              ...(isActive ? styles.listItemSelected : {}),
-            }}
-            onClick={() => setActiveSheet(sheet.id)}
-          >
-            <span>📄</span>
-            <span>{sheet.name}</span>
-            {isActive && <span style={{ marginLeft: "auto", color: "#4dabf7" }}>●</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ============================================================================
 // Properties Panel (Right Sidebar)
 // ============================================================================
 
@@ -301,11 +266,79 @@ function PropertiesContent() {
   const getSymbol = useSchematicStore((s) => s.getSymbol);
   const setInstanceRefDes = useSchematicStore((s) => s.setInstanceRefDes);
   const setInstanceValue = useSchematicStore((s) => s.setInstanceValue);
+  const setInstanceProperty = useSchematicStore((s) => s.setInstanceProperty);
+  const setInstanceComponent = useSchematicStore((s) => s.setInstanceComponent);
+  const changeInstanceSymbol = useSchematicStore((s) => s.changeInstanceSymbol);
+
+  // Library store for component lookup
+  const libraryStore = useLibraryStore();
+
+  // Search state for variant picker
+  const [variantSearch, setVariantSearch] = useState("");
+  const [showVariantPicker, setShowVariantPicker] = useState(false);
+  const [searchResults, setSearchResults] = useState<Array<{ component: Component; libraryId: string }>>([]);
 
   // Get first selected instance
   const selectedId = selectedInstances.size > 0 ? Array.from(selectedInstances)[0] : null;
   const instance = selectedId && schematic ? schematic.symbolInstances.get(selectedId) : null;
   const symbol = instance ? getSymbol(instance.symbolId) : null;
+
+  // Get linked library component if any
+  const linkedComponent = instance?.componentId
+    ? libraryStore.getComponent(instance.componentId as ComponentId)
+    : undefined;
+
+  // Search for variants when search term changes
+  useEffect(() => {
+    if (variantSearch.length >= 2) {
+      const results = libraryStore.searchComponents(variantSearch);
+      setSearchResults(results.slice(0, 10));
+    } else {
+      setSearchResults([]);
+    }
+  }, [variantSearch, libraryStore]);
+
+  // Handle selecting a variant from search
+  const handleSelectVariant = useCallback(
+    (component: Component, libraryId: string) => {
+      if (!instance) return;
+
+      // Link the component
+      setInstanceComponent(instance.id, component.id, libraryId);
+
+      // If the component has a symbol, use it
+      if (component.symbols.length > 0) {
+        const symbolId = component.symbols[0];
+        // Find the symbol in library
+        const allComponents = libraryStore.getAllComponents();
+        for (const { component: c, library } of allComponents) {
+          if (c.id === component.id && library.symbols) {
+            const sym = library.symbols.get(symbolId);
+            if (sym) {
+              changeInstanceSymbol(instance.id, sym as unknown as Symbol);
+              break;
+            }
+          }
+        }
+      }
+
+      // Update value if component has specs
+      if (component.specs && component.specs.size > 0) {
+        const resistance = component.specs.get("resistance");
+        const capacitance = component.specs.get("capacitance");
+        if (resistance) {
+          setInstanceValue(instance.id, String(resistance));
+        } else if (capacitance) {
+          setInstanceValue(instance.id, String(capacitance));
+        }
+      }
+
+      // Close picker
+      setShowVariantPicker(false);
+      setVariantSearch("");
+    },
+    [instance, setInstanceComponent, changeInstanceSymbol, setInstanceValue, libraryStore]
+  );
 
   if (!instance || !symbol) {
     return (
@@ -323,6 +356,95 @@ function PropertiesContent() {
           <span style={styles.label}>Type</span>
           <span style={styles.value}>{symbol.name}</span>
         </div>
+        {linkedComponent && (
+          <>
+            <div style={styles.row}>
+              <span style={styles.label}>Category</span>
+              <span style={styles.value}>{linkedComponent.component.category}</span>
+            </div>
+            {linkedComponent.component.manufacturer && (
+              <div style={styles.row}>
+                <span style={styles.label}>Manufacturer</span>
+                <span style={styles.value}>{linkedComponent.component.manufacturer}</span>
+              </div>
+            )}
+            {linkedComponent.component.mpn && (
+              <div style={styles.row}>
+                <span style={styles.label}>MPN</span>
+                <span style={styles.value}>{linkedComponent.component.mpn}</span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Variant Selection */}
+      <div style={styles.section}>
+        <div style={styles.sectionTitle}>Library Component</div>
+        {linkedComponent ? (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ ...styles.value, marginBottom: 4 }}>
+              {linkedComponent.component.name}
+            </div>
+            <button
+              style={{ ...styles.button, backgroundColor: "rgba(255, 100, 100, 0.2)" }}
+              onClick={() => setInstanceComponent(instance.id, undefined, undefined)}
+            >
+              Unlink
+            </button>
+          </div>
+        ) : (
+          <div style={{ color: "#666", fontSize: 11, marginBottom: 8 }}>
+            No library component linked
+          </div>
+        )}
+
+        <button
+          style={styles.button}
+          onClick={() => setShowVariantPicker(!showVariantPicker)}
+        >
+          {showVariantPicker ? "Cancel" : "Change Component..."}
+        </button>
+
+        {showVariantPicker && (
+          <div style={{ marginTop: 8 }}>
+            <input
+              type="text"
+              style={styles.input}
+              placeholder="Search components..."
+              value={variantSearch}
+              onChange={(e) => setVariantSearch(e.target.value)}
+              autoFocus
+            />
+            {searchResults.length > 0 && (
+              <div style={{ maxHeight: 200, overflow: "auto" }}>
+                {searchResults.map(({ component, libraryId }) => (
+                  <div
+                    key={component.id}
+                    style={{
+                      ...styles.listItem,
+                      padding: "6px 8px",
+                      fontSize: 11,
+                    }}
+                    onClick={() => handleSelectVariant(component, libraryId)}
+                  >
+                    <span style={{ fontWeight: 500 }}>{component.name}</span>
+                    {component.manufacturer && (
+                      <span style={{ color: "#888", marginLeft: 8 }}>
+                        {component.manufacturer}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {variantSearch.length >= 2 && searchResults.length === 0 && (
+              <div style={{ color: "#666", fontSize: 11, padding: 8 }}>
+                No matching components found
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={styles.section}>
@@ -345,6 +467,54 @@ function PropertiesContent() {
           placeholder="e.g., 10k, 100nF"
         />
       </div>
+
+      {/* Custom Properties */}
+      {instance.properties.size > 0 && (
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>Properties</div>
+          {Array.from(instance.properties.entries()).map(([key, value]) => (
+            <div key={key} style={styles.row}>
+              <span style={styles.label}>{key}</span>
+              <input
+                type="text"
+                style={{ ...styles.input, marginBottom: 0, width: "50%" }}
+                value={value}
+                onChange={(e) => setInstanceProperty(instance.id, key, e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Supplier Info from linked component */}
+      {linkedComponent && linkedComponent.component.suppliers.length > 0 && (
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>Suppliers</div>
+          {linkedComponent.component.suppliers.slice(0, 3).map((supplier, idx) => (
+            <div key={idx} style={{ ...styles.row, marginBottom: 4 }}>
+              <span style={styles.label}>{supplier.supplier}</span>
+              <span style={styles.value}>
+                {supplier.partNumber}
+                {supplier.stock !== undefined && (
+                  <span style={{ color: supplier.stock > 0 ? "#4caf50" : "#f44336", marginLeft: 8 }}>
+                    {supplier.stock > 0 ? `${supplier.stock} in stock` : "Out of stock"}
+                  </span>
+                )}
+              </span>
+            </div>
+          ))}
+          {linkedComponent.component.datasheetUrl && (
+            <a
+              href={linkedComponent.component.datasheetUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: "#4dabf7", fontSize: 11, textDecoration: "none" }}
+            >
+              View Datasheet
+            </a>
+          )}
+        </div>
+      )}
 
       <div style={styles.section}>
         <div style={styles.sectionTitle}>Position</div>
@@ -391,7 +561,6 @@ function DesignInfoContent() {
   const componentCount = schematic.symbolInstances.size;
   const netCount = schematic.nets.size;
   const wireCount = schematic.wires.size;
-  const sheetCount = schematic.sheets.size;
 
   return (
     <div>
@@ -400,10 +569,6 @@ function DesignInfoContent() {
         <div style={styles.row}>
           <span style={styles.label}>Name</span>
           <span style={styles.value}>{schematic.name}</span>
-        </div>
-        <div style={styles.row}>
-          <span style={styles.label}>Sheets</span>
-          <span style={styles.value}>{sheetCount}</span>
         </div>
       </div>
 
@@ -443,101 +608,13 @@ function DesignInfoContent() {
 }
 
 // ============================================================================
-// Library Browser Content
+// Library Browser Content (uses enhanced LibraryBrowser component)
 // ============================================================================
 
+import { LibraryBrowser } from "./LibraryBrowser";
+
 function LibraryBrowserContent() {
-  const libraryStore = useLibraryStore();
-  const startPlaceSymbol = useSchematicStore((s) => s.startPlaceSymbol);
-
-  const [searchQuery, setSearchQuery] = useState("");
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(["resistor", "capacitor"]));
-
-  const allComponents = libraryStore.getAllComponents();
-
-  // Filter by search
-  const filteredComponents = searchQuery
-    ? allComponents.filter(
-        ({ component }) =>
-          component.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          component.keywords.some((k) => k.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : allComponents;
-
-  // Group by category
-  const grouped = filteredComponents.reduce((acc, item) => {
-    const cat = item.component.category;
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(item);
-    return acc;
-  }, {} as Record<ComponentCategory, typeof allComponents>);
-
-  const toggleCategory = (cat: string) => {
-    const newExpanded = new Set(expandedCategories);
-    if (newExpanded.has(cat)) {
-      newExpanded.delete(cat);
-    } else {
-      newExpanded.add(cat);
-    }
-    setExpandedCategories(newExpanded);
-  };
-
-  const handleSelectComponent = (symbolId: string) => {
-    startPlaceSymbol(symbolId as any);
-  };
-
-  return (
-    <div>
-      <div style={{ padding: 12 }}>
-        <input
-          type="text"
-          style={styles.input}
-          placeholder="Search components..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </div>
-
-      {Object.entries(grouped).map(([category, items]) => (
-        <div key={category}>
-          <div
-            style={styles.categoryHeader}
-            onClick={() => toggleCategory(category)}
-          >
-            <span>
-              {expandedCategories.has(category) ? "▼" : "▶"} {category}
-            </span>
-            <span style={styles.badge}>{items.length}</span>
-          </div>
-
-          {expandedCategories.has(category) && (
-            <div>
-              {items.map(({ component }) => (
-                <div
-                  key={component.id}
-                  style={styles.listItem}
-                  onClick={() => {
-                    // Use the first symbol for this component
-                    if (component.symbols.length > 0) {
-                      handleSelectComponent(component.symbols[0]);
-                    }
-                  }}
-                >
-                  <span>{component.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-
-      {filteredComponents.length === 0 && (
-        <div style={styles.emptyState}>
-          {searchQuery ? "No matching components found." : "No components in library."}
-        </div>
-      )}
-    </div>
-  );
+  return <LibraryBrowser mode="schematic" />;
 }
 
 // ============================================================================
@@ -546,7 +623,6 @@ function LibraryBrowserContent() {
 
 export { ComponentsListContent as SchematicComponentsContent };
 export { NetsListContent as SchematicNetsContent };
-export { SheetsListContent as SchematicSheetsContent };
 export { PropertiesContent as SchematicPropertiesContent };
 export { LibraryBrowserContent as SchematicLibraryContent };
 export { DesignInfoContent as SchematicInfoContent };
@@ -566,11 +642,6 @@ export function SchematicLeftSidebar() {
       id: "nets",
       label: "Nets",
       content: <NetsListContent />,
-    },
-    {
-      id: "sheets",
-      label: "Sheets",
-      content: <SheetsListContent />,
     },
   ];
 

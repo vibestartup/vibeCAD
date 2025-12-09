@@ -688,6 +688,16 @@ function BoardInfoContent() {
 }
 
 // ============================================================================
+// Footprint Library Browser (for placing footprints)
+// ============================================================================
+
+import { LibraryBrowser } from "./LibraryBrowser";
+
+function FootprintLibraryContent() {
+  return <LibraryBrowser mode="pcb" />;
+}
+
+// ============================================================================
 // Exported Content Components (for flat tabs in AppLayout)
 // ============================================================================
 
@@ -697,6 +707,7 @@ export { NetsContent as PcbNetsContent };
 export { PropertiesContent as PcbPropertiesContent };
 export { DrcContent as PcbDrcContent };
 export { BoardInfoContent as PcbBoardInfoContent };
+export { FootprintLibraryContent as PcbLibraryContent };
 
 // ============================================================================
 // Legacy Wrapped Sidebars (deprecated - use individual content exports)

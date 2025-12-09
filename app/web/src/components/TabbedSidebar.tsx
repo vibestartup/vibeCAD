@@ -18,12 +18,14 @@ const styles = {
 
   tabs: {
     display: "flex",
+    flexWrap: "wrap",
     borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
     flexShrink: 0,
   } as React.CSSProperties,
 
   tab: {
-    flex: 1,
+    flex: "1 1 auto",
+    minWidth: "fit-content",
     padding: "10px 12px",
     border: "none",
     backgroundColor: "transparent",

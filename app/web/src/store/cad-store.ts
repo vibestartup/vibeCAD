@@ -50,6 +50,7 @@ import {
   getReferencedPoints,
   createPlaneFromNormal,
   sketch as sketchOps,
+  getConstraintArity,
 } from "@vibecad/core";
 import { history, HistoryState, createHistory, pushState, undo, redo } from "@vibecad/core";
 import { params } from "@vibecad/core";
@@ -2838,15 +2839,78 @@ export const useCadStore = create<CadStore>((set, get) => ({
   },
 
   addConstraintEntity: (primitiveId) => {
-    const { pendingConstraint } = get();
-    if (!pendingConstraint) return;
+    const { pendingConstraint, activeSketchId, studio } = get();
+    if (!pendingConstraint || !activeSketchId) return;
 
-    // Add entity if not already in list
-    if (!pendingConstraint.entities.includes(primitiveId)) {
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    const primitive = sketch.primitives.get(primitiveId);
+    if (!primitive) return;
+
+    // Get constraint arity to know how many entities we need
+    const arity = getConstraintArity(pendingConstraint.type);
+    const currentEntities = pendingConstraint.entities;
+
+    // For constraints that need points (coincident, distance, horizontalDistance, verticalDistance),
+    // if user clicks a line/arc, auto-fill with its endpoints
+    const pointBasedConstraints: ConstraintType[] = [
+      "coincident", "distance", "horizontalDistance", "verticalDistance"
+    ];
+
+    if (pointBasedConstraints.includes(pendingConstraint.type)) {
+      // If clicked entity is a line, add its start and end points
+      if (primitive.type === "line") {
+        const newEntities = [...currentEntities];
+        const slotsRemaining = arity.max - newEntities.length;
+
+        // Add start point if not already present and we have room
+        if (!newEntities.includes(primitive.start) && slotsRemaining > 0) {
+          newEntities.push(primitive.start);
+        }
+        // Add end point if not already present and we still have room
+        if (!newEntities.includes(primitive.end) && newEntities.length < arity.max) {
+          newEntities.push(primitive.end);
+        }
+
+        set({
+          pendingConstraint: {
+            ...pendingConstraint,
+            entities: newEntities,
+          },
+        });
+        return;
+      }
+
+      // If clicked entity is an arc, add its start and end points (not center)
+      if (primitive.type === "arc") {
+        const newEntities = [...currentEntities];
+
+        // Add start point if not already present and we have room
+        if (!newEntities.includes(primitive.start) && newEntities.length < arity.max) {
+          newEntities.push(primitive.start);
+        }
+        // Add end point if not already present and we still have room
+        if (!newEntities.includes(primitive.end) && newEntities.length < arity.max) {
+          newEntities.push(primitive.end);
+        }
+
+        set({
+          pendingConstraint: {
+            ...pendingConstraint,
+            entities: newEntities,
+          },
+        });
+        return;
+      }
+    }
+
+    // Default behavior: add entity if not already in list
+    if (!currentEntities.includes(primitiveId)) {
       set({
         pendingConstraint: {
           ...pendingConstraint,
-          entities: [...pendingConstraint.entities, primitiveId],
+          entities: [...currentEntities, primitiveId],
         },
       });
     }
@@ -2956,11 +3020,16 @@ export const useCadStore = create<CadStore>((set, get) => ({
         // Solve the sketch if kernel is available
         if (kernel) {
           try {
+            console.log("[CAD] Solving sketch with", updatedSketch.constraints.size, "constraints");
             const solveResult = sketchOps.solveSketch(updatedSketch, kernel.gcs);
+            console.log("[CAD] Solve result:", solveResult);
             updatedSketch = sketchOps.applysolvedPositions(updatedSketch, solveResult);
+            console.log("[CAD] Applied positions, solvedPositions size:", updatedSketch.solvedPositions?.size);
           } catch (e) {
             console.warn("[CAD] Failed to solve sketch after adding constraint:", e);
           }
+        } else {
+          console.warn("[CAD] Kernel not available - constraints won't be solved");
         }
 
         const newSketches = new Map(studio.sketches);

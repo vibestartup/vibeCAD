@@ -258,21 +258,6 @@ export const useTabsStore = create<TabsState>()(
     }),
     {
       name: "vibecad-tabs",
-      partialize: (state) => ({
-        // Only persist tab metadata, not actual content for images/raw
-        tabs: state.tabs.map((t) => {
-          if (t.type === "cad") {
-            return t;
-          }
-          // For other types, only persist metadata (data will need to be reloaded)
-          return {
-            ...t,
-            src: t.type === "image" ? undefined : undefined,
-            data: t.type === "raw" ? undefined : undefined,
-          };
-        }).filter((t) => t.type === "cad" || t.type === "drawing"), // Only persist CAD and Drawing tabs
-        activeTabId: state.activeTabId,
-      }),
     }
   )
 );
