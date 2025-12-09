@@ -1,54 +1,88 @@
 /**
  * DrawingEditor - Main component for 2D technical drawing editing.
  *
- * Combines the canvas, toolbar, and properties panel into a complete editor.
+ * Uses EditorLayout for consistent UI with other editor modes.
  */
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useEffect } from "react";
+import { EditorLayout } from "../../layouts/EditorLayout";
 import { useDrawingStore } from "../../store/drawing-store";
 import { DrawingCanvas } from "./DrawingCanvas";
 import { DrawingToolbar } from "./DrawingToolbar";
-import { DrawingPropertiesPanel } from "./DrawingPropertiesPanel";
+import { DrawingLeftSidebar, DrawingRightSidebar } from "./DrawingSidebars";
 import type { ViewProjection } from "@vibecad/core";
 
 // ============================================================================
-// Styles
+// Status Bar
 // ============================================================================
 
-const styles = {
-  container: {
-    display: "flex",
-    width: "100%",
-    height: "100%",
-    backgroundColor: "#0f0f1a",
-  },
-  main: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column" as const,
-    overflow: "hidden",
-  },
-  canvas: {
-    flex: 1,
-    overflow: "hidden",
-  },
-  statusBar: {
-    height: 24,
-    backgroundColor: "#1a1a2e",
-    borderTop: "1px solid #333",
-    display: "flex",
-    alignItems: "center",
-    padding: "0 12px",
-    fontSize: 11,
-    color: "#888",
-    gap: 16,
-  },
-  statusItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: 4,
-  },
-  modal: {
+function StatusBar() {
+  const drawing = useDrawingStore((s) => s.drawing);
+  const sheetZoom = useDrawingStore((s) => s.sheetZoom);
+  const editorMode = useDrawingStore((s) => s.editorMode);
+  const selectedViews = useDrawingStore((s) => s.selectedViews);
+  const selectedDimensions = useDrawingStore((s) => s.selectedDimensions);
+  const selectedAnnotations = useDrawingStore((s) => s.selectedAnnotations);
+  const isRecomputing = useDrawingStore((s) => s.isRecomputing);
+
+  const totalSelected = selectedViews.size + selectedDimensions.size + selectedAnnotations.size;
+
+  if (!drawing) return null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+      {/* Sheet info */}
+      <span>
+        Sheet: {drawing.sheet.size} ({drawing.sheet.width} x {drawing.sheet.height} mm)
+      </span>
+
+      {/* Zoom */}
+      <span style={{ color: "#666" }}>Zoom: {(sheetZoom * 100).toFixed(0)}%</span>
+
+      {/* Counts */}
+      <span style={{ color: "#666" }}>
+        {drawing.views.size} views · {drawing.dimensions.size} dimensions
+      </span>
+
+      {/* Selection */}
+      {totalSelected > 0 && (
+        <span style={{ color: "#646cff" }}>
+          {totalSelected} selected
+        </span>
+      )}
+
+      {/* Mode */}
+      {editorMode !== "select" && (
+        <span style={{ color: "#ffa500" }}>Mode: {editorMode}</span>
+      )}
+
+      {/* Recomputing */}
+      {isRecomputing && (
+        <span style={{ color: "#00ff00" }}>Recomputing...</span>
+      )}
+
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* Controls hint */}
+      <span style={{ fontFamily: "monospace" }}>
+        Pan: Middle Mouse · Zoom: Scroll
+      </span>
+    </div>
+  );
+}
+
+// ============================================================================
+// Add View Modal
+// ============================================================================
+
+interface AddViewModalProps {
+  onClose: () => void;
+  onConfirm: (sourcePath: string, projection: ViewProjection, scale: number) => void;
+}
+
+const modalStyles = {
+  overlay: {
     position: "fixed" as const,
     top: 0,
     left: 0,
@@ -60,7 +94,7 @@ const styles = {
     justifyContent: "center",
     zIndex: 1000,
   },
-  modalContent: {
+  content: {
     backgroundColor: "#1a1a2e",
     border: "1px solid #444",
     borderRadius: 8,
@@ -68,22 +102,22 @@ const styles = {
     minWidth: 360,
     maxWidth: 480,
   },
-  modalTitle: {
+  title: {
     fontSize: 16,
     fontWeight: 600,
     color: "#fff",
     marginBottom: 16,
   },
-  modalField: {
+  field: {
     marginBottom: 16,
   },
-  modalLabel: {
+  label: {
     display: "block",
     fontSize: 12,
     color: "#888",
     marginBottom: 4,
   },
-  modalInput: {
+  input: {
     width: "100%",
     padding: "8px 12px",
     backgroundColor: "#252545",
@@ -93,7 +127,7 @@ const styles = {
     fontSize: 13,
     outline: "none",
   },
-  modalSelect: {
+  select: {
     width: "100%",
     padding: "8px 12px",
     backgroundColor: "#252545",
@@ -103,37 +137,28 @@ const styles = {
     fontSize: 13,
     outline: "none",
   },
-  modalButtons: {
+  buttons: {
     display: "flex",
     justifyContent: "flex-end",
     gap: 8,
     marginTop: 20,
   },
-  modalButton: {
+  button: {
     padding: "8px 16px",
     borderRadius: 4,
     fontSize: 13,
     cursor: "pointer",
     border: "none",
   },
-  modalButtonPrimary: {
+  buttonPrimary: {
     backgroundColor: "#646cff",
     color: "#fff",
   },
-  modalButtonSecondary: {
+  buttonSecondary: {
     backgroundColor: "#333",
     color: "#ccc",
   },
 };
-
-// ============================================================================
-// Add View Modal
-// ============================================================================
-
-interface AddViewModalProps {
-  onClose: () => void;
-  onConfirm: (sourcePath: string, projection: ViewProjection, scale: number) => void;
-}
 
 function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
   const [sourcePath, setSourcePath] = useState("./part.vibecad");
@@ -141,15 +166,8 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
   const [scale, setScale] = useState(1);
 
   const projections: ViewProjection[] = [
-    "front",
-    "back",
-    "top",
-    "bottom",
-    "left",
-    "right",
-    "isometric",
-    "dimetric",
-    "trimetric",
+    "front", "back", "top", "bottom", "left", "right",
+    "isometric", "dimetric", "trimetric",
   ];
 
   const handleConfirm = () => {
@@ -158,14 +176,14 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
   };
 
   return (
-    <div style={styles.modal} onClick={onClose}>
-      <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.modalTitle}>Add View</div>
+    <div style={modalStyles.overlay} onClick={onClose}>
+      <div style={modalStyles.content} onClick={(e) => e.stopPropagation()}>
+        <div style={modalStyles.title}>Add View</div>
 
-        <div style={styles.modalField}>
-          <label style={styles.modalLabel}>Source File (relative path)</label>
+        <div style={modalStyles.field}>
+          <label style={modalStyles.label}>Source File (relative path)</label>
           <input
-            style={styles.modalInput}
+            style={modalStyles.input}
             type="text"
             value={sourcePath}
             onChange={(e) => setSourcePath(e.target.value)}
@@ -173,10 +191,10 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
           />
         </div>
 
-        <div style={styles.modalField}>
-          <label style={styles.modalLabel}>Projection</label>
+        <div style={modalStyles.field}>
+          <label style={modalStyles.label}>Projection</label>
           <select
-            style={styles.modalSelect}
+            style={modalStyles.select}
             value={projection}
             onChange={(e) => setProjection(e.target.value as ViewProjection)}
           >
@@ -188,10 +206,10 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
           </select>
         </div>
 
-        <div style={styles.modalField}>
-          <label style={styles.modalLabel}>Scale (1:X)</label>
+        <div style={modalStyles.field}>
+          <label style={modalStyles.label}>Scale (1:X)</label>
           <input
-            style={styles.modalInput}
+            style={modalStyles.input}
             type="number"
             step={0.5}
             min={0.1}
@@ -204,11 +222,11 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
           />
         </div>
 
-        <div style={styles.modalButtons}>
-          <button style={{ ...styles.modalButton, ...styles.modalButtonSecondary }} onClick={onClose}>
+        <div style={modalStyles.buttons}>
+          <button style={{ ...modalStyles.button, ...modalStyles.buttonSecondary }} onClick={onClose}>
             Cancel
           </button>
-          <button style={{ ...styles.modalButton, ...styles.modalButtonPrimary }} onClick={handleConfirm}>
+          <button style={{ ...modalStyles.button, ...modalStyles.buttonPrimary }} onClick={handleConfirm}>
             Add View
           </button>
         </div>
@@ -222,16 +240,12 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
 // ============================================================================
 
 export function DrawingEditor() {
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
   const [showAddViewModal, setShowAddViewModal] = useState(false);
 
   const drawing = useDrawingStore((s) => s.drawing);
-  const sheetZoom = useDrawingStore((s) => s.sheetZoom);
-  const editorMode = useDrawingStore((s) => s.editorMode);
-  const selectedViews = useDrawingStore((s) => s.selectedViews);
-  const selectedDimensions = useDrawingStore((s) => s.selectedDimensions);
-  const selectedAnnotations = useDrawingStore((s) => s.selectedAnnotations);
   const startViewPlacement = useDrawingStore((s) => s.startViewPlacement);
-  const isRecomputing = useDrawingStore((s) => s.isRecomputing);
   const recomputeViews = useDrawingStore((s) => s.recomputeViews);
   const initDrawing = useDrawingStore((s) => s.initDrawing);
 
@@ -255,74 +269,50 @@ export function DrawingEditor() {
     recomputeViews();
   }, [recomputeViews]);
 
-  const totalSelected = selectedViews.size + selectedDimensions.size + selectedAnnotations.size;
-
   // Show loading state while drawing initializes
   if (!drawing) {
     return (
-      <div style={{ ...styles.container, alignItems: "center", justifyContent: "center" }}>
-        <span style={{ color: "#888" }}>Loading drawing...</span>
+      <div style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: "#0f0f1a",
+        color: "#888",
+      }}>
+        Loading drawing...
       </div>
     );
   }
 
   return (
-    <div style={styles.container}>
-      {/* Left toolbar */}
-      <DrawingToolbar onAddView={handleAddView} onRecompute={handleRecompute} />
-
-      {/* Main canvas area */}
-      <div style={styles.main}>
-        <div style={styles.canvas}>
-          <DrawingCanvas />
-        </div>
-
-        {/* Status bar */}
-        <div style={styles.statusBar}>
-          <div style={styles.statusItem}>
-            <span>Sheet:</span>
-            <span style={{ color: "#fff" }}>
-              {drawing.sheet.size} ({drawing.sheet.width} x {drawing.sheet.height} mm)
-            </span>
-          </div>
-          <div style={styles.statusItem}>
-            <span>Zoom:</span>
-            <span style={{ color: "#fff" }}>{(sheetZoom * 100).toFixed(0)}%</span>
-          </div>
-          <div style={styles.statusItem}>
-            <span>Views:</span>
-            <span style={{ color: "#fff" }}>{drawing.views.size}</span>
-          </div>
-          <div style={styles.statusItem}>
-            <span>Dimensions:</span>
-            <span style={{ color: "#fff" }}>{drawing.dimensions.size}</span>
-          </div>
-          {totalSelected > 0 && (
-            <div style={styles.statusItem}>
-              <span style={{ color: "#646cff" }}>{totalSelected} selected</span>
-            </div>
-          )}
-          {editorMode !== "select" && (
-            <div style={styles.statusItem}>
-              <span style={{ color: "#ffa500" }}>Mode: {editorMode}</span>
-            </div>
-          )}
-          {isRecomputing && (
-            <div style={styles.statusItem}>
-              <span style={{ color: "#00ff00" }}>Recomputing...</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Right properties panel */}
-      <DrawingPropertiesPanel />
+    <>
+      <EditorLayout
+        toolbar={
+          <DrawingToolbar
+            onAddView={handleAddView}
+            onRecompute={handleRecompute}
+          />
+        }
+        leftPanel={<DrawingLeftSidebar />}
+        rightPanel={<DrawingRightSidebar />}
+        leftCollapsed={leftCollapsed}
+        onToggleLeft={() => setLeftCollapsed((c) => !c)}
+        rightCollapsed={rightCollapsed}
+        onToggleRight={() => setRightCollapsed((c) => !c)}
+        viewport={<DrawingCanvas />}
+        statusBar={<StatusBar />}
+      />
 
       {/* Add View Modal */}
       {showAddViewModal && (
-        <AddViewModal onClose={() => setShowAddViewModal(false)} onConfirm={handleConfirmAddView} />
+        <AddViewModal
+          onClose={() => setShowAddViewModal(false)}
+          onConfirm={handleConfirmAddView}
+        />
       )}
-    </div>
+    </>
   );
 }
 

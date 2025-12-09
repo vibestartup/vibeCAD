@@ -78,34 +78,6 @@ const styles = {
     zIndex: 10,
   } as React.CSSProperties,
 
-  toolbar: {
-    position: "absolute",
-    top: 16,
-    left: 16,
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    zIndex: 10,
-  } as React.CSSProperties,
-
-  toolButton: {
-    width: 36,
-    height: 36,
-    backgroundColor: "rgba(30, 30, 60, 0.9)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 4,
-    color: "#fff",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 14,
-  } as React.CSSProperties,
-
-  activeToolButton: {
-    backgroundColor: "rgba(77, 171, 247, 0.5)",
-    borderColor: "#4dabf7",
-  } as React.CSSProperties,
 };
 
 // ============================================================================
@@ -518,30 +490,6 @@ export function SchematicCanvas() {
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
       />
-
-      {/* Tool buttons */}
-      <div style={styles.toolbar}>
-        <button
-          style={{
-            ...styles.toolButton,
-            ...(activeTool === "select" ? styles.activeToolButton : {}),
-          }}
-          onClick={() => setTool("select")}
-          title="Select (V)"
-        >
-          V
-        </button>
-        <button
-          style={{
-            ...styles.toolButton,
-            ...(activeTool === "wire" ? styles.activeToolButton : {}),
-          }}
-          onClick={() => setTool("wire")}
-          title="Wire (W)"
-        >
-          W
-        </button>
-      </div>
 
       {/* Status hint */}
       <div style={styles.hint}>

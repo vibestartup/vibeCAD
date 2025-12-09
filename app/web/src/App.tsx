@@ -32,6 +32,7 @@ import { useDrawingStore } from "./store/drawing-store";
 import { useSchematicStore } from "./store/schematic-store";
 import { usePcbStore } from "./store/pcb-store";
 import { useDocumentViewStore } from "./store/document-view-store";
+import { useLibraryStore } from "./store/library-store";
 // Import as namespace to avoid module initialization timing issues
 import * as VibeCadCore from "@vibecad/core";
 import type { TabDefinition } from "./components/TabbedSidebar";
@@ -54,9 +55,41 @@ import { MyLibrary } from "./components/MyLibrary";
 import { OpTimelineContent } from "./components/OpTimeline";
 import { PropertiesContent, ParametersContent, RenderContent } from "./components/PropertiesPanel";
 import { ImageEditorSidebar } from "./components/ImageEditorSidebar";
-import { DrawingEditor } from "./components/drawing";
-import { SchematicEditor } from "./pages/SchematicEditor";
-import { PcbEditor } from "./pages/PcbEditor";
+
+// Import Drawing components
+import { DrawingCanvas } from "./components/drawing/DrawingCanvas";
+import { DrawingToolbar } from "./components/drawing/DrawingToolbar";
+import {
+  DrawingViewsContent,
+  DrawingDimensionsContent,
+  DrawingSheetContent,
+  DrawingPropertiesContent,
+} from "./components/drawing/DrawingSidebars";
+
+// Import Schematic components
+import { SchematicCanvas } from "./components/SchematicCanvas";
+import { SchematicToolbar } from "./components/SchematicToolbar";
+import {
+  SchematicComponentsContent,
+  SchematicNetsContent,
+  SchematicSheetsContent,
+  SchematicPropertiesContent,
+  SchematicLibraryContent,
+  SchematicInfoContent,
+} from "./components/SchematicSidebars";
+
+// Import PCB components
+import { PcbCanvas } from "./components/PcbCanvas";
+import { PcbToolbar } from "./components/PcbToolbar";
+import {
+  PcbComponentsContent,
+  PcbLayersContent,
+  PcbNetsContent,
+  PcbPropertiesContent,
+  PcbDrcContent,
+  PcbBoardInfoContent,
+} from "./components/PcbSidebars";
+
 import { captureThumbnail } from "./utils/viewport-capture";
 import { serializeDocument, downloadFile, useFileStore } from "./store/file-store";
 
@@ -150,6 +183,131 @@ function CadStatusBar() {
           Orbit: Left Mouse | Pan: Right Mouse | Zoom: Scroll
         </span>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Schematic Status Bar
+// ============================================================================
+
+function SchematicStatusBar() {
+  const schematic = useSchematicStore((s) => s.schematic);
+  const selectedInstances = useSchematicStore((s) => s.selectedInstances);
+  const selectedWires = useSchematicStore((s) => s.selectedWires);
+  const mode = useSchematicStore((s) => s.mode);
+  const wireDrawing = useSchematicStore((s) => s.wireDrawing);
+
+  const totalSelected = selectedInstances.size + selectedWires.size;
+  const componentCount = schematic?.symbolInstances.size ?? 0;
+  const netCount = schematic?.nets.size ?? 0;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+      <span>
+        {totalSelected > 0
+          ? `${totalSelected} item${totalSelected > 1 ? "s" : ""} selected`
+          : "No selection"}
+      </span>
+      <span style={{ color: "#666" }}>
+        {componentCount} components · {netCount} nets
+      </span>
+      {wireDrawing && (
+        <span style={{ color: "#4dabf7" }}>Drawing Wire</span>
+      )}
+      <div style={{ flex: 1 }} />
+      <span style={{ fontFamily: "monospace" }}>
+        Pan: Middle Mouse · Zoom: Scroll · Wire: W · Select: V
+      </span>
+    </div>
+  );
+}
+
+// ============================================================================
+// PCB Status Bar
+// ============================================================================
+
+function PcbStatusBar() {
+  const pcb = usePcbStore((s) => s.pcb);
+  const selectedInstances = usePcbStore((s) => s.selectedInstances);
+  const selectedTraces = usePcbStore((s) => s.selectedTraces);
+  const selectedVias = usePcbStore((s) => s.selectedVias);
+  const activeLayer = usePcbStore((s) => s.activeLayer);
+  const routing = usePcbStore((s) => s.routing);
+
+  const totalSelected = selectedInstances.size + selectedTraces.size + selectedVias.size;
+  const instanceCount = pcb?.instances.size ?? 0;
+  const traceCount = pcb?.traces.size ?? 0;
+  const viaCount = pcb?.vias.size ?? 0;
+  const layer = activeLayer && pcb ? pcb.layers.get(activeLayer) : null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+      <span>
+        {totalSelected > 0
+          ? `${totalSelected} item${totalSelected > 1 ? "s" : ""} selected`
+          : "No selection"}
+      </span>
+      <span style={{ color: "#666" }}>
+        {instanceCount} footprints · {traceCount} traces · {viaCount} vias
+      </span>
+      {routing && layer && (
+        <span style={{ color: "#4dabf7" }}>
+          Routing on {layer.name}
+        </span>
+      )}
+      {layer && !routing && (
+        <span style={{ color: "#888" }}>
+          Layer: {layer.name}
+        </span>
+      )}
+      <div style={{ flex: 1 }} />
+      <span style={{ fontFamily: "monospace" }}>
+        Pan: Middle Mouse · Zoom: Scroll · Route: X · Via: V · Select: V
+      </span>
+    </div>
+  );
+}
+
+// ============================================================================
+// Drawing Status Bar
+// ============================================================================
+
+function DrawingStatusBar() {
+  const drawing = useDrawingStore((s) => s.drawing);
+  const sheetZoom = useDrawingStore((s) => s.sheetZoom);
+  const editorMode = useDrawingStore((s) => s.editorMode);
+  const selectedViews = useDrawingStore((s) => s.selectedViews);
+  const selectedDimensions = useDrawingStore((s) => s.selectedDimensions);
+  const selectedAnnotations = useDrawingStore((s) => s.selectedAnnotations);
+  const isRecomputing = useDrawingStore((s) => s.isRecomputing);
+
+  const totalSelected = selectedViews.size + selectedDimensions.size + selectedAnnotations.size;
+
+  if (!drawing) return null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
+      <span>
+        Sheet: {drawing.sheet.size} ({drawing.sheet.width} x {drawing.sheet.height} mm)
+      </span>
+      <span style={{ color: "#666" }}>Zoom: {(sheetZoom * 100).toFixed(0)}%</span>
+      <span style={{ color: "#666" }}>
+        {drawing.views.size} views · {drawing.dimensions.size} dimensions
+      </span>
+      {totalSelected > 0 && (
+        <span style={{ color: "#646cff" }}>{totalSelected} selected</span>
+      )}
+      {editorMode !== "select" && (
+        <span style={{ color: "#ffa500" }}>Mode: {editorMode}</span>
+      )}
+      {isRecomputing && (
+        <span style={{ color: "#00ff00" }}>Recomputing...</span>
+      )}
+      <div style={{ flex: 1 }} />
+      <span style={{ fontFamily: "monospace" }}>
+        Pan: Middle Mouse · Zoom: Scroll
+      </span>
     </div>
   );
 }
@@ -344,6 +502,66 @@ export const App: React.FC = () => {
     prevStudioRef.current = { id: studio.id, modifiedAt: studio.meta.modifiedAt };
     docViewStore.updateStudio(activeDocumentId, studio);
   }, [studio, activeDocumentId, docViewStore]);
+
+  // Initialize schematic when switching to schematic tab
+  useEffect(() => {
+    const tab = activeTabId ? getTab(activeTabId) : null;
+    if (!tab || tab.type !== "schematic") return;
+
+    // Initialize schematic store if needed
+    useSchematicStore.getState().initSchematic();
+
+    // Initialize library store with dummy layer IDs for schematic
+    useLibraryStore.getState().initializeLibraries({
+      topCopper: "layer_topCu" as any,
+      topSilk: "layer_topSilk" as any,
+      topFab: "layer_topFab" as any,
+      topCrtYd: "layer_topCrtYd" as any,
+    });
+  }, [activeTabId, getTab]);
+
+  // Initialize PCB when switching to PCB tab
+  useEffect(() => {
+    const tab = activeTabId ? getTab(activeTabId) : null;
+    if (!tab || tab.type !== "pcb") return;
+
+    // Initialize PCB store if needed
+    usePcbStore.getState().initPcb();
+
+    // Initialize library store with PCB layers
+    const pcb = usePcbStore.getState().pcb;
+    if (pcb) {
+      let topCopper: any = null;
+      let topSilk: any = null;
+      let topFab: any = null;
+      let topCrtYd: any = null;
+
+      for (const [layerId, layer] of pcb.layers) {
+        if (layer.name === "F.Cu") topCopper = layerId;
+        if (layer.name === "F.SilkS") topSilk = layerId;
+        if (layer.name === "F.Fab") topFab = layerId;
+        if (layer.name === "F.CrtYd") topCrtYd = layerId;
+      }
+
+      if (topCopper && topSilk && topFab && topCrtYd) {
+        useLibraryStore.getState().initializeLibraries({
+          topCopper,
+          topSilk,
+          topFab,
+          topCrtYd,
+        });
+      }
+    }
+  }, [activeTabId, getTab]);
+
+  // Initialize Drawing when switching to drawing tab
+  useEffect(() => {
+    const tab = activeTabId ? getTab(activeTabId) : null;
+    if (!tab || tab.type !== "drawing") return;
+
+    // Initialize drawing store if needed
+    useDrawingStore.getState().initDrawing();
+  }, [activeTabId, getTab]);
 
   // Create new CAD document
   const handleNewCadDocument = useCallback(() => {
@@ -568,6 +786,9 @@ export const App: React.FC = () => {
 
   // Determine content and sidebar tabs based on active tab type
   const isCadDocument = activeTab?.type === "cad";
+  const isSchematicDocument = activeTab?.type === "schematic";
+  const isPcbDocument = activeTab?.type === "pcb";
+  const isDrawingDocument = activeTab?.type === "drawing";
 
   // ViewCube positioning
   const viewCubeTopOffset = TOOLBAR_HEIGHT + VIEWCUBE_GAP;
@@ -575,21 +796,39 @@ export const App: React.FC = () => {
     ? VIEWCUBE_GAP
     : PANEL_MARGIN + RIGHT_PANEL_WIDTH + VIEWCUBE_GAP;
 
-  // Build left sidebar extra tabs (Operations for CAD)
+  // Build left sidebar extra tabs based on document type (flat structure)
   const leftExtraTabs = useMemo<TabDefinition[]>(() => {
-    if (isCadDocument) {
-      return [
-        {
-          id: "operations",
-          label: "Operations",
-          content: <OpTimelineContent />,
-        },
-      ];
-    }
-    return [];
-  }, [isCadDocument]);
+    if (!activeTab) return [];
 
-  // Build right sidebar tabs based on document type
+    switch (activeTab.type) {
+      case "cad":
+        return [
+          { id: "operations", label: "Ops", content: <OpTimelineContent /> },
+        ];
+      case "schematic":
+        return [
+          { id: "sch-components", label: "Components", content: <SchematicComponentsContent /> },
+          { id: "sch-nets", label: "Nets", content: <SchematicNetsContent /> },
+          { id: "sch-sheets", label: "Sheets", content: <SchematicSheetsContent /> },
+        ];
+      case "pcb":
+        return [
+          { id: "pcb-components", label: "Components", content: <PcbComponentsContent /> },
+          { id: "pcb-layers", label: "Layers", content: <PcbLayersContent /> },
+          { id: "pcb-nets", label: "Nets", content: <PcbNetsContent /> },
+        ];
+      case "drawing":
+        return [
+          { id: "drawing-views", label: "Views", content: <DrawingViewsContent /> },
+          { id: "drawing-dims", label: "Dims", content: <DrawingDimensionsContent /> },
+          { id: "drawing-sheet", label: "Sheet", content: <DrawingSheetContent /> },
+        ];
+      default:
+        return [];
+    }
+  }, [activeTab]);
+
+  // Build right sidebar tabs based on document type (flat structure)
   const rightTabs = useMemo<TabDefinition[]>(() => {
     if (!activeTab) return [];
 
@@ -597,14 +836,29 @@ export const App: React.FC = () => {
       case "cad":
         return [
           { id: "properties", label: "Properties", content: <PropertiesContent /> },
-          { id: "parameters", label: "Parameters", content: <ParametersContent /> },
+          { id: "parameters", label: "Params", content: <ParametersContent /> },
           { id: "render", label: "Render", content: <RenderContent /> },
+        ];
+      case "schematic":
+        return [
+          { id: "sch-props", label: "Properties", content: <SchematicPropertiesContent /> },
+          { id: "sch-library", label: "Library", content: <SchematicLibraryContent /> },
+          { id: "sch-info", label: "Info", content: <SchematicInfoContent /> },
+        ];
+      case "pcb":
+        return [
+          { id: "pcb-props", label: "Properties", content: <PcbPropertiesContent /> },
+          { id: "pcb-drc", label: "DRC", content: <PcbDrcContent /> },
+          { id: "pcb-info", label: "Info", content: <PcbBoardInfoContent /> },
+        ];
+      case "drawing":
+        return [
+          { id: "drawing-props", label: "Properties", content: <DrawingPropertiesContent /> },
         ];
       case "image":
         return [
           { id: "draw", label: "Draw", content: <ImageEditorSidebar /> },
         ];
-      // Other viewers can add their tabs here
       default:
         return [];
     }
@@ -628,11 +882,14 @@ export const App: React.FC = () => {
           </>
         );
       case "drawing":
-        return <DrawingEditor />;
+        // Just render the canvas - sidebars/toolbar handled by AppLayout
+        return <DrawingCanvas />;
       case "schematic":
-        return <SchematicEditor />;
+        // Just render the canvas - sidebars/toolbar handled by AppLayout
+        return <SchematicCanvas />;
       case "pcb":
-        return <PcbEditor />;
+        // Just render the canvas - sidebars/toolbar handled by AppLayout
+        return <PcbCanvas />;
       case "image":
         return <ImageViewer document={activeTab as ImageDocument} />;
       case "text":
@@ -656,56 +913,110 @@ export const App: React.FC = () => {
 
   // Render toolbar based on document type
   const renderToolbar = () => {
-    // For now, only CAD documents have a toolbar
-    // Other viewers can have their tools in the toolbar later
-    if (isCadDocument) {
+    if (!activeTab) {
       return (
-        <Toolbar
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenLibrary={() => setLibraryOpen(true)}
-          onSaveProject={handleSaveProject}
-          onDownloadProject={handleDownloadProject}
-          onNewProject={handleNewCadDocument}
-          onNewDrawing={handleNewDrawing}
-          onNewSchematic={handleNewSchematic}
-          onNewPcb={handleNewPcb}
-          onOpenAbout={() => setAboutOpen(true)}
-        />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#aaa" }}>vibeCAD</span>
+        </div>
       );
     }
-    // Minimal toolbar for other document types (just app-level actions)
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#aaa" }}>vibeCAD</span>
-        <div style={{ flex: 1 }} />
-        <button
-          onClick={() => setSettingsOpen(true)}
-          style={{
-            padding: "6px 12px",
-            borderRadius: 4,
-            border: "1px solid #333",
-            backgroundColor: "transparent",
-            color: "#888",
-            fontSize: 12,
-            cursor: "pointer",
-          }}
-        >
-          Settings
-        </button>
-      </div>
-    );
+
+    switch (activeTab.type) {
+      case "cad":
+        return (
+          <Toolbar
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenLibrary={() => setLibraryOpen(true)}
+            onSaveProject={handleSaveProject}
+            onDownloadProject={handleDownloadProject}
+            onNewProject={handleNewCadDocument}
+            onNewDrawing={handleNewDrawing}
+            onNewSchematic={handleNewSchematic}
+            onNewPcb={handleNewPcb}
+            onOpenAbout={() => setAboutOpen(true)}
+          />
+        );
+      case "schematic":
+        return (
+          <SchematicToolbar
+            onOpenLibrary={() => setLibraryOpen(true)}
+            onRunErc={() => {
+              // TODO: Implement ERC
+              alert("ERC not yet implemented");
+            }}
+            onExportNetlist={() => {
+              // TODO: Implement netlist export
+              alert("Netlist export not yet implemented");
+            }}
+          />
+        );
+      case "pcb":
+        return (
+          <PcbToolbar
+            onOpenLibrary={() => setLibraryOpen(true)}
+            onRunDrc={() => usePcbStore.getState().runDrc()}
+            onExportGerber={() => {
+              // TODO: Implement Gerber export
+              alert("Gerber export not yet implemented");
+            }}
+            onExport3d={() => {
+              // TODO: Implement 3D export
+              alert("3D export not yet implemented");
+            }}
+          />
+        );
+      case "drawing":
+        return (
+          <DrawingToolbar
+            onAddView={() => {
+              // TODO: Open add view modal
+              alert("Add view modal not yet integrated");
+            }}
+            onRecompute={() => useDrawingStore.getState().recomputeViews()}
+          />
+        );
+      default:
+        // Minimal toolbar for other document types (just app-level actions)
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#aaa" }}>vibeCAD</span>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => setSettingsOpen(true)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 4,
+                border: "1px solid #333",
+                backgroundColor: "transparent",
+                color: "#888",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              Settings
+            </button>
+          </div>
+        );
+    }
   };
 
   // Render status bar
   const renderStatusBar = () => {
-    if (isCadDocument) {
-      return <CadStatusBar />;
+    if (!activeTab) return null;
+
+    switch (activeTab.type) {
+      case "cad":
+        return <CadStatusBar />;
+      case "schematic":
+        return <SchematicStatusBar />;
+      case "pcb":
+        return <PcbStatusBar />;
+      case "drawing":
+        return <DrawingStatusBar />;
+      default:
+        // Generic status for other document types
+        return <span>{activeTab.name}</span>;
     }
-    // Generic status for other document types
-    if (activeTab) {
-      return <span>{activeTab.name}</span>;
-    }
-    return null;
   };
 
   return (

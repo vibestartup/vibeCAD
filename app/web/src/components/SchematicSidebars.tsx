@@ -541,7 +541,18 @@ function LibraryBrowserContent() {
 }
 
 // ============================================================================
-// Left Sidebar
+// Exported Content Components (for flat tabs in AppLayout)
+// ============================================================================
+
+export { ComponentsListContent as SchematicComponentsContent };
+export { NetsListContent as SchematicNetsContent };
+export { SheetsListContent as SchematicSheetsContent };
+export { PropertiesContent as SchematicPropertiesContent };
+export { LibraryBrowserContent as SchematicLibraryContent };
+export { DesignInfoContent as SchematicInfoContent };
+
+// ============================================================================
+// Legacy Wrapped Sidebars (deprecated - use individual content exports)
 // ============================================================================
 
 export function SchematicLeftSidebar() {
@@ -565,10 +576,6 @@ export function SchematicLeftSidebar() {
 
   return <TabbedSidebar tabs={tabs} defaultTab="components" />;
 }
-
-// ============================================================================
-// Right Sidebar
-// ============================================================================
 
 export function SchematicRightSidebar() {
   const tabs: TabDefinition[] = [

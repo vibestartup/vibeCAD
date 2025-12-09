@@ -100,61 +100,6 @@ const styles = {
     zIndex: 10,
   } as React.CSSProperties,
 
-  layerPanel: {
-    position: "absolute",
-    top: 16,
-    right: 16,
-    backgroundColor: "rgba(30, 30, 60, 0.9)",
-    padding: 8,
-    borderRadius: 4,
-    zIndex: 10,
-    maxHeight: 300,
-    overflowY: "auto",
-  } as React.CSSProperties,
-
-  layerItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "4px 0",
-    cursor: "pointer",
-    fontSize: 11,
-  } as React.CSSProperties,
-
-  layerColor: {
-    width: 16,
-    height: 16,
-    borderRadius: 2,
-  } as React.CSSProperties,
-
-  toolbar: {
-    position: "absolute",
-    top: 16,
-    left: 16,
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    zIndex: 10,
-  } as React.CSSProperties,
-
-  toolButton: {
-    width: 36,
-    height: 36,
-    backgroundColor: "rgba(30, 30, 60, 0.9)",
-    border: "1px solid rgba(255,255,255,0.1)",
-    borderRadius: 4,
-    color: "#fff",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 14,
-  } as React.CSSProperties,
-
-  activeToolButton: {
-    backgroundColor: "rgba(77, 171, 247, 0.5)",
-    borderColor: "#4dabf7",
-  } as React.CSSProperties,
 };
 
 // ============================================================================
@@ -634,57 +579,6 @@ export function PcbCanvas() {
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
       />
-
-      {/* Tool buttons */}
-      <div style={styles.toolbar}>
-        <button
-          style={{
-            ...styles.toolButton,
-            ...(activeTool === "select" ? styles.activeToolButton : {}),
-          }}
-          onClick={() => setTool("select")}
-          title="Select (V)"
-        >
-          V
-        </button>
-        <button
-          style={{
-            ...styles.toolButton,
-            ...(activeTool === "track" ? styles.activeToolButton : {}),
-          }}
-          onClick={() => setTool("track")}
-          title="Route Track (X)"
-        >
-          X
-        </button>
-      </div>
-
-      {/* Layer panel */}
-      <div style={styles.layerPanel}>
-        <div style={{ color: "#fff", fontSize: 12, marginBottom: 8, fontWeight: "bold" }}>
-          Layers
-        </div>
-        {visibleLayers.map(([layerId, layer]) => (
-          <div
-            key={layerId}
-            style={{
-              ...styles.layerItem,
-              opacity: layerVisibility.get(layerId) ? 1 : 0.5,
-              backgroundColor: activeLayer === layerId ? "rgba(77, 171, 247, 0.3)" : "transparent",
-            }}
-            onClick={() => setActiveLayer(layerId)}
-            onDoubleClick={() => toggleLayerVisibility(layerId)}
-          >
-            <div
-              style={{
-                ...styles.layerColor,
-                backgroundColor: getLayerColor(layer),
-              }}
-            />
-            <span style={{ color: "#fff" }}>{layer.name}</span>
-          </div>
-        ))}
-      </div>
 
       {/* Status hint */}
       <div style={styles.hint}>

@@ -688,7 +688,18 @@ function BoardInfoContent() {
 }
 
 // ============================================================================
-// Left Sidebar
+// Exported Content Components (for flat tabs in AppLayout)
+// ============================================================================
+
+export { ComponentsListContent as PcbComponentsContent };
+export { LayersContent as PcbLayersContent };
+export { NetsContent as PcbNetsContent };
+export { PropertiesContent as PcbPropertiesContent };
+export { DrcContent as PcbDrcContent };
+export { BoardInfoContent as PcbBoardInfoContent };
+
+// ============================================================================
+// Legacy Wrapped Sidebars (deprecated - use individual content exports)
 // ============================================================================
 
 export function PcbLeftSidebar() {
@@ -712,10 +723,6 @@ export function PcbLeftSidebar() {
 
   return <TabbedSidebar tabs={tabs} defaultTab="components" />;
 }
-
-// ============================================================================
-// Right Sidebar
-// ============================================================================
 
 export function PcbRightSidebar() {
   const tabs: TabDefinition[] = [

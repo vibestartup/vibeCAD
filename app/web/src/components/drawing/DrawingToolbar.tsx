@@ -1,12 +1,41 @@
 /**
- * DrawingToolbar - Tool palette for the drawing editor.
+ * DrawingToolbar - Horizontal toolbar for the drawing editor.
  *
  * Provides tools for adding views, dimensions, and annotations.
+ * Follows the same pattern as PcbToolbar and SchematicToolbar.
  */
 
 import React, { useState } from "react";
 import { useDrawingStore, DrawingTool } from "../../store/drawing-store";
-import type { ViewProjection, DrawingSheetSize as SheetSize } from "@vibecad/core";
+
+// ============================================================================
+// Tool Definitions
+// ============================================================================
+
+interface Tool {
+  id: DrawingTool;
+  label: string;
+  icon: string;
+  shortcut?: string;
+  group: "select" | "dimension" | "annotation";
+}
+
+const TOOLS: Tool[] = [
+  // Selection
+  { id: "select", label: "Select", icon: "⎋", shortcut: "V", group: "select" },
+  { id: "pan", label: "Pan", icon: "☰", shortcut: "H", group: "select" },
+
+  // Dimensions
+  { id: "dim-linear", label: "Linear", icon: "↔", shortcut: "D", group: "dimension" },
+  { id: "dim-diameter", label: "Diameter", icon: "⌀", group: "dimension" },
+  { id: "dim-radius", label: "Radius", icon: "R", group: "dimension" },
+  { id: "dim-angle", label: "Angle", icon: "∠", group: "dimension" },
+
+  // Annotations
+  { id: "text", label: "Text", icon: "A", shortcut: "T", group: "annotation" },
+  { id: "note", label: "Note", icon: "✉", group: "annotation" },
+  { id: "balloon", label: "Balloon", icon: "⓪", group: "annotation" },
+];
 
 // ============================================================================
 // Styles
@@ -15,154 +44,82 @@ import type { ViewProjection, DrawingSheetSize as SheetSize } from "@vibecad/cor
 const styles = {
   container: {
     display: "flex",
-    flexDirection: "column" as const,
-    gap: 8,
-    padding: 8,
-    backgroundColor: "#1a1a2e",
-    borderRight: "1px solid #333",
-    width: 48,
     alignItems: "center",
-  },
-  section: {
+    height: "100%",
+    flex: 1,
+    gap: 8,
+  } as React.CSSProperties,
+
+  divider: {
+    width: 1,
+    height: 24,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    margin: "0 8px",
+  } as React.CSSProperties,
+
+  toolGroup: {
     display: "flex",
-    flexDirection: "column" as const,
-    gap: 4,
-    width: "100%",
-  },
-  sectionLabel: {
-    fontSize: 9,
-    color: "#666",
-    textAlign: "center" as const,
-    marginBottom: 2,
-  },
-  button: {
-    width: 36,
-    height: 36,
+    alignItems: "center",
+    gap: 2,
+  } as React.CSSProperties,
+
+  toolButton: {
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "transparent",
-    border: "1px solid transparent",
-    borderRadius: 4,
-    color: "#888",
-    fontSize: 16,
-    cursor: "pointer",
-    transition: "all 0.15s",
-  },
-  buttonHover: {
-    backgroundColor: "#252545",
-    color: "#fff",
-    border: "1px solid #444",
-  },
-  buttonActive: {
-    backgroundColor: "#3a3a5a",
-    color: "#fff",
-    border: "1px solid #646cff",
-  },
-  divider: {
-    width: "80%",
-    height: 1,
-    backgroundColor: "#333",
-    margin: "4px 0",
-  },
-  tooltip: {
-    position: "fixed" as const,
-    backgroundColor: "#1a1a2e",
-    border: "1px solid #444",
-    borderRadius: 4,
     padding: "4px 8px",
-    fontSize: 11,
+    border: "none",
+    borderRadius: 4,
+    backgroundColor: "transparent",
+    color: "#aaa",
+    cursor: "pointer",
+    minWidth: 40,
+    fontSize: 16,
+    transition: "background-color 0.15s, color 0.15s",
+  } as React.CSSProperties,
+
+  toolButtonActive: {
+    backgroundColor: "#646cff",
     color: "#fff",
-    whiteSpace: "nowrap" as const,
-    zIndex: 1000,
-    pointerEvents: "none" as const,
-  },
+  } as React.CSSProperties,
+
+  toolLabel: {
+    fontSize: 9,
+    marginTop: 2,
+    opacity: 0.7,
+  } as React.CSSProperties,
+
+  actionButton: {
+    padding: "6px 12px",
+    border: "none",
+    borderRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 12,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  } as React.CSSProperties,
+
+  spacer: {
+    flex: 1,
+  } as React.CSSProperties,
 };
 
 // ============================================================================
-// Tool Button Component
-// ============================================================================
-
-interface ToolButtonProps {
-  icon: string;
-  label: string;
-  tool: DrawingTool;
-  activeTool: DrawingTool;
-  onClick: () => void;
-}
-
-function ToolButton({ icon, label, tool, activeTool, onClick }: ToolButtonProps) {
-  const [isHovered, setIsHovered] = useState(false);
-  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
-  const isActive = tool === activeTool;
-
-  const handleMouseEnter = (e: React.MouseEvent) => {
-    setIsHovered(true);
-    setTooltipPos({ x: e.clientX + 10, y: e.clientY });
-  };
-
-  return (
-    <>
-      <button
-        style={{
-          ...styles.button,
-          ...(isActive ? styles.buttonActive : {}),
-          ...(isHovered && !isActive ? styles.buttonHover : {}),
-        }}
-        onClick={onClick}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={() => setIsHovered(false)}
-        title={label}
-      >
-        {icon}
-      </button>
-      {isHovered && (
-        <div style={{ ...styles.tooltip, left: tooltipPos.x + 20, top: tooltipPos.y - 10 }}>{label}</div>
-      )}
-    </>
-  );
-}
-
-// ============================================================================
-// Action Button Component
-// ============================================================================
-
-interface ActionButtonProps {
-  icon: string;
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-}
-
-function ActionButton({ icon, label, onClick, disabled }: ActionButtonProps) {
-  const [isHovered, setIsHovered] = useState(false);
-
-  return (
-    <button
-      style={{
-        ...styles.button,
-        ...(isHovered && !disabled ? styles.buttonHover : {}),
-        ...(disabled ? { opacity: 0.4, cursor: "not-allowed" } : {}),
-      }}
-      onClick={disabled ? undefined : onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      title={label}
-      disabled={disabled}
-    >
-      {icon}
-    </button>
-  );
-}
-
-// ============================================================================
-// Main Component
+// Props
 // ============================================================================
 
 interface DrawingToolbarProps {
   onAddView?: () => void;
   onRecompute?: () => void;
 }
+
+// ============================================================================
+// Component
+// ============================================================================
 
 export function DrawingToolbar({ onAddView, onRecompute }: DrawingToolbarProps) {
   const activeTool = useDrawingStore((s) => s.activeTool);
@@ -173,6 +130,8 @@ export function DrawingToolbar({ onAddView, onRecompute }: DrawingToolbarProps) 
   const selectedAnnotations = useDrawingStore((s) => s.selectedAnnotations);
   const isRecomputing = useDrawingStore((s) => s.isRecomputing);
   const recomputeViews = useDrawingStore((s) => s.recomputeViews);
+
+  const [hoveredTool, setHoveredTool] = useState<string | null>(null);
 
   const hasSelection =
     selectedViews.size > 0 || selectedDimensions.size > 0 || selectedAnnotations.size > 0;
@@ -185,116 +144,101 @@ export function DrawingToolbar({ onAddView, onRecompute }: DrawingToolbarProps) 
     }
   };
 
+  // Group tools
+  const selectTools = TOOLS.filter((t) => t.group === "select");
+  const dimensionTools = TOOLS.filter((t) => t.group === "dimension");
+  const annotationTools = TOOLS.filter((t) => t.group === "annotation");
+
+  const renderToolButton = (tool: Tool) => (
+    <button
+      key={tool.id}
+      style={{
+        ...styles.toolButton,
+        ...(activeTool === tool.id ? styles.toolButtonActive : {}),
+        ...(hoveredTool === tool.id && activeTool !== tool.id
+          ? { backgroundColor: "#333", color: "#fff" }
+          : {}),
+      }}
+      onClick={() => setActiveTool(tool.id)}
+      onMouseEnter={() => setHoveredTool(tool.id)}
+      onMouseLeave={() => setHoveredTool(null)}
+      title={`${tool.label}${tool.shortcut ? ` (${tool.shortcut})` : ""}`}
+    >
+      <span>{tool.icon}</span>
+      <span style={styles.toolLabel}>{tool.label}</span>
+    </button>
+  );
+
   return (
     <div style={styles.container}>
       {/* Selection Tools */}
-      <div style={styles.section}>
-        <div style={styles.sectionLabel}>Select</div>
-        <ToolButton
-          icon="\u2B9E"
-          label="Select (V)"
-          tool="select"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("select")}
-        />
-        <ToolButton
-          icon="\u2630"
-          label="Pan (H)"
-          tool="pan"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("pan")}
-        />
-      </div>
+      <div style={styles.toolGroup}>{selectTools.map(renderToolButton)}</div>
 
       <div style={styles.divider} />
 
-      {/* View Tools */}
-      <div style={styles.section}>
-        <div style={styles.sectionLabel}>Views</div>
-        <ActionButton icon="\u229E" label="Add View" onClick={onAddView || (() => {})} />
-        <ActionButton
-          icon="\u21BB"
-          label="Recompute Views"
-          onClick={handleRecompute}
-          disabled={isRecomputing}
-        />
-      </div>
+      {/* View Actions */}
+      <button
+        style={{
+          ...styles.actionButton,
+          ...(hoveredTool === "add-view" ? { backgroundColor: "#333", color: "#fff" } : {}),
+        }}
+        onClick={onAddView}
+        onMouseEnter={() => setHoveredTool("add-view")}
+        onMouseLeave={() => setHoveredTool(null)}
+        title="Add View"
+      >
+        <span>⊞</span>
+        <span>Add View</span>
+      </button>
+
+      <button
+        style={{
+          ...styles.actionButton,
+          ...(isRecomputing ? { opacity: 0.5, cursor: "not-allowed" } : {}),
+          ...(hoveredTool === "recompute" && !isRecomputing
+            ? { backgroundColor: "#333", color: "#fff" }
+            : {}),
+        }}
+        onClick={isRecomputing ? undefined : handleRecompute}
+        onMouseEnter={() => setHoveredTool("recompute")}
+        onMouseLeave={() => setHoveredTool(null)}
+        disabled={isRecomputing}
+        title="Recompute Views"
+      >
+        <span>↻</span>
+        <span>{isRecomputing ? "Computing..." : "Recompute"}</span>
+      </button>
 
       <div style={styles.divider} />
 
       {/* Dimension Tools */}
-      <div style={styles.section}>
-        <div style={styles.sectionLabel}>Dim</div>
-        <ToolButton
-          icon="\u2194"
-          label="Linear Dimension (D)"
-          tool="dim-linear"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("dim-linear")}
-        />
-        <ToolButton
-          icon="\u2300"
-          label="Diameter Dimension"
-          tool="dim-diameter"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("dim-diameter")}
-        />
-        <ToolButton
-          icon="R"
-          label="Radius Dimension"
-          tool="dim-radius"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("dim-radius")}
-        />
-        <ToolButton
-          icon="\u2220"
-          label="Angle Dimension"
-          tool="dim-angle"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("dim-angle")}
-        />
-      </div>
+      <div style={styles.toolGroup}>{dimensionTools.map(renderToolButton)}</div>
 
       <div style={styles.divider} />
 
       {/* Annotation Tools */}
-      <div style={styles.section}>
-        <div style={styles.sectionLabel}>Annot</div>
-        <ToolButton
-          icon="A"
-          label="Text (T)"
-          tool="text"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("text")}
-        />
-        <ToolButton
-          icon="\u2709"
-          label="Note with Leader"
-          tool="note"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("note")}
-        />
-        <ToolButton
-          icon="\u24EA"
-          label="Balloon"
-          tool="balloon"
-          activeTool={activeTool}
-          onClick={() => setActiveTool("balloon")}
-        />
-      </div>
+      <div style={styles.toolGroup}>{annotationTools.map(renderToolButton)}</div>
 
-      <div style={styles.divider} />
+      <div style={styles.spacer} />
 
-      {/* Edit Actions */}
-      <div style={styles.section}>
-        <div style={styles.sectionLabel}>Edit</div>
-        <ActionButton
-          icon="\u2716"
-          label="Delete Selected (Del)"
-          onClick={deleteSelected}
-          disabled={!hasSelection}
-        />
-      </div>
+      {/* Delete */}
+      <button
+        style={{
+          ...styles.actionButton,
+          ...(hasSelection ? {} : { opacity: 0.5, cursor: "not-allowed" }),
+          ...(hoveredTool === "delete" && hasSelection
+            ? { backgroundColor: "#ff6b6b", color: "#fff" }
+            : {}),
+        }}
+        onClick={hasSelection ? deleteSelected : undefined}
+        onMouseEnter={() => setHoveredTool("delete")}
+        onMouseLeave={() => setHoveredTool(null)}
+        disabled={!hasSelection}
+        title="Delete Selected (Del)"
+      >
+        <span>✖</span>
+        <span>Delete</span>
+      </button>
     </div>
   );
 }
