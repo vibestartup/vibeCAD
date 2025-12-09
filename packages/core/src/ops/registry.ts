@@ -19,7 +19,7 @@ import {
   FilletOp,
   ChamferOp,
 } from "../types";
-import type { OccApi, SlvsApi } from "./index";
+import type { OccApi, GcsApi } from "./index";
 
 // ============================================================================
 // Evaluation Context
@@ -31,8 +31,8 @@ import type { OccApi, SlvsApi } from "./index";
 export interface OpEvalContext {
   /** OpenCascade API */
   occ: OccApi;
-  /** SolveSpace API */
-  slvs: SlvsApi;
+  /** Geometric Constraint Solver API (PlaneGCS) */
+  gcs: GcsApi;
   /** Global parameters */
   params: ParamEnv;
   /** Current part studio */
@@ -51,14 +51,14 @@ export interface OpEvalContext {
  */
 export function createEvalContext(
   occ: OccApi,
-  slvs: SlvsApi,
+  gcs: GcsApi,
   params: ParamEnv,
   studio: PartStudio,
   results: Map<OpId, OpResult>
 ): OpEvalContext {
   return {
     occ,
-    slvs,
+    gcs,
     params,
     studio,
     results,

@@ -52,3 +52,6 @@ export {
   sketchPointsToWorld,
   worldPointsToSketch,
 } from "./transform";
+
+// Constraint solver
+export { solveSketch, applysolvedPositions, type SketchSolveResult } from "./solver";

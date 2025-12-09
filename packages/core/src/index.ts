@@ -8,6 +8,15 @@
 // All types
 export * from "./types";
 
+// EDA namespaces - directly import and re-export to ensure they're available
+// (export * from doesn't re-export namespace exports in ESM)
+import * as SchematicNS from "./types/schematic";
+import * as PcbNS from "./types/pcb";
+export { SchematicNS as Schematic, PcbNS as Pcb };
+
+// Drawing functions - explicit re-export for ESM compatibility
+export { createDrawing } from "./types/drawing";
+
 // Sketch operations
 export * as sketch from "./sketch";
 

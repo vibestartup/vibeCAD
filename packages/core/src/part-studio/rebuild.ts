@@ -13,8 +13,8 @@ import {
 } from "../types";
 import { evaluateParams, evalDimValue } from "../params";
 import { buildOpOrder } from "./graph";
-import { EvalContext, OccApi, SlvsApi, buildOpResult } from "../ops";
-import { sketchToWorld, findClosedLoops, getLoopPoints } from "../sketch";
+import { EvalContext, OccApi, GcsApi, buildOpResult } from "../ops";
+import { sketchToWorld, findClosedLoops, getLoopPoints, solveSketch, applysolvedPositions } from "../sketch";
 
 // ============================================================================
 // Rebuild
@@ -28,7 +28,7 @@ export async function rebuild(
   studio: PartStudio,
   params: ParamEnv,
   occ: OccApi,
-  slvs: SlvsApi
+  gcs: GcsApi
 ): Promise<PartStudio> {
   // Evaluate parameters first
   const evaledParams = evaluateParams(params);
@@ -42,7 +42,7 @@ export async function rebuild(
 
   const ctx: EvalContext = {
     occ,
-    slvs,
+    gcs,
     params: evaledParams,
     studio,
     results,
@@ -80,11 +80,11 @@ export async function rebuildFrom(
   changedOpId: OpId,
   params: ParamEnv,
   occ: OccApi,
-  slvs: SlvsApi
+  gcs: GcsApi
 ): Promise<PartStudio> {
   // For now, just do a full rebuild
   // Incremental rebuild optimization can be added later
-  return rebuild(studio, params, occ, slvs);
+  return rebuild(studio, params, occ, gcs);
 }
 
 // ============================================================================
@@ -120,8 +120,23 @@ async function evalSketchOp(
   op: Extract<Op, { type: "sketch" }>,
   ctx: EvalContext
 ): Promise<OpResult | null> {
-  // Sketch ops don't produce OCC shapes
-  // Constraint solving would happen here via SLVS
+  // Sketch ops don't produce OCC shapes, but we solve constraints
+  const sketch = ctx.studio.sketches.get(op.sketchId);
+  if (!sketch) return null;
+
+  // Only solve if there are constraints
+  if (sketch.constraints.size > 0) {
+    try {
+      const result = solveSketch(sketch, ctx.gcs);
+
+      // Update sketch with solved positions (mutating for now - ideally would be immutable)
+      const updatedSketch = applysolvedPositions(sketch, result);
+      ctx.studio.sketches.set(op.sketchId, updatedSketch);
+    } catch (error) {
+      console.warn(`[rebuild] Failed to solve sketch ${op.sketchId}:`, error);
+    }
+  }
+
   return null;
 }
 
