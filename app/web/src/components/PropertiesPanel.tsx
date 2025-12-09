@@ -16,7 +16,8 @@ import {
   BACKGROUND_PRESETS,
   type CaptureResult,
 } from "../utils/viewport-capture";
-import type { Op, Parameter, ParamId, SketchId } from "@vibecad/core";
+import type { Op, Parameter, ParamId, SketchId, ConstraintType, PrimitiveId } from "@vibecad/core";
+import { getConstraintArity } from "@vibecad/core";
 
 const styles = {
   container: {
@@ -2078,6 +2079,210 @@ function RenderingTab() {
 }
 
 // ============================================================================
+// Constraint Properties (for sketch constraint creation)
+// ============================================================================
+
+const constraintLabels: Record<ConstraintType, string> = {
+  coincident: "Coincident",
+  horizontal: "Horizontal",
+  vertical: "Vertical",
+  parallel: "Parallel",
+  perpendicular: "Perpendicular",
+  tangent: "Tangent",
+  equal: "Equal",
+  fixed: "Fixed",
+  symmetric: "Symmetric",
+  midpoint: "Midpoint",
+  pointOn: "Point On Curve",
+  distance: "Distance",
+  angle: "Angle",
+  radius: "Radius",
+  diameter: "Diameter",
+  horizontalDistance: "Horizontal Distance",
+  verticalDistance: "Vertical Distance",
+};
+
+const dimensionalConstraints: ConstraintType[] = ["distance", "angle", "radius", "diameter", "horizontalDistance", "verticalDistance"];
+
+function ConstraintProperties() {
+  const pendingConstraint = useCadStore((s) => s.pendingConstraint);
+  const activeSketchId = useCadStore((s) => s.activeSketchId);
+  const studio = useCadStore((s) => s.studio);
+  const setConstraintDimension = useCadStore((s) => s.setConstraintDimension);
+  const confirmConstraint = useCadStore((s) => s.confirmConstraint);
+  const cancelConstraint = useCadStore((s) => s.cancelConstraint);
+  const removeConstraintEntity = useCadStore((s) => s.removeConstraintEntity);
+  const lengthUnit = useSettingsStore((s) => s.lengthUnit);
+  const unitLabel = getLengthUnitLabel(lengthUnit);
+
+  const [dimensionValue, setDimensionValue] = React.useState("");
+
+  // Get constraint info
+  const constraintType = pendingConstraint?.type;
+  const entities = pendingConstraint?.entities ?? [];
+  const arity = constraintType ? getConstraintArity(constraintType) : { min: 0, max: 0 };
+  const isDimensional = constraintType ? dimensionalConstraints.includes(constraintType) : false;
+  const hasEnoughEntities = entities.length >= arity.min;
+  const hasDimension = !isDimensional || (pendingConstraint?.dimension !== undefined && pendingConstraint.dimension > 0);
+
+  // Get active sketch for entity names
+  const activeSketch = React.useMemo(() => {
+    if (!studio || !activeSketchId) return null;
+    return studio.sketches.get(activeSketchId);
+  }, [studio, activeSketchId]);
+
+  // Get entity display name
+  const getEntityName = (id: PrimitiveId): string => {
+    if (!activeSketch) return id;
+    const primitive = activeSketch.primitives.get(id);
+    if (!primitive) return id;
+    return `${primitive.type.charAt(0).toUpperCase() + primitive.type.slice(1)} (${id.slice(-4)})`;
+  };
+
+  // Handle dimension input
+  const handleDimensionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setDimensionValue(val);
+    const num = parseFloat(val);
+    if (!isNaN(num) && num > 0) {
+      setConstraintDimension(num);
+    }
+  };
+
+  // Sync dimension value when it changes externally
+  React.useEffect(() => {
+    if (pendingConstraint?.dimension !== undefined) {
+      setDimensionValue(pendingConstraint.dimension.toString());
+    } else {
+      setDimensionValue("");
+    }
+  }, [pendingConstraint?.dimension]);
+
+  // Auto-focus on dimension input when we have enough entities
+  const dimensionInputRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => {
+    if (hasEnoughEntities && isDimensional && dimensionInputRef.current) {
+      dimensionInputRef.current.focus();
+    }
+  }, [hasEnoughEntities, isDimensional]);
+
+  const canConfirm = hasEnoughEntities && hasDimension;
+
+  if (!pendingConstraint) return null;
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.sectionTitle}>
+        {constraintLabels[constraintType!] || constraintType} Constraint
+      </div>
+
+      {/* Entity selection slots */}
+      <div style={styles.field}>
+        <label style={styles.fieldLabel}>
+          Selected Entities ({entities.length}/{arity.min})
+        </label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {Array.from({ length: arity.min }, (_, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "8px 10px",
+                borderRadius: 4,
+                backgroundColor: entities[i] ? "#2a3a4a" : "#252545",
+                border: entities[i] ? "1px solid #4a6a8a" : "1px dashed #444",
+                transition: "all 0.15s",
+              }}
+            >
+              {entities[i] ? (
+                <>
+                  <span style={{ flex: 1, fontSize: 12, color: "#fff" }}>
+                    {getEntityName(entities[i])}
+                  </span>
+                  <button
+                    onClick={() => removeConstraintEntity(entities[i])}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#888",
+                      cursor: "pointer",
+                      padding: "2px 6px",
+                      fontSize: 14,
+                    }}
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </>
+              ) : (
+                <span style={{ fontSize: 12, color: "#666", fontStyle: "italic" }}>
+                  {i === entities.length ? "← Click entity in viewport" : `Entity ${i + 1}`}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Dimension input for dimensional constraints */}
+      {isDimensional && (
+        <div style={styles.field}>
+          <label style={styles.fieldLabel}>
+            {constraintType === "angle" ? "Angle (°)" : `Value (${unitLabel})`}
+          </label>
+          <input
+            ref={dimensionInputRef}
+            type="number"
+            value={dimensionValue}
+            onChange={handleDimensionChange}
+            style={{
+              ...styles.input,
+              borderColor: hasEnoughEntities && !hasDimension ? "#ff6600" : "#333",
+            }}
+            placeholder={hasEnoughEntities ? "Enter value..." : "Select entities first"}
+            min={0}
+            step={constraintType === "angle" ? 5 : 1}
+            disabled={!hasEnoughEntities}
+          />
+          {hasEnoughEntities && !hasDimension && (
+            <div style={{ fontSize: 11, color: "#ff6600", marginTop: 4 }}>
+              Enter a value to apply constraint
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Status hint */}
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 12 }}>
+        {!hasEnoughEntities
+          ? `Select ${arity.min - entities.length} more ${entities.length === 0 ? "entities" : "entity"} in the viewport`
+          : isDimensional && !hasDimension
+          ? "Enter dimension value above"
+          : "Ready to apply constraint"}
+      </div>
+
+      {/* Action buttons */}
+      <div style={styles.buttonRow}>
+        <button style={styles.secondaryButton} onClick={cancelConstraint}>
+          Cancel
+        </button>
+        <button
+          style={{
+            ...styles.primaryButton,
+            ...(canConfirm ? {} : styles.primaryButtonDisabled),
+          }}
+          onClick={confirmConstraint}
+          disabled={!canConfirm}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Exported Content Components (for use with TabbedSidebar)
 // ============================================================================
 
@@ -2093,6 +2298,7 @@ export function PropertiesContent() {
   const pendingBoolean = useCadStore((s) => s.pendingBoolean);
   const pendingPrimitive = useCadStore((s) => s.pendingPrimitive);
   const pendingTransform = useCadStore((s) => s.pendingTransform);
+  const pendingConstraint = useCadStore((s) => s.pendingConstraint);
   const studio = useCadStore((s) =>
     s.studio
   );
@@ -2106,7 +2312,10 @@ export function PropertiesContent() {
 
   return (
     <div style={styles.content}>
-      {pendingPrimitive ? (
+      {/* Constraint panel takes priority when in sketch mode with pending constraint */}
+      {pendingConstraint ? (
+        <ConstraintProperties />
+      ) : pendingPrimitive ? (
         <PrimitiveProperties isPending />
       ) : pendingTransform ? (
         <TransformProperties isPending />

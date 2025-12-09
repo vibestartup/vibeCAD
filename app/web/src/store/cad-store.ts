@@ -435,6 +435,7 @@ interface CadActions {
   // Constraint actions
   startConstraint: (type: ConstraintType) => void;
   addConstraintEntity: (primitiveId: PrimitiveId) => void;
+  removeConstraintEntity: (primitiveId: PrimitiveId) => void;
   setConstraintDimension: (value: number) => void;
   confirmConstraint: () => void;
   cancelConstraint: () => void;
@@ -2849,6 +2850,18 @@ export const useCadStore = create<CadStore>((set, get) => ({
         },
       });
     }
+  },
+
+  removeConstraintEntity: (primitiveId) => {
+    const { pendingConstraint } = get();
+    if (!pendingConstraint) return;
+
+    set({
+      pendingConstraint: {
+        ...pendingConstraint,
+        entities: pendingConstraint.entities.filter((id) => id !== primitiveId),
+      },
+    });
   },
 
   setConstraintDimension: (value) => {
