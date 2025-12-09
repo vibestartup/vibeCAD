@@ -16,6 +16,9 @@ export {
   type FaceHandle,
   type EdgeHandle,
   type VertexHandle,
+  type ProjectionResult,
+  type ProjectedEdge2D,
+  type ProjectedEdgeType,
 } from "./occ";
 
 // Geometric Constraint Solver (PlaneGCS)

@@ -3,7 +3,17 @@
  */
 
 import type { Vec3 } from "@vibecad/core";
-import type { OccApi, ShapeHandle, FaceHandle, EdgeHandle, VertexHandle, MeshData } from "./api";
+import type {
+  OccApi,
+  ShapeHandle,
+  FaceHandle,
+  EdgeHandle,
+  VertexHandle,
+  MeshData,
+  ProjectionResult,
+  ProjectedEdge2D,
+  ProjectedEdgeType,
+} from "./api";
 import type { OpenCascadeInstance } from "./loader";
 
 /**
@@ -1020,6 +1030,238 @@ export class OccApiImpl implements OccApi {
 
   exportShapeToSTEP(shape: ShapeHandle): string | null {
     return this.exportSTEP([shape], false);
+  }
+
+  // ============================================================================
+  // 2D Projection (for Drawing Views)
+  // ============================================================================
+
+  projectTo2D(
+    shape: ShapeHandle,
+    viewDir: Vec3,
+    upDir: Vec3,
+    scale: number = 1.0
+  ): ProjectionResult {
+    const shapeObj = this.store.get(shape);
+
+    // Create the projector (camera setup)
+    // HLRAlgo_Projector defines the view transformation
+    const eyeDir = new this.oc.gp_Dir_4(viewDir[0], viewDir[1], viewDir[2]);
+    const upVec = new this.oc.gp_Dir_4(upDir[0], upDir[1], upDir[2]);
+
+    // Create coordinate system for projection
+    // The view looks along -Z in the projection coordinate system
+    const origin = new this.oc.gp_Pnt_3(0, 0, 0);
+
+    // Calculate the right vector (X axis of projection plane)
+    const rightVec = upVec.Crossed(eyeDir);
+
+    // Build the projection axes
+    const ax2 = new this.oc.gp_Ax2_3(origin, eyeDir, rightVec);
+
+    // Create HLR algorithm
+    const hlrAlgo = new this.oc.HLRBRep_Algo_1();
+    hlrAlgo.Add_1(shapeObj, 0);
+
+    // Create projector and set it
+    const projector = new this.oc.HLRAlgo_Projector_2(ax2);
+    hlrAlgo.Projector_1(projector);
+
+    // Perform hidden line removal
+    hlrAlgo.Update();
+    hlrAlgo.Hide_1();
+
+    // Extract results using HLRBRep_HLRToShape
+    const hlrToShape = new this.oc.HLRBRep_HLRToShape(new this.oc.Handle_HLRBRep_Algo_2(hlrAlgo));
+
+    const edges: ProjectedEdge2D[] = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    // Helper to extract edges from a shape and add them to the result
+    const extractEdges = (edgeShape: any, type: ProjectedEdgeType) => {
+      if (edgeShape.IsNull()) return;
+
+      const explorer = new this.oc.TopExp_Explorer_2(
+        edgeShape,
+        this.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+        this.oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+      );
+
+      while (explorer.More()) {
+        const edge = this.oc.TopoDS.Edge_1(explorer.Current());
+        const points = this.discretizeEdge2D(edge, scale);
+
+        if (points.length > 0) {
+          // Update bounding box
+          for (const [x, y] of points) {
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+          }
+
+          edges.push({ type, points });
+        }
+
+        explorer.Next();
+      }
+    };
+
+    // Extract visible edges (sharp edges that are visible)
+    try {
+      extractEdges(hlrToShape.VCompound_1(), "visible");
+    } catch (e) {
+      console.warn("[OCC] Failed to extract visible edges:", e);
+    }
+
+    // Extract hidden edges (sharp edges that are hidden)
+    try {
+      extractEdges(hlrToShape.HCompound_1(), "hidden");
+    } catch (e) {
+      console.warn("[OCC] Failed to extract hidden edges:", e);
+    }
+
+    // Extract outline edges (silhouette/contour)
+    try {
+      extractEdges(hlrToShape.OutLineVCompound_1(), "outline");
+    } catch (e) {
+      console.warn("[OCC] Failed to extract outline edges:", e);
+    }
+
+    // Extract silhouette edges
+    try {
+      extractEdges(hlrToShape.Rg1LineVCompound_1(), "silhouette");
+    } catch (e) {
+      console.warn("[OCC] Failed to extract silhouette edges:", e);
+    }
+
+    // Handle case where no edges were found
+    if (edges.length === 0) {
+      // Fallback: try to project edges directly without HLR
+      console.warn("[OCC] HLR produced no edges, attempting direct projection");
+      return this.projectEdgesDirect(shapeObj, viewDir, upDir, scale);
+    }
+
+    return {
+      edges,
+      boundingBox: {
+        min: [minX === Infinity ? 0 : minX, minY === Infinity ? 0 : minY],
+        max: [maxX === -Infinity ? 0 : maxX, maxY === -Infinity ? 0 : maxY],
+      },
+    };
+  }
+
+  /**
+   * Discretize a 2D edge into a polyline.
+   * The edge is already in the 2D projection plane.
+   */
+  private discretizeEdge2D(edge: any, scale: number): [number, number][] {
+    const points: [number, number][] = [];
+
+    try {
+      const curve = new this.oc.BRepAdaptor_Curve_2(edge);
+      const first = curve.FirstParameter();
+      const last = curve.LastParameter();
+
+      // Determine number of segments based on edge length
+      const numSegments = Math.max(2, Math.min(50, Math.ceil((last - first) * 10)));
+
+      for (let i = 0; i <= numSegments; i++) {
+        const t = first + (i / numSegments) * (last - first);
+        const pnt = curve.Value(t);
+        // In HLR projection, X and Y are in the projection plane
+        points.push([pnt.X() * scale, pnt.Y() * scale]);
+      }
+    } catch (e) {
+      console.warn("[OCC] Failed to discretize edge:", e);
+    }
+
+    return points;
+  }
+
+  /**
+   * Fallback: Direct projection of edges without HLR.
+   * Used when HLR fails or produces no results.
+   */
+  private projectEdgesDirect(
+    shape: any,
+    viewDir: Vec3,
+    upDir: Vec3,
+    scale: number
+  ): ProjectionResult {
+    const edges: ProjectedEdge2D[] = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    // Build projection transformation matrix
+    const vd = this.normalize(viewDir);
+    const up = this.normalize(upDir);
+    const right = this.cross(up, vd);
+    const correctedUp = this.cross(vd, right);
+
+    // Project all edges
+    const explorer = new this.oc.TopExp_Explorer_2(
+      shape,
+      this.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+      this.oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+    );
+
+    while (explorer.More()) {
+      const edge = this.oc.TopoDS.Edge_1(explorer.Current());
+      const points: [number, number][] = [];
+
+      try {
+        const curve = new this.oc.BRepAdaptor_Curve_2(edge);
+        const first = curve.FirstParameter();
+        const last = curve.LastParameter();
+        const numSegments = Math.max(2, Math.min(50, Math.ceil((last - first) * 10)));
+
+        for (let i = 0; i <= numSegments; i++) {
+          const t = first + (i / numSegments) * (last - first);
+          const pnt3d = curve.Value(t);
+
+          // Project 3D point to 2D using the view transformation
+          const px = pnt3d.X(), py = pnt3d.Y(), pz = pnt3d.Z();
+          const x2d = (px * right[0] + py * right[1] + pz * right[2]) * scale;
+          const y2d = (px * correctedUp[0] + py * correctedUp[1] + pz * correctedUp[2]) * scale;
+
+          points.push([x2d, y2d]);
+
+          minX = Math.min(minX, x2d);
+          minY = Math.min(minY, y2d);
+          maxX = Math.max(maxX, x2d);
+          maxY = Math.max(maxY, y2d);
+        }
+
+        if (points.length > 0) {
+          edges.push({ type: "visible", points });
+        }
+      } catch (e) {
+        console.warn("[OCC] Failed to project edge:", e);
+      }
+
+      explorer.Next();
+    }
+
+    return {
+      edges,
+      boundingBox: {
+        min: [minX === Infinity ? 0 : minX, minY === Infinity ? 0 : minY],
+        max: [maxX === -Infinity ? 0 : maxX, maxY === -Infinity ? 0 : maxY],
+      },
+    };
+  }
+
+  private normalize(v: Vec3): Vec3 {
+    const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    return len > 0 ? [v[0] / len, v[1] / len, v[2] / len] : [0, 0, 1];
+  }
+
+  private cross(a: Vec3, b: Vec3): Vec3 {
+    return [
+      a[1] * b[2] - a[2] * b[1],
+      a[2] * b[0] - a[0] * b[2],
+      a[0] * b[1] - a[1] * b[0],
+    ];
   }
 
   // ============================================================================

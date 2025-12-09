@@ -9,6 +9,9 @@ export type {
   FaceHandle,
   EdgeHandle,
   VertexHandle,
+  ProjectionResult,
+  ProjectedEdge2D,
+  ProjectedEdgeType,
 } from "./api";
 
 export type { OpenCascadeInstance } from "./loader";

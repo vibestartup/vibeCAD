@@ -6,7 +6,8 @@
 
 import React, { useState, useCallback, useEffect } from "react";
 import { EditorLayout } from "../../layouts/EditorLayout";
-import { useDrawingStore } from "../../store/drawing-store";
+import { useDrawingStore, CURRENT_PART_PATH } from "../../store/drawing-store";
+import { useCadStore } from "../../store/cad-store";
 import { DrawingCanvas } from "./DrawingCanvas";
 import { DrawingToolbar } from "./DrawingToolbar";
 import { DrawingLeftSidebar, DrawingRightSidebar } from "./DrawingSidebars";
@@ -161,6 +162,7 @@ const modalStyles = {
 };
 
 function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
+  const [sourceType, setSourceType] = useState<"current" | "file">("current");
   const [sourcePath, setSourcePath] = useState("./part.vibecad");
   const [projection, setProjection] = useState<ViewProjection>("front");
   const [scale, setScale] = useState(1);
@@ -171,7 +173,8 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
   ];
 
   const handleConfirm = () => {
-    onConfirm(sourcePath, projection, scale);
+    const finalPath = sourceType === "current" ? CURRENT_PART_PATH : sourcePath;
+    onConfirm(finalPath, projection, scale);
     onClose();
   };
 
@@ -181,14 +184,43 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
         <div style={modalStyles.title}>Add View</div>
 
         <div style={modalStyles.field}>
-          <label style={modalStyles.label}>Source File (relative path)</label>
-          <input
-            style={modalStyles.input}
-            type="text"
-            value={sourcePath}
-            onChange={(e) => setSourcePath(e.target.value)}
-            placeholder="./part.vibecad"
-          />
+          <label style={modalStyles.label}>Source</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button
+              style={{
+                ...modalStyles.button,
+                flex: 1,
+                ...(sourceType === "current" ? modalStyles.buttonPrimary : modalStyles.buttonSecondary),
+              }}
+              onClick={() => setSourceType("current")}
+            >
+              Current Part
+            </button>
+            <button
+              style={{
+                ...modalStyles.button,
+                flex: 1,
+                ...(sourceType === "file" ? modalStyles.buttonPrimary : modalStyles.buttonSecondary),
+              }}
+              onClick={() => setSourceType("file")}
+            >
+              File Path
+            </button>
+          </div>
+          {sourceType === "file" && (
+            <input
+              style={modalStyles.input}
+              type="text"
+              value={sourcePath}
+              onChange={(e) => setSourcePath(e.target.value)}
+              placeholder="./part.vibecad"
+            />
+          )}
+          {sourceType === "current" && (
+            <div style={{ color: "#888", fontSize: 12, marginTop: 4 }}>
+              Uses the currently open CAD part
+            </div>
+          )}
         </div>
 
         <div style={modalStyles.field}>
@@ -248,11 +280,31 @@ export function DrawingEditor() {
   const startViewPlacement = useDrawingStore((s) => s.startViewPlacement);
   const recomputeViews = useDrawingStore((s) => s.recomputeViews);
   const initDrawing = useDrawingStore((s) => s.initDrawing);
+  const setKernel = useDrawingStore((s) => s.setKernel);
+  const setCurrentPartShape = useDrawingStore((s) => s.setCurrentPartShape);
+
+  // Get kernel and shape handles from CAD store
+  const cadKernel = useCadStore((s) => s.kernel);
+  const exportShapeHandles = useCadStore((s) => s.exportShapeHandles);
 
   // Initialize drawing on mount
   useEffect(() => {
     initDrawing();
   }, [initDrawing]);
+
+  // Sync kernel from CAD store to drawing store
+  useEffect(() => {
+    if (cadKernel) {
+      setKernel(cadKernel);
+    }
+  }, [cadKernel, setKernel]);
+
+  // Sync current part shape from CAD store to drawing store
+  useEffect(() => {
+    // Use the first shape handle if available
+    const shapeHandle = exportShapeHandles.length > 0 ? exportShapeHandles[0] : null;
+    setCurrentPartShape(shapeHandle);
+  }, [exportShapeHandles, setCurrentPartShape]);
 
   const handleAddView = useCallback(() => {
     setShowAddViewModal(true);

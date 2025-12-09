@@ -9,6 +9,7 @@ import type {
   DrawingAnnotationId,
   ViewProjection,
   Vec2,
+  Vec3,
   PartStudio,
   DrawingSheetSize,
 } from "@vibecad/core";
@@ -17,6 +18,8 @@ import type {
   DrawingView,
   DrawingDimension,
   DrawingAnnotation,
+  ViewProjectionResult,
+  ProjectedEdge,
 } from "@vibecad/core";
 
 // Import functions dynamically to avoid module initialization timing issues
@@ -25,7 +28,7 @@ import * as coreFunctions from "@vibecad/core";
 
 // Use DrawingSheetSize (renamed to avoid conflict with schematic sheet)
 type SheetSize = DrawingSheetSize;
-import type { Kernel } from "@vibecad/kernel";
+import type { Kernel, ShapeHandle, ProjectionResult } from "@vibecad/kernel";
 
 // ============================================================================
 // Types
@@ -62,6 +65,9 @@ export interface SourceCache {
   lastModified: number;
 }
 
+// Special path for current CAD part
+export const CURRENT_PART_PATH = "__current_part__";
+
 // ============================================================================
 // State Interface
 // ============================================================================
@@ -72,6 +78,9 @@ interface DrawingState {
 
   // Source geometry cache (loaded .vibecad files)
   sourceCache: Map<string, SourceCache>;
+
+  // Current part shape handle (from CAD store, for "current part" views)
+  currentPartShapeHandle: ShapeHandle | null;
 
   // Editor state
   editorMode: DrawingEditorMode;
@@ -173,6 +182,7 @@ interface DrawingActions {
   // Source management
   loadSource: (path: string, studio: PartStudio, shapeHandle?: number) => void;
   clearSourceCache: () => void;
+  setCurrentPartShape: (shapeHandle: ShapeHandle | null) => void;
 
   // Kernel
   setKernel: (kernel: Kernel) => void;
@@ -191,6 +201,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   // Initial state - drawing is null until initDrawing() is called
   drawing: null,
   sourceCache: new Map(),
+  currentPartShapeHandle: null,
   editorMode: "select",
   activeTool: "select",
   selectedViews: new Set(),
@@ -568,23 +579,85 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     set({ sourceCache: new Map() });
   },
 
+  setCurrentPartShape: (shapeHandle) => {
+    set({ currentPartShapeHandle: shapeHandle });
+  },
+
   // Kernel
   setKernel: (kernel) => set({ kernel }),
 
-  // Recompute views (stub - will be implemented with projection logic)
+  // Recompute all views using OCC HLR projection
   recomputeViews: async () => {
+    const state = get();
+    const { drawing, kernel, currentPartShapeHandle, sourceCache } = state;
+
+    if (!drawing || !kernel) {
+      console.warn("[Drawing] Cannot recompute: no drawing or kernel");
+      return;
+    }
+
     set({ isRecomputing: true });
 
-    // TODO: Implement actual view projection using OCC
-    // For each view:
-    // 1. Load source geometry from cache or file
-    // 2. Project to 2D using HLRBRep
-    // 3. Store projected edges in view.projectionResult
+    try {
+      let updatedDrawing = drawing;
 
-    // Simulate async work
-    await new Promise((resolve) => setTimeout(resolve, 100));
+      for (const [viewId, view] of drawing.views) {
+        // Determine which shape to project
+        let shapeHandle: ShapeHandle | undefined;
 
-    set({ isRecomputing: false });
+        if (view.sourceRef.path === CURRENT_PART_PATH) {
+          // Use the current part from CAD store
+          shapeHandle = currentPartShapeHandle ?? undefined;
+        } else {
+          // Look up in source cache
+          const cached = sourceCache.get(view.sourceRef.path);
+          shapeHandle = cached?.shapeHandle;
+        }
+
+        if (shapeHandle === undefined) {
+          console.warn(`[Drawing] No shape for view ${view.name} (${view.sourceRef.path})`);
+          continue;
+        }
+
+        // Get view direction and up vector
+        const viewDir = coreFunctions.getProjectionDirection(view.projection);
+        const upDir = coreFunctions.getProjectionUp(view.projection);
+
+        try {
+          // Project the shape
+          const occResult = kernel.occ.projectTo2D(
+            shapeHandle,
+            viewDir as Vec3,
+            upDir as Vec3,
+            view.scale
+          );
+
+          // Convert OCC projection result to drawing projection result
+          const projectionResult: ViewProjectionResult = {
+            edges: occResult.edges.map((edge) => ({
+              type: edge.type as "visible" | "hidden" | "silhouette" | "section",
+              points: edge.points as Vec2[],
+            })),
+            vertices: [],
+            boundingBox: {
+              min: occResult.boundingBox.min as Vec2,
+              max: occResult.boundingBox.max as Vec2,
+            },
+          };
+
+          // Update the view with projection result
+          updatedDrawing = coreFunctions.updateView(updatedDrawing, viewId, {
+            projectionResult,
+          });
+        } catch (err) {
+          console.error(`[Drawing] Failed to project view ${view.name}:`, err);
+        }
+      }
+
+      set({ drawing: updatedDrawing });
+    } finally {
+      set({ isRecomputing: false });
+    }
   },
 }));
 

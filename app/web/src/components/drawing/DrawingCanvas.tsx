@@ -120,15 +120,47 @@ interface ViewRendererProps {
 }
 
 function ViewRenderer({ view, isSelected, isHovered, onSelect, onHover }: ViewRendererProps) {
-  // For now, render a placeholder rectangle for the view
-  // Real implementation would render projected edges from view.projectionResult
-  const size = 80 * view.scale; // Placeholder size
+  const hasProjection = view.projectionResult && view.projectionResult.edges.length > 0;
+
+  // Calculate bounding box for the view
+  let bbox = { minX: -40, minY: -40, maxX: 40, maxY: 40 };
+  if (hasProjection && view.projectionResult) {
+    bbox = {
+      minX: view.projectionResult.boundingBox.min[0],
+      minY: view.projectionResult.boundingBox.min[1],
+      maxX: view.projectionResult.boundingBox.max[0],
+      maxY: view.projectionResult.boundingBox.max[1],
+    };
+  }
+
+  const width = bbox.maxX - bbox.minX;
+  const height = bbox.maxY - bbox.minY;
+  const centerX = (bbox.minX + bbox.maxX) / 2;
+  const centerY = (bbox.minY + bbox.maxY) / 2;
 
   const borderStyle = isSelected
     ? styles.viewBorderSelected
     : isHovered
     ? styles.viewBorderHovered
     : styles.viewBorder;
+
+  // Get edge style based on type
+  const getEdgeStyle = (type: string) => {
+    switch (type) {
+      case "hidden":
+        return styles.projectedEdgeHidden;
+      case "silhouette":
+      case "outline":
+        return { ...styles.projectedEdge, strokeWidth: 0.5 };
+      default:
+        return styles.projectedEdge;
+    }
+  };
+
+  // Source path display (shorten if it's the current part)
+  const sourceDisplay = view.sourceRef.path === "__current_part__"
+    ? "Current Part"
+    : view.sourceRef.path;
 
   return (
     <g
@@ -141,35 +173,44 @@ function ViewRenderer({ view, isSelected, isHovered, onSelect, onHover }: ViewRe
       onMouseLeave={() => onHover(false)}
       style={{ cursor: "pointer" }}
     >
-      {/* View bounding box */}
-      <rect x={-size / 2} y={-size / 2} width={size} height={size} {...borderStyle} />
+      {/* View bounding box - offset to center the content */}
+      <rect
+        x={bbox.minX - 5 - centerX}
+        y={bbox.minY - 5 - centerY}
+        width={width + 10}
+        height={height + 10}
+        {...borderStyle}
+      />
 
-      {/* Projected edges placeholder */}
-      {view.projectionResult ? (
-        view.projectionResult.edges.map((edge, i) => (
-          <polyline
-            key={i}
-            points={edge.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
-            {...(edge.type === "hidden" ? styles.projectedEdgeHidden : styles.projectedEdge)}
-          />
-        ))
+      {/* Projected edges */}
+      {hasProjection && view.projectionResult ? (
+        <g transform={`translate(${-centerX}, ${-centerY})`}>
+          {view.projectionResult.edges.map((edge, i) => (
+            <polyline
+              key={i}
+              points={edge.points.map((p) => `${p[0]},${p[1]}`).join(" ")}
+              {...getEdgeStyle(edge.type)}
+            />
+          ))}
+        </g>
       ) : (
         // Placeholder content when no projection
         <g>
-          <line x1={-size / 3} y1={0} x2={size / 3} y2={0} {...styles.projectedEdge} />
-          <line x1={0} y1={-size / 3} x2={0} y2={size / 3} {...styles.projectedEdge} />
-          <text x={0} y={size / 2 + 5} {...styles.dimensionText} fontSize={2.5}>
-            {view.projection.toUpperCase()} 1:{1 / view.scale}
+          <line x1={-30} y1={0} x2={30} y2={0} {...styles.projectedEdge} />
+          <line x1={0} y1={-30} x2={0} y2={30} {...styles.projectedEdge} />
+          <rect x={-20} y={-20} width={40} height={40} stroke="#999" strokeWidth={0.25} fill="none" strokeDasharray="2,2" />
+          <text x={0} y={-35} {...styles.dimensionText} fontSize={2}>
+            {sourceDisplay}
           </text>
-          <text x={0} y={-size / 2 - 3} {...styles.dimensionText} fontSize={2}>
-            {view.sourceRef.path}
+          <text x={0} y={35} {...styles.dimensionText} fontSize={2.5}>
+            Click Recompute to project
           </text>
         </g>
       )}
 
       {/* View label */}
-      <text x={0} y={size / 2 + 10} {...styles.dimensionText} fontSize={3}>
-        {view.name}
+      <text x={0} y={(height / 2) + 12 - centerY} {...styles.dimensionText} fontSize={3}>
+        {view.name} ({view.projection.toUpperCase()} 1:{Math.round(1 / view.scale)})
       </text>
     </g>
   );

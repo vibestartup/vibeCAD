@@ -235,9 +235,49 @@ export interface OccApi {
   exportShapeToSTEP(shape: ShapeHandle): string | null;
 
   // ============================================================================
+  // 2D Projection (for Drawing Views)
+  // ============================================================================
+
+  /**
+   * Project a 3D shape to 2D for technical drawings using HLR (Hidden Line Removal).
+   * Returns categorized 2D edges (visible, hidden, silhouette).
+   *
+   * @param shape - The 3D shape to project
+   * @param viewDir - View direction vector (where the camera looks FROM)
+   * @param upDir - Up direction vector for the view
+   * @param scale - Scale factor (default 1.0)
+   */
+  projectTo2D(
+    shape: ShapeHandle,
+    viewDir: Vec3,
+    upDir: Vec3,
+    scale?: number
+  ): ProjectionResult;
+
+  // ============================================================================
   // Memory Management
   // ============================================================================
 
   /** Free a shape from memory */
   freeShape(shape: ShapeHandle): void;
+}
+
+// ============================================================================
+// Projection Types
+// ============================================================================
+
+export type ProjectedEdgeType = "visible" | "hidden" | "silhouette" | "sewn" | "outline";
+
+export interface ProjectedEdge2D {
+  type: ProjectedEdgeType;
+  /** Polyline points in 2D (already projected and scaled) */
+  points: [number, number][];
+}
+
+export interface ProjectionResult {
+  edges: ProjectedEdge2D[];
+  boundingBox: {
+    min: [number, number];
+    max: [number, number];
+  };
 }
