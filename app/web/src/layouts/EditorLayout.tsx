@@ -1,9 +1,10 @@
 /**
  * Editor Layout - main CAD editor layout with floating glassy panels.
  * The viewport extends full-screen underneath all panels.
+ * Panels are resizable via drag handles.
  */
 
-import React from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 
 // ============================================================================
 // Shared glass effect styles
@@ -15,6 +16,36 @@ const glassStyle: React.CSSProperties = {
   WebkitBackdropFilter: "blur(12px)",
   border: "1px solid rgba(255, 255, 255, 0.1)",
 };
+
+// ============================================================================
+// Resize handle styles
+// ============================================================================
+
+const resizeHandleStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 0,
+  bottom: 0,
+  width: 6,
+  cursor: "ew-resize",
+  backgroundColor: "transparent",
+  zIndex: 11,
+};
+
+const resizeHandleHoverStyle: React.CSSProperties = {
+  backgroundColor: "rgba(100, 108, 255, 0.5)",
+};
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const LEFT_WIDTH_DEFAULT = 240;
+const LEFT_WIDTH_MIN = 180;
+const LEFT_WIDTH_MAX = 500;
+
+const RIGHT_WIDTH_DEFAULT = 280;
+const RIGHT_WIDTH_MIN = 200;
+const RIGHT_WIDTH_MAX = 500;
 
 // ============================================================================
 // Props
@@ -39,6 +70,14 @@ interface EditorLayoutProps {
   rightCollapsed?: boolean;
   /** Toggle right panel */
   onToggleRight?: () => void;
+  /** Current left panel width (optional, for external tracking) */
+  leftWidth?: number;
+  /** Current right panel width (optional, for external tracking) */
+  rightWidth?: number;
+  /** Callback when left panel width changes */
+  onLeftWidthChange?: (width: number) => void;
+  /** Callback when right panel width changes */
+  onRightWidthChange?: (width: number) => void;
 }
 
 // ============================================================================
@@ -55,9 +94,114 @@ export function EditorLayout({
   onToggleLeft,
   rightCollapsed = false,
   onToggleRight,
+  leftWidth: externalLeftWidth,
+  rightWidth: externalRightWidth,
+  onLeftWidthChange,
+  onRightWidthChange,
 }: EditorLayoutProps) {
-  const leftWidth = 240;
-  const rightWidth = 280;
+  // Resizable panel widths (internal state, can be overridden by props)
+  const [internalLeftWidth, setInternalLeftWidth] = useState(LEFT_WIDTH_DEFAULT);
+  const [internalRightWidth, setInternalRightWidth] = useState(RIGHT_WIDTH_DEFAULT);
+
+  // Use external width if provided, otherwise internal
+  const leftWidth = externalLeftWidth ?? internalLeftWidth;
+  const rightWidth = externalRightWidth ?? internalRightWidth;
+
+  // Setters that call both internal state and external callback
+  const setLeftWidth = useCallback(
+    (width: number) => {
+      setInternalLeftWidth(width);
+      onLeftWidthChange?.(width);
+    },
+    [onLeftWidthChange]
+  );
+
+  const setRightWidth = useCallback(
+    (width: number) => {
+      setInternalRightWidth(width);
+      onRightWidthChange?.(width);
+    },
+    [onRightWidthChange]
+  );
+
+  // Drag state
+  const [isResizingLeft, setIsResizingLeft] = useState(false);
+  const [isResizingRight, setIsResizingRight] = useState(false);
+  const [leftHover, setLeftHover] = useState(false);
+  const [rightHover, setRightHover] = useState(false);
+
+  // Store initial position for drag calculations
+  const dragStartRef = useRef<{ x: number; width: number } | null>(null);
+
+  // Handle mouse move for resizing
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (!dragStartRef.current) return;
+
+      if (isResizingLeft) {
+        // Left panel: dragging right edge, so width increases with mouse X
+        const delta = e.clientX - dragStartRef.current.x;
+        const newWidth = Math.max(
+          LEFT_WIDTH_MIN,
+          Math.min(LEFT_WIDTH_MAX, dragStartRef.current.width + delta)
+        );
+        setLeftWidth(newWidth);
+      } else if (isResizingRight) {
+        // Right panel: dragging left edge, so width increases as mouse X decreases
+        const delta = dragStartRef.current.x - e.clientX;
+        const newWidth = Math.max(
+          RIGHT_WIDTH_MIN,
+          Math.min(RIGHT_WIDTH_MAX, dragStartRef.current.width + delta)
+        );
+        setRightWidth(newWidth);
+      }
+    },
+    [isResizingLeft, isResizingRight]
+  );
+
+  // Handle mouse up to stop resizing
+  const handleMouseUp = useCallback(() => {
+    setIsResizingLeft(false);
+    setIsResizingRight(false);
+    dragStartRef.current = null;
+  }, []);
+
+  // Add/remove global mouse listeners
+  useEffect(() => {
+    if (isResizingLeft || isResizingRight) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      // Prevent text selection while dragging
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "ew-resize";
+    }
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+  }, [isResizingLeft, isResizingRight, handleMouseMove, handleMouseUp]);
+
+  // Start resizing left panel
+  const handleLeftResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizingLeft(true);
+      dragStartRef.current = { x: e.clientX, width: leftWidth };
+    },
+    [leftWidth]
+  );
+
+  // Start resizing right panel
+  const handleRightResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizingRight(true);
+      dragStartRef.current = { x: e.clientX, width: rightWidth };
+    },
+    [rightWidth]
+  );
 
   const toolbarHeight = toolbar ? 48 : 0;
   const actualLeftWidth = leftPanel ? (leftCollapsed ? 0 : leftWidth) : 0;
@@ -181,6 +325,17 @@ export function EditorLayout({
           }}
         >
           <div style={{ flex: 1, overflow: "auto" }}>{leftPanel}</div>
+          {/* Resize handle on right edge */}
+          <div
+            style={{
+              ...resizeHandleStyle,
+              right: -3,
+              ...(leftHover || isResizingLeft ? resizeHandleHoverStyle : {}),
+            }}
+            onMouseDown={handleLeftResizeStart}
+            onMouseEnter={() => setLeftHover(true)}
+            onMouseLeave={() => setLeftHover(false)}
+          />
         </div>
       )}
 
@@ -203,6 +358,17 @@ export function EditorLayout({
           }}
         >
           <div style={{ flex: 1, overflow: "auto" }}>{rightPanel}</div>
+          {/* Resize handle on left edge */}
+          <div
+            style={{
+              ...resizeHandleStyle,
+              left: -3,
+              ...(rightHover || isResizingRight ? resizeHandleHoverStyle : {}),
+            }}
+            onMouseDown={handleRightResizeStart}
+            onMouseEnter={() => setRightHover(true)}
+            onMouseLeave={() => setRightHover(false)}
+          />
         </div>
       )}
 

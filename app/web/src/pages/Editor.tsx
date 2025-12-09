@@ -69,7 +69,7 @@ function StatusBar() {
 
 // Layout constants (must match EditorLayout)
 const TOOLBAR_HEIGHT = 48;
-const RIGHT_PANEL_WIDTH = 280;
+const RIGHT_PANEL_WIDTH_DEFAULT = 280;
 const PANEL_MARGIN = 12;
 const VIEWCUBE_GAP = 12;
 
@@ -79,6 +79,7 @@ export function Editor() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightPanelWidth, setRightPanelWidth] = useState(RIGHT_PANEL_WIDTH_DEFAULT);
   const studioForSave = useCadStore((s) => s.studio);
   const fileStore = useFileStore();
   const resetDocument = useCadStore((s) => s.resetDocument);
@@ -102,7 +103,7 @@ export function Editor() {
   const viewCubeTopOffset = TOOLBAR_HEIGHT + VIEWCUBE_GAP;
   const viewCubeRightOffset = rightCollapsed
     ? VIEWCUBE_GAP
-    : PANEL_MARGIN + RIGHT_PANEL_WIDTH + VIEWCUBE_GAP;
+    : PANEL_MARGIN + rightPanelWidth + VIEWCUBE_GAP;
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -175,6 +176,7 @@ export function Editor() {
         onToggleLeft={() => setLeftCollapsed((c) => !c)}
         rightCollapsed={rightCollapsed}
         onToggleRight={() => setRightCollapsed((c) => !c)}
+        onRightWidthChange={setRightPanelWidth}
         viewport={
           <>
             <Viewport
