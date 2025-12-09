@@ -383,7 +383,67 @@ function DimensionProperties() {
 }
 
 // ============================================================================
-// Main Component
+// Content Component (for use in tabbed sidebars)
+// ============================================================================
+
+export function DrawingPropertiesContent() {
+  const selectedViews = useDrawingStore((s) => s.selectedViews);
+  const selectedDimensions = useDrawingStore((s) => s.selectedDimensions);
+  const selectedAnnotations = useDrawingStore((s) => s.selectedAnnotations);
+
+  const hasViewSelection = selectedViews.size > 0;
+  const hasDimensionSelection = selectedDimensions.size > 0;
+  const hasAnnotationSelection = selectedAnnotations.size > 0;
+  const hasSelection = hasViewSelection || hasDimensionSelection || hasAnnotationSelection;
+
+  return (
+    <>
+      <style>
+        {`
+          .drawing-properties-scroll::-webkit-scrollbar {
+            width: 8px;
+          }
+          .drawing-properties-scroll::-webkit-scrollbar-track {
+            background: transparent;
+          }
+          .drawing-properties-scroll::-webkit-scrollbar-thumb {
+            background: #444;
+            border-radius: 4px;
+          }
+          .drawing-properties-scroll::-webkit-scrollbar-thumb:hover {
+            background: #555;
+          }
+        `}
+      </style>
+      <div
+        className="drawing-properties-scroll"
+        style={{
+          padding: 16,
+          flex: 1,
+          minHeight: 0,
+          scrollbarWidth: "thin",
+          scrollbarColor: "#444 transparent",
+        }}
+      >
+        {/* Always show sheet properties */}
+        <SheetProperties />
+
+        {/* Context-sensitive properties */}
+        {hasViewSelection && <ViewProperties />}
+        {hasDimensionSelection && <DimensionProperties />}
+
+        {!hasSelection && (
+          <div style={styles.emptyState}>
+            <div>Select a view, dimension, or annotation to edit its properties.</div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ============================================================================
+// Main Component (standalone panel with container/header)
 // ============================================================================
 
 export function DrawingPropertiesPanel() {
@@ -394,7 +454,6 @@ export function DrawingPropertiesPanel() {
   const hasViewSelection = selectedViews.size > 0;
   const hasDimensionSelection = selectedDimensions.size > 0;
   const hasAnnotationSelection = selectedAnnotations.size > 0;
-  const hasSelection = hasViewSelection || hasDimensionSelection || hasAnnotationSelection;
 
   const title = hasViewSelection
     ? "View Properties"
@@ -408,18 +467,7 @@ export function DrawingPropertiesPanel() {
     <div style={styles.container}>
       <div style={styles.header}>{title}</div>
       <div style={styles.content}>
-        {/* Always show sheet properties */}
-        <SheetProperties />
-
-        {/* Context-sensitive properties */}
-        {hasViewSelection && <ViewProperties />}
-        {hasDimensionSelection && <DimensionProperties />}
-
-        {!hasSelection && (
-          <div style={styles.emptyState}>
-            <div>Select a view, dimension, or annotation to edit its properties.</div>
-          </div>
-        )}
+        <DrawingPropertiesContent />
       </div>
     </div>
   );

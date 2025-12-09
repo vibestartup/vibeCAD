@@ -257,13 +257,13 @@ function SheetInfoContent() {
 }
 
 // ============================================================================
-// Properties Panel (Right Sidebar) - reuses DrawingPropertiesPanel content
+// Properties Panel (Right Sidebar) - uses content component directly
 // ============================================================================
 
-import { DrawingPropertiesPanel } from "./DrawingPropertiesPanel";
+import { DrawingPropertiesContent } from "./DrawingPropertiesPanel";
 
 function PropertiesContent() {
-  return <DrawingPropertiesPanel />;
+  return <DrawingPropertiesContent />;
 }
 
 // ============================================================================

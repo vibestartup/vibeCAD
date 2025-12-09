@@ -1172,7 +1172,6 @@ export const App: React.FC = () => {
         return [
           { id: "drawing-views", label: "Views", content: <DrawingViewsContent /> },
           { id: "drawing-dims", label: "Dims", content: <DrawingDimensionsContent /> },
-          { id: "drawing-sheet", label: "Sheet", content: <DrawingSheetContent /> },
         ];
       default:
         return [];
@@ -1204,6 +1203,7 @@ export const App: React.FC = () => {
       case "drawing":
         return [
           { id: "drawing-props", label: "Properties", content: <DrawingPropertiesContent /> },
+          { id: "drawing-sheet", label: "Sheet", content: <DrawingSheetContent /> },
         ];
       case "image":
         return [
