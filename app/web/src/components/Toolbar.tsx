@@ -11,7 +11,7 @@ import { exportSTEP } from "../utils/step-export";
 import { getOcc } from "@vibecad/kernel";
 
 // Tool categories
-type ToolCategory = "select" | "sketch" | "sketch-draw" | "primitive" | "operation" | "modify" | "transform";
+type ToolCategory = "select" | "sketch" | "sketch-draw" | "sketch-constraint" | "primitive" | "operation" | "modify" | "transform";
 
 // Which mode the tool is available in
 type ToolMode = "object" | "sketch" | "both";
@@ -37,6 +37,18 @@ const TOOLS: Tool[] = [
   { id: "rect", label: "Rectangle", icon: "▭", category: "sketch-draw", shortcut: "R", mode: "sketch" },
   { id: "circle", label: "Circle", icon: "◯", category: "sketch-draw", shortcut: "C", mode: "sketch" },
   { id: "arc", label: "Arc", icon: "⌒", category: "sketch-draw", mode: "sketch" },
+
+  // Sketch mode: constraint tools
+  { id: "coincident", label: "Coincident", icon: "⊙", category: "sketch-constraint", mode: "sketch" },
+  { id: "horizontal", label: "Horizontal", icon: "─", category: "sketch-constraint", shortcut: "H", mode: "sketch" },
+  { id: "vertical", label: "Vertical", icon: "│", category: "sketch-constraint", shortcut: "V", mode: "sketch" },
+  { id: "parallel", label: "Parallel", icon: "∥", category: "sketch-constraint", mode: "sketch" },
+  { id: "perpendicular", label: "Perp", icon: "⊥", category: "sketch-constraint", mode: "sketch" },
+  { id: "equal", label: "Equal", icon: "=", category: "sketch-constraint", mode: "sketch" },
+  { id: "fixed", label: "Fixed", icon: "⚓", category: "sketch-constraint", mode: "sketch" },
+  { id: "distance", label: "Distance", icon: "↔", category: "sketch-constraint", shortcut: "D", mode: "sketch" },
+  { id: "angle", label: "Angle", icon: "∠", category: "sketch-constraint", mode: "sketch" },
+  { id: "radius", label: "Radius", icon: "⊚", category: "sketch-constraint", mode: "sketch" },
 
   // 3D Primitives (object mode)
   { id: "box", label: "Box", icon: "⬡", category: "primitive", mode: "object" },
@@ -312,7 +324,10 @@ function ToolButton({ tool, isActive, onClick }: ToolButtonProps) {
 
 // Profile Menu Component
 interface ProfileMenuProps {
-  onNew: () => void;
+  onNewPartStudio: () => void;
+  onNewDrawing?: () => void;
+  onNewSchematic?: () => void;
+  onNewPcb?: () => void;
   onOpen: () => void;
   onSave: () => void;
   onDownload: () => void;
@@ -326,7 +341,10 @@ interface ProfileMenuProps {
 }
 
 function ProfileMenu({
-  onNew,
+  onNewPartStudio,
+  onNewDrawing,
+  onNewSchematic,
+  onNewPcb,
   onOpen,
   onSave,
   onDownload,
@@ -341,6 +359,7 @@ function ProfileMenu({
   const [isOpen, setIsOpen] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
   const [hoveredItem, setHoveredItem] = React.useState<string | null>(null);
+  const [showNewSubmenu, setShowNewSubmenu] = React.useState(false);
   const [showImportSubmenu, setShowImportSubmenu] = React.useState(false);
   const [showExportSubmenu, setShowExportSubmenu] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
@@ -350,6 +369,7 @@ function ProfileMenu({
     function handleClickOutside(event: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setIsOpen(false);
+        setShowNewSubmenu(false);
         setShowImportSubmenu(false);
         setShowExportSubmenu(false);
       }
@@ -364,9 +384,17 @@ function ProfileMenu({
   const handleMenuItemClick = (action: () => void) => {
     action();
     setIsOpen(false);
+    setShowNewSubmenu(false);
     setShowImportSubmenu(false);
     setShowExportSubmenu(false);
   };
+
+  const newDocumentTypes = [
+    { id: "part-studio", label: "Part Studio", icon: "⬡", action: onNewPartStudio },
+    { id: "drawing", label: "Drawing", icon: "📐", action: onNewDrawing },
+    { id: "schematic", label: "Schematic", icon: "⚡", action: onNewSchematic },
+    { id: "pcb", label: "PCB", icon: "⌹", action: onNewPcb },
+  ].filter(item => item.action); // Only show items with handlers
 
   const importFormats = [
     { id: "stl", label: "STL", icon: "▲" },
@@ -398,23 +426,63 @@ function ProfileMenu({
 
       {isOpen && (
         <div style={styles.menu}>
-          {/* New */}
-          <button
-            style={{
-              ...styles.menuItem,
-              ...(hoveredItem === "new" ? styles.menuItemHover : {}),
-            }}
-            onClick={() => handleMenuItemClick(onNew)}
+          {/* New with submenu */}
+          <div
+            style={{ position: "relative" }}
             onMouseEnter={() => {
               setHoveredItem("new");
+              setShowNewSubmenu(true);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
-            onMouseLeave={() => setHoveredItem(null)}
+            onMouseLeave={(e) => {
+              const relatedTarget = e.relatedTarget as HTMLElement;
+              if (relatedTarget?.closest?.('[data-submenu="new"]')) {
+                return;
+              }
+              setHoveredItem(null);
+              setShowNewSubmenu(false);
+            }}
           >
-            <span style={styles.menuItemIcon}>+</span>
-            <span>New</span>
-          </button>
+            <button
+              style={{
+                ...styles.menuItem,
+                ...(hoveredItem === "new" ? styles.menuItemHover : {}),
+              }}
+            >
+              <span style={styles.menuItemIcon}>+</span>
+              <span>New</span>
+              <span style={styles.submenuArrow}>▶</span>
+            </button>
+            {showNewSubmenu && (
+              <div
+                style={styles.submenu}
+                data-submenu="new"
+                onMouseLeave={() => {
+                  setHoveredItem(null);
+                  setShowNewSubmenu(false);
+                }}
+              >
+                <div style={styles.submenuInner}>
+                  {newDocumentTypes.map((docType) => (
+                    <button
+                      key={docType.id}
+                      style={{
+                        ...styles.menuItem,
+                        ...(hoveredItem === `new-${docType.id}` ? styles.menuItemHover : {}),
+                      }}
+                      onClick={() => handleMenuItemClick(docType.action!)}
+                      onMouseEnter={() => setHoveredItem(`new-${docType.id}`)}
+                      onMouseLeave={() => setHoveredItem("new")}
+                    >
+                      <span style={styles.menuItemIcon}>{docType.icon}</span>
+                      <span>{docType.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* My Library */}
           <button
@@ -425,6 +493,7 @@ function ProfileMenu({
             onClick={() => handleMenuItemClick(onMyLibrary)}
             onMouseEnter={() => {
               setHoveredItem("library");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
@@ -445,6 +514,7 @@ function ProfileMenu({
             onClick={() => handleMenuItemClick(onOpen)}
             onMouseEnter={() => {
               setHoveredItem("open");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
@@ -463,6 +533,7 @@ function ProfileMenu({
             onClick={() => handleMenuItemClick(onSave)}
             onMouseEnter={() => {
               setHoveredItem("save");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
@@ -481,6 +552,7 @@ function ProfileMenu({
             onClick={() => handleMenuItemClick(onDownload)}
             onMouseEnter={() => {
               setHoveredItem("download");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
@@ -497,6 +569,7 @@ function ProfileMenu({
             style={{ position: "relative" }}
             onMouseEnter={() => {
               setHoveredItem("import");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(true);
               setShowExportSubmenu(false);
             }}
@@ -555,6 +628,7 @@ function ProfileMenu({
             style={{ position: "relative" }}
             onMouseEnter={() => {
               setHoveredItem("export");
+              setShowNewSubmenu(false);
               setShowExportSubmenu(true);
               setShowImportSubmenu(false);
             }}
@@ -632,6 +706,7 @@ function ProfileMenu({
             onClick={() => handleMenuItemClick(onSettings)}
             onMouseEnter={() => {
               setHoveredItem("settings");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
@@ -650,6 +725,7 @@ function ProfileMenu({
             onClick={() => handleMenuItemClick(onAbout)}
             onMouseEnter={() => {
               setHoveredItem("about");
+              setShowNewSubmenu(false);
               setShowImportSubmenu(false);
               setShowExportSubmenu(false);
             }}
@@ -670,6 +746,9 @@ interface ToolbarProps {
   onSaveProject?: () => Promise<void> | void;
   onDownloadProject?: () => void;
   onNewProject?: () => void;
+  onNewDrawing?: () => void;
+  onNewSchematic?: () => void;
+  onNewPcb?: () => void;
   onImport?: (format: string) => void;
   onOpenAbout?: () => void;
 }
@@ -680,6 +759,9 @@ export function Toolbar({
   onSaveProject,
   onDownloadProject,
   onNewProject,
+  onNewDrawing,
+  onNewSchematic,
+  onNewPcb,
   onImport,
   onOpenAbout,
 }: ToolbarProps) {
@@ -727,6 +809,10 @@ export function Toolbar({
   const startTransform = useCadStore((s) => s.startTransform);
   const cancelTransform = useCadStore((s) => s.cancelTransform);
   const pendingTransform = useCadStore((s) => s.pendingTransform);
+
+  // Constraint workflows
+  const startConstraint = useCadStore((s) => s.startConstraint);
+  const pendingConstraint = useCadStore((s) => s.pendingConstraint);
 
   // Handle tool click - some tools trigger immediate actions
   const handleToolClick = React.useCallback((toolId: string) => {
@@ -778,11 +864,42 @@ export function Toolbar({
       case "scale":
         startTransform("scale");
         break;
+      // Sketch constraint tools
+      case "coincident":
+        startConstraint("coincident");
+        break;
+      case "horizontal":
+        startConstraint("horizontal");
+        break;
+      case "vertical":
+        startConstraint("vertical");
+        break;
+      case "parallel":
+        startConstraint("parallel");
+        break;
+      case "perpendicular":
+        startConstraint("perpendicular");
+        break;
+      case "equal":
+        startConstraint("equal");
+        break;
+      case "fixed":
+        startConstraint("fixed");
+        break;
+      case "distance":
+        startConstraint("distance");
+        break;
+      case "angle":
+        startConstraint("angle");
+        break;
+      case "radius":
+        startConstraint("radius");
+        break;
       default:
         setActiveTool(toolId);
         break;
     }
-  }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, startPrimitive, startTransform, setActiveTool]);
+  }, [enterPlaneSelectionMode, startExtrude, startRevolve, startFillet, startBoolean, startPrimitive, startTransform, startConstraint, setActiveTool]);
 
   // Handle export for all formats
   const handleExport = React.useCallback((formatId: string) => {
@@ -858,6 +975,7 @@ export function Toolbar({
       select: [],
       sketch: [],
       "sketch-draw": [],
+      "sketch-constraint": [],
       primitive: [],
       operation: [],
       modify: [],
@@ -874,10 +992,13 @@ export function Toolbar({
       {/* Fixed left section with profile menu */}
       <div style={styles.toolbarFixed}>
         <ProfileMenu
-          onNew={onNewProject || (() => {
-            console.log("[Toolbar] New project not implemented");
-            alert("New project coming soon!");
+          onNewPartStudio={onNewProject || (() => {
+            console.log("[Toolbar] New Part Studio not implemented");
+            alert("New Part Studio coming soon!");
           })}
+          onNewDrawing={onNewDrawing}
+          onNewSchematic={onNewSchematic}
+          onNewPcb={onNewPcb}
           onOpen={onOpenLibrary || (() => {
             console.log("[Toolbar] Open library not implemented");
           })}
@@ -1010,6 +1131,23 @@ export function Toolbar({
                   key={tool.id}
                   tool={tool}
                   isActive={activeTool === tool.id}
+                  onClick={() => handleToolClick(tool.id)}
+                />
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Sketch Mode: Constraint tools */}
+        {toolsByCategory["sketch-constraint"].length > 0 && (
+          <>
+            <div style={styles.divider} />
+            <div style={styles.toolGroup}>
+              {toolsByCategory["sketch-constraint"].map((tool) => (
+                <ToolButton
+                  key={tool.id}
+                  tool={tool}
+                  isActive={activeTool === tool.id || (pendingConstraint?.type === tool.id)}
                   onClick={() => handleToolClick(tool.id)}
                 />
               ))}

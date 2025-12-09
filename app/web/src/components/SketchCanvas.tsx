@@ -6,7 +6,8 @@
 
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import { useCadStore } from "../store";
-import type { Sketch, SketchPrimitive, Vec2, SketchId } from "@vibecad/core";
+import type { Sketch, SketchPrimitive, Vec2, SketchId, ConstraintType } from "@vibecad/core";
+import { getConstraintArity } from "@vibecad/core";
 
 interface Point2D {
   x: number;
@@ -98,6 +99,42 @@ function getHint(tool: string, drawingState: DrawingState): string {
   }
 }
 
+// Get hint for constraint tool
+function getConstraintHint(type: ConstraintType, selectedCount: number): string {
+  const arity = getConstraintArity(type);
+  const remaining = arity.min - selectedCount;
+
+  const entityNames: Record<ConstraintType, string> = {
+    coincident: "points",
+    horizontal: "line or 2 points",
+    vertical: "line or 2 points",
+    parallel: "lines",
+    perpendicular: "lines",
+    tangent: "curves",
+    equal: "entities",
+    fixed: "point",
+    symmetric: "entities + symmetry line",
+    midpoint: "point, then line",
+    pointOn: "point, then curve",
+    distance: "points or line",
+    angle: "lines",
+    radius: "circle or arc",
+    diameter: "circle or arc",
+    horizontalDistance: "points",
+    verticalDistance: "points",
+  };
+
+  if (remaining <= 0) {
+    return "Constraint will be applied";
+  }
+
+  if (selectedCount === 0) {
+    return `Select ${entityNames[type]} for ${type} constraint`;
+  }
+
+  return `Select ${remaining} more ${remaining === 1 ? "entity" : "entities"} (${selectedCount}/${arity.min})`;
+}
+
 export function SketchCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,6 +146,10 @@ export function SketchCanvas() {
   const sketchMousePos = useCadStore((s) => s.sketchMousePos);
   const sketchDrawingState = useCadStore((s) => s.sketchDrawingState);
   const cancelSketchDrawing = useCadStore((s) => s.cancelSketchDrawing);
+  const pendingConstraint = useCadStore((s) => s.pendingConstraint);
+  const cancelConstraint = useCadStore((s) => s.cancelConstraint);
+  const currentSketchSolveStatus = useCadStore((s) => s.currentSketchSolveStatus);
+  const currentSketchDof = useCadStore((s) => s.currentSketchDof);
 
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
@@ -170,13 +211,17 @@ export function SketchCanvas() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        cancelSketchDrawing();
+        if (pendingConstraint) {
+          cancelConstraint();
+        } else {
+          cancelSketchDrawing();
+        }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [cancelSketchDrawing]);
+  }, [cancelSketchDrawing, cancelConstraint, pendingConstraint]);
 
   // Draw the canvas
   useEffect(() => {
@@ -280,13 +325,60 @@ export function SketchCanvas() {
     >
       <canvas ref={canvasRef} style={styles.canvas} />
 
-      <div style={styles.hint}>
-        {getHint(activeTool, drawingState)}
+      <div style={{
+        ...styles.hint,
+        ...(pendingConstraint ? { backgroundColor: "rgba(100, 108, 255, 0.9)" } : {}),
+      }}>
+        {pendingConstraint
+          ? getConstraintHint(pendingConstraint.type, pendingConstraint.entities.length)
+          : getHint(activeTool, drawingState)}
       </div>
 
       <div style={styles.coords}>
         X: {mousePos.x.toFixed(0)}mm, Y: {mousePos.y.toFixed(0)}mm
       </div>
+
+      {/* DOF and solve status indicator */}
+      {activeSketch && activeSketch.constraints.size > 0 && (
+        <div style={{
+          position: "absolute",
+          bottom: 16,
+          right: 16,
+          backgroundColor: currentSketchSolveStatus === "ok"
+            ? "rgba(64, 192, 87, 0.9)"
+            : currentSketchSolveStatus === "under-constrained"
+              ? "rgba(255, 169, 77, 0.9)"
+              : currentSketchSolveStatus === "over-constrained"
+                ? "rgba(255, 107, 107, 0.9)"
+                : "rgba(100, 100, 100, 0.9)",
+          color: "#fff",
+          padding: "6px 12px",
+          borderRadius: 4,
+          fontSize: 11,
+          fontFamily: "monospace",
+          pointerEvents: "none",
+          display: "flex",
+          flexDirection: "column",
+          gap: 2,
+        }}>
+          <div style={{ fontWeight: 600 }}>
+            {currentSketchSolveStatus === "ok" ? "✓ Fully Constrained" :
+             currentSketchSolveStatus === "under-constrained" ? "⚠ Under-constrained" :
+             currentSketchSolveStatus === "over-constrained" ? "✗ Over-constrained" :
+             currentSketchSolveStatus === "inconsistent" ? "✗ Inconsistent" :
+             currentSketchSolveStatus === "error" ? "✗ Solver Error" :
+             "Not Solved"}
+          </div>
+          {currentSketchDof !== null && currentSketchDof > 0 && (
+            <div style={{ opacity: 0.9 }}>
+              DOF: {currentSketchDof}
+            </div>
+          )}
+          <div style={{ opacity: 0.7 }}>
+            Constraints: {activeSketch.constraints.size}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

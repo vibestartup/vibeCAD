@@ -838,6 +838,10 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
   const getMaterializedSelectionPoints = useCadStore((s) => s.getMaterializedSelectionPoints);
   const activeTool = useCadStore((s) => s.activeTool);
 
+  // Constraint actions
+  const pendingConstraint = useCadStore((s) => s.pendingConstraint);
+  const addConstraintEntity = useCadStore((s) => s.addConstraintEntity);
+
   // Clipboard actions
   const deleteSketchSelection = useCadStore((s) => s.deleteSketchSelection);
   const copySketchSelection = useCadStore((s) => s.copySketchSelection);
@@ -2518,6 +2522,159 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
     }
   }, [editorMode, activeSketch, activeSketchPlane, sketchSelection, hoveredSketchEntity]);
 
+  // Render constraint visualization in sketch mode
+  useEffect(() => {
+    const entityGroup = sketchEntityGroupRef.current;
+    if (!entityGroup || editorMode !== "sketch" || !activeSketch || !activeSketchPlane) return;
+
+    const sketch = activeSketch;
+    const plane = activeSketchPlane;
+
+    // Helper to convert sketch 2D to Three.js 3D
+    const sketchTo3D = (x: number, y: number): THREE.Vector3 => {
+      const world = sketchUtils.sketchToWorld([x, y], plane);
+      return new THREE.Vector3(world[0], world[2], world[1]);
+    };
+
+    const getPos = (id: PrimitiveId): [number, number] | null => {
+      const solved = sketch.solvedPositions?.get(id);
+      if (solved) return [solved[0], solved[1]];
+      const prim = sketch.primitives.get(id);
+      if (prim?.type === "point") return [prim.x, prim.y];
+      return null;
+    };
+
+    // Create constraint visualization
+    const constraintColor = 0xff6b6b; // Red for constraints
+    const constraintGroup = new THREE.Group();
+    constraintGroup.name = "constraints";
+
+    for (const [constraintId, constraint] of sketch.constraints) {
+      const entities = constraint.entities;
+      if (entities.length === 0) continue;
+
+      // Get position for first entity
+      const firstEntity = entities[0];
+      let pos: [number, number] | null = null;
+
+      // Try to get position from entity
+      const prim = sketch.primitives.get(firstEntity);
+      if (prim?.type === "point") {
+        pos = getPos(firstEntity);
+      } else if (prim?.type === "line") {
+        const startPos = getPos(prim.start);
+        const endPos = getPos(prim.end);
+        if (startPos && endPos) {
+          pos = [(startPos[0] + endPos[0]) / 2, (startPos[1] + endPos[1]) / 2];
+        }
+      } else if (prim?.type === "circle" || prim?.type === "arc") {
+        pos = getPos(prim.center);
+      }
+
+      if (!pos) continue;
+
+      // Create small indicator for constraint
+      const indicatorSize = 4;
+      let symbol = "";
+
+      switch (constraint.type) {
+        case "horizontal": symbol = "H"; break;
+        case "vertical": symbol = "V"; break;
+        case "parallel": symbol = "∥"; break;
+        case "perpendicular": symbol = "⊥"; break;
+        case "coincident": symbol = "◦"; break;
+        case "equal": symbol = "="; break;
+        case "fixed": symbol = "⚓"; break;
+        case "tangent": symbol = "T"; break;
+        case "distance": symbol = "D"; break;
+        case "angle": symbol = "∠"; break;
+        case "radius": symbol = "R"; break;
+        case "diameter": symbol = "⌀"; break;
+        default: symbol = "C"; break;
+      }
+
+      // Create a small sphere to indicate constraint location
+      const geo = new THREE.SphereGeometry(indicatorSize, 8, 8);
+      const mat = new THREE.MeshBasicMaterial({
+        color: constraintColor,
+        transparent: true,
+        opacity: 0.7,
+        depthTest: false
+      });
+      const mesh = new THREE.Mesh(geo, mat);
+      const pos3d = sketchTo3D(pos[0], pos[1]);
+      // Offset slightly to not overlap with primitive
+      mesh.position.set(pos3d.x + 5, pos3d.y, pos3d.z + 5);
+      mesh.userData.constraintId = constraintId;
+      mesh.userData.constraintType = constraint.type;
+      mesh.renderOrder = 1001;
+      constraintGroup.add(mesh);
+    }
+
+    // Also highlight entities selected for pending constraint
+    if (pendingConstraint && pendingConstraint.entities.length > 0) {
+      const pendingColor = 0xffa94d; // Orange for pending
+      for (const entityId of pendingConstraint.entities) {
+        const prim = sketch.primitives.get(entityId);
+        if (!prim) continue;
+
+        let pos: [number, number] | null = null;
+        if (prim.type === "point") {
+          pos = getPos(entityId);
+        } else if (prim.type === "line") {
+          const startPos = getPos(prim.start);
+          const endPos = getPos(prim.end);
+          if (startPos && endPos) {
+            pos = [(startPos[0] + endPos[0]) / 2, (startPos[1] + endPos[1]) / 2];
+          }
+        } else if (prim.type === "circle" || prim.type === "arc") {
+          pos = getPos(prim.center);
+        }
+
+        if (!pos) continue;
+
+        const geo = new THREE.RingGeometry(6, 8, 16);
+        const mat = new THREE.MeshBasicMaterial({
+          color: pendingColor,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.8,
+          depthTest: false
+        });
+        const mesh = new THREE.Mesh(geo, mat);
+        const pos3d = sketchTo3D(pos[0], pos[1]);
+        mesh.position.copy(pos3d);
+        // Rotate to lie on sketch plane
+        const planeNormal = new THREE.Vector3(plane.axisX[1] * plane.axisY[2] - plane.axisX[2] * plane.axisY[1],
+                                              plane.axisX[2] * plane.axisY[0] - plane.axisX[0] * plane.axisY[2],
+                                              plane.axisX[0] * plane.axisY[1] - plane.axisX[1] * plane.axisY[0]);
+        planeNormal.normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        const quaternion = new THREE.Quaternion().setFromUnitVectors(up, planeNormal);
+        mesh.quaternion.copy(quaternion);
+        mesh.renderOrder = 1002;
+        constraintGroup.add(mesh);
+      }
+    }
+
+    entityGroup.add(constraintGroup);
+
+    // Cleanup on unmount
+    return () => {
+      entityGroup.remove(constraintGroup);
+      constraintGroup.traverse(obj => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach(m => m.dispose());
+          } else {
+            (obj.material as THREE.Material).dispose();
+          }
+        }
+      });
+    };
+  }, [editorMode, activeSketch, activeSketchPlane, pendingConstraint]);
+
   // Render sketch transform gizmo
   useEffect(() => {
     const gizmoGroup = sketchGizmoGroupRef.current;
@@ -3675,6 +3832,13 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         return;
       }
 
+      // If a constraint tool is active, handle entity selection for constraint
+      if (pendingConstraint && hoveredSketchEntity) {
+        console.log("[Viewport] Adding entity to constraint:", hoveredSketchEntity, "type:", pendingConstraint.type);
+        addConstraintEntity(hoveredSketchEntity);
+        return;
+      }
+
       // If in select mode with select tool, handle entity selection
       if (activeTool === "select") {
         // If we have a hovered entity, toggle its selection
@@ -3833,7 +3997,7 @@ export function Viewport({ viewCubeTopOffset = 16, viewCubeRightOffset = 16 }: V
         }
       }
     }
-  }, [editorMode, createNewSketch, createNewSketchFromFace, occApi, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection, activeTool, hoveredSketchEntity, toggleSketchEntitySelected, setSketchSelection, clearSketchSelection, sketchGizmoState.mode]);
+  }, [editorMode, createNewSketch, createNewSketchFromFace, occApi, handleSketchClick, faceSelectionTarget, setPendingExtrudeSketch, setPendingExtrudeBodyFace, setPendingRevolveSketch, pendingRevolve, hoveredFace, selectFace, objectSelection, setObjectSelection, activeTool, hoveredSketchEntity, toggleSketchEntitySelected, setSketchSelection, clearSketchSelection, sketchGizmoState.mode, pendingConstraint, addConstraintEntity]);
 
   // Handle mouse up - for ending gizmo drags
   const handleMouseUp = useCallback(() => {
