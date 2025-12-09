@@ -13,6 +13,7 @@ import type {
   PinId,
   NetClassId,
 } from "@vibecad/core";
+// Import Schematic namespace - access functions through namespace to avoid module init timing issues
 import { Schematic } from "@vibecad/core";
 
 // Re-export types from Schematic namespace for convenience
@@ -24,35 +25,6 @@ type Net = Schematic.Net;
 type NetLabel = Schematic.NetLabel;
 type SchematicPoint = Schematic.SchematicPoint;
 type NetClass = Schematic.NetClass;
-
-// Destructure functions from Schematic namespace
-const {
-  createSchematicDocument,
-  addSymbolInstance,
-  updateSymbolInstance,
-  deleteSymbolInstance,
-  addWire,
-  deleteWire,
-  addNet,
-  updateNet,
-  addNetLabel,
-  addSymbol,
-  setActiveSheet,
-  getActiveSheetInstances,
-  getActiveSheetWires,
-  getActiveSheetLabels,
-  getNextRefDes,
-  createSymbolInstance,
-  createWire,
-  createNet,
-  createNetLabel,
-  moveInstance,
-  rotateInstance,
-  mirrorInstance,
-  setInstanceRefDes,
-  setInstanceValue,
-  snapToGrid,
-} = Schematic;
 import { HistoryState, createHistory, pushState, undo as historyUndo, redo as historyRedo } from "@vibecad/core";
 
 // ============================================================================
@@ -86,11 +58,11 @@ export type SchematicTool =
 // ============================================================================
 
 interface SchematicState {
-  // Document
-  schematic: SchematicDocument;
+  // Document (null until initialized)
+  schematic: SchematicDocument | null;
 
-  // History
-  historyState: HistoryState<SchematicDocument>;
+  // History (null until initialized)
+  historyState: HistoryState<SchematicDocument> | null;
 
   // View state
   viewOffset: { x: number; y: number };
@@ -140,6 +112,7 @@ interface SchematicState {
 
 interface SchematicActions {
   // Document management
+  initSchematic: () => void; // Initialize schematic if null (call on component mount)
   setSchematic: (doc: SchematicDocument) => void;
   newSchematic: (name: string) => void;
 
@@ -235,9 +208,9 @@ interface SchematicActions {
 // ============================================================================
 
 export const useSchematicStore = create<SchematicState & SchematicActions>()((set, get) => ({
-  // Initial state
-  schematic: createSchematicDocument("Untitled Schematic"),
-  historyState: createHistory(createSchematicDocument("Untitled Schematic")),
+  // Initial state - null until initSchematic() is called
+  schematic: null,
+  historyState: null,
 
   viewOffset: { x: 0, y: 0 },
   zoom: 1,
@@ -267,6 +240,16 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
   // Document management
   // ========================================
 
+  initSchematic: () => {
+    if (get().schematic === null) {
+      const doc = Schematic.createSchematicDocument("Untitled Schematic");
+      set({
+        schematic: doc,
+        historyState: createHistory(doc),
+      });
+    }
+  },
+
   setSchematic: (doc) => {
     set({
       schematic: doc,
@@ -280,7 +263,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
   },
 
   newSchematic: (name) => {
-    const doc = createSchematicDocument(name);
+    const doc = Schematic.createSchematicDocument(name);
     set({
       schematic: doc,
       historyState: createHistory(doc),
@@ -299,13 +282,15 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
   // ========================================
 
   pushHistory: () => {
-    set((state) => ({
-      historyState: pushState(state.historyState, state.schematic),
-    }));
+    set((state) => {
+      if (!state.historyState || !state.schematic) return state;
+      return { historyState: pushState(state.historyState, state.schematic) };
+    });
   },
 
   undo: () => {
     const { historyState } = get();
+    if (!historyState) return;
     const result = historyUndo(historyState);
     if (result) {
       set({
@@ -320,6 +305,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   redo: () => {
     const { historyState } = get();
+    if (!historyState) return;
     const result = historyRedo(historyState);
     if (result) {
       set({
@@ -332,8 +318,8 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
     }
   },
 
-  canUndo: () => get().historyState.past.length > 0,
-  canRedo: () => get().historyState.future.length > 0,
+  canUndo: () => (get().historyState?.past.length ?? 0) > 0,
+  canRedo: () => (get().historyState?.future.length ?? 0) > 0,
 
   // ========================================
   // View
@@ -394,12 +380,15 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
   // ========================================
 
   setActiveSheet: (sheetId) => {
-    set((state) => ({
-      schematic: setActiveSheet(state.schematic, sheetId),
-      selectedInstances: new Set(),
-      selectedWires: new Set(),
-      selectedLabels: new Set(),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return {
+        schematic: Schematic.setActiveSheet(state.schematic, sheetId),
+        selectedInstances: new Set(),
+        selectedWires: new Set(),
+        selectedLabels: new Set(),
+      };
+    });
   },
 
   newSheet: () => {
@@ -416,9 +405,10 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
   // ========================================
 
   addSymbolToLibrary: (symbol) => {
-    set((state) => ({
-      schematic: addSymbol(state.schematic, symbol),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return { schematic: Schematic.addSymbol(state.schematic, symbol) };
+    });
   },
 
   startPlaceSymbol: (symbolId) => {
@@ -460,17 +450,17 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   placeSymbol: (position) => {
     const { schematic, pendingSymbol, gridSize, snapToGrid: snap } = get();
-    if (!pendingSymbol) return null;
+    if (!pendingSymbol || !schematic) return null;
 
     const symbol = schematic.symbols.get(pendingSymbol.symbolId);
     if (!symbol) return null;
 
     get().pushHistory();
 
-    const snappedPos = snap ? snapToGrid(position, gridSize) : position;
-    const refDes = getNextRefDes(schematic, symbol.refDesPrefix);
+    const snappedPos = snap ? Schematic.snapToGrid(position, gridSize) : position;
+    const refDes = Schematic.getNextRefDes(schematic, symbol.refDesPrefix);
 
-    const instance = createSymbolInstance(
+    const instance = Schematic.createSymbolInstance(
       pendingSymbol.symbolId,
       snappedPos,
       schematic.activeSheetId,
@@ -481,9 +471,10 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
     let finalInstance = instance;
     finalInstance = { ...finalInstance, rotation: pendingSymbol.rotation, mirror: pendingSymbol.mirror };
 
-    set((state) => ({
-      schematic: addSymbolInstance(state.schematic, finalInstance),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return { schematic: Schematic.addSymbolInstance(state.schematic, finalInstance) };
+    });
 
     return instance.id;
   },
@@ -494,7 +485,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   moveSelectedInstances: (delta) => {
     const { schematic, selectedInstances, gridSize, snapToGrid: snap } = get();
-    if (selectedInstances.size === 0) return;
+    if (selectedInstances.size === 0 || !schematic) return;
 
     get().pushHistory();
 
@@ -506,8 +497,8 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
           x: instance.position.x + delta.x,
           y: instance.position.y + delta.y,
         };
-        const snappedPos = snap ? snapToGrid(newPos, gridSize) : newPos;
-        doc = updateSymbolInstance(doc, moveInstance(instance, snappedPos));
+        const snappedPos = snap ? Schematic.snapToGrid(newPos, gridSize) : newPos;
+        doc = Schematic.updateSymbolInstance(doc, Schematic.moveInstance(instance, snappedPos));
       }
     }
 
@@ -516,7 +507,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   rotateSelectedInstances: () => {
     const { schematic, selectedInstances } = get();
-    if (selectedInstances.size === 0) return;
+    if (selectedInstances.size === 0 || !schematic) return;
 
     get().pushHistory();
 
@@ -524,7 +515,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
     for (const instanceId of selectedInstances) {
       const instance = doc.symbolInstances.get(instanceId);
       if (instance) {
-        doc = updateSymbolInstance(doc, rotateInstance(instance));
+        doc = Schematic.updateSymbolInstance(doc, Schematic.rotateInstance(instance));
       }
     }
 
@@ -533,7 +524,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   mirrorSelectedInstances: () => {
     const { schematic, selectedInstances } = get();
-    if (selectedInstances.size === 0) return;
+    if (selectedInstances.size === 0 || !schematic) return;
 
     get().pushHistory();
 
@@ -541,7 +532,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
     for (const instanceId of selectedInstances) {
       const instance = doc.symbolInstances.get(instanceId);
       if (instance) {
-        doc = updateSymbolInstance(doc, mirrorInstance(instance));
+        doc = Schematic.updateSymbolInstance(doc, Schematic.mirrorInstance(instance));
       }
     }
 
@@ -550,13 +541,13 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   deleteSelectedInstances: () => {
     const { schematic, selectedInstances } = get();
-    if (selectedInstances.size === 0) return;
+    if (selectedInstances.size === 0 || !schematic) return;
 
     get().pushHistory();
 
     let doc = schematic;
     for (const instanceId of selectedInstances) {
-      doc = deleteSymbolInstance(doc, instanceId);
+      doc = Schematic.deleteSymbolInstance(doc, instanceId);
     }
 
     set({
@@ -567,26 +558,30 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   setInstanceRefDes: (instanceId, refDes) => {
     const { schematic } = get();
+    if (!schematic) return;
     const instance = schematic.symbolInstances.get(instanceId);
     if (!instance) return;
 
     get().pushHistory();
 
-    set((state) => ({
-      schematic: updateSymbolInstance(state.schematic, setInstanceRefDes(instance, refDes)),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return { schematic: Schematic.updateSymbolInstance(state.schematic, Schematic.setInstanceRefDes(instance, refDes)) };
+    });
   },
 
   setInstanceValue: (instanceId, value) => {
     const { schematic } = get();
+    if (!schematic) return;
     const instance = schematic.symbolInstances.get(instanceId);
     if (!instance) return;
 
     get().pushHistory();
 
-    set((state) => ({
-      schematic: updateSymbolInstance(state.schematic, setInstanceValue(instance, value)),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return { schematic: Schematic.updateSymbolInstance(state.schematic, Schematic.setInstanceValue(instance, value)) };
+    });
   },
 
   // ========================================
@@ -595,7 +590,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   startWire: (point, startPin) => {
     const { gridSize, snapToGrid: snap } = get();
-    const snappedPoint = snap ? snapToGrid(point, gridSize) : point;
+    const snappedPoint = snap ? Schematic.snapToGrid(point, gridSize) : point;
 
     set({
       mode: "draw-wire",
@@ -610,7 +605,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
     const { wireDrawing, gridSize, snapToGrid: snap } = get();
     if (!wireDrawing) return;
 
-    const snappedPoint = snap ? snapToGrid(point, gridSize) : point;
+    const snappedPoint = snap ? Schematic.snapToGrid(point, gridSize) : point;
 
     // Add intermediate orthogonal point if needed
     const lastPoint = wireDrawing.points[wireDrawing.points.length - 1];
@@ -630,7 +625,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   finishWire: (endPin) => {
     const { schematic, wireDrawing } = get();
-    if (!wireDrawing || wireDrawing.points.length < 2) {
+    if (!wireDrawing || wireDrawing.points.length < 2 || !schematic) {
       set({ wireDrawing: null });
       return null;
     }
@@ -643,17 +638,17 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
     // Check if we're connecting to existing nets
     // For now, create a new net
-    const net = createNet(`Net_${doc.nets.size + 1}`);
-    doc = addNet(doc, net);
+    const net = Schematic.createNet(`Net_${doc.nets.size + 1}`);
+    doc = Schematic.addNet(doc, net);
     netId = net.id;
 
     // Create wire
-    const wire = createWire(wireDrawing.points, netId, doc.activeSheetId);
-    doc = addWire(doc, wire);
+    const wire = Schematic.createWire(wireDrawing.points, netId, doc.activeSheetId);
+    doc = Schematic.addWire(doc, wire);
 
     // Update net with wire
     const updatedNet = { ...doc.nets.get(netId)!, wires: [...doc.nets.get(netId)!.wires, wire.id] };
-    doc = updateNet(doc, updatedNet);
+    doc = Schematic.updateNet(doc, updatedNet);
 
     set({
       schematic: doc,
@@ -673,13 +668,13 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   deleteSelectedWires: () => {
     const { schematic, selectedWires } = get();
-    if (selectedWires.size === 0) return;
+    if (selectedWires.size === 0 || !schematic) return;
 
     get().pushHistory();
 
     let doc = schematic;
     for (const wireId of selectedWires) {
-      doc = deleteWire(doc, wireId);
+      doc = Schematic.deleteWire(doc, wireId);
     }
 
     set({
@@ -694,14 +689,16 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   renameNet: (netId, name) => {
     const { schematic } = get();
+    if (!schematic) return;
     const net = schematic.nets.get(netId);
     if (!net) return;
 
     get().pushHistory();
 
-    set((state) => ({
-      schematic: updateNet(state.schematic, { ...net, name }),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return { schematic: Schematic.updateNet(state.schematic, { ...net, name }) };
+    });
   },
 
   // ========================================
@@ -710,15 +707,17 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   placeNetLabel: (position, netName, style) => {
     const { schematic, gridSize, snapToGrid: snap } = get();
+    if (!schematic) return null as unknown as NetLabelId;
 
     get().pushHistory();
 
-    const snappedPos = snap ? snapToGrid(position, gridSize) : position;
-    const label = createNetLabel(snappedPos, netName, style, schematic.activeSheetId);
+    const snappedPos = snap ? Schematic.snapToGrid(position, gridSize) : position;
+    const label = Schematic.createNetLabel(snappedPos, netName, style, schematic.activeSheetId);
 
-    set((state) => ({
-      schematic: addNetLabel(state.schematic, label),
-    }));
+    set((state) => {
+      if (!state.schematic) return state;
+      return { schematic: Schematic.addNetLabel(state.schematic, label) };
+    });
 
     return label.id;
   },
@@ -783,6 +782,7 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
 
   selectAll: () => {
     const { schematic } = get();
+    if (!schematic) return;
     const sheet = schematic.sheets.get(schematic.activeSheetId);
     if (!sheet) return;
 
@@ -841,8 +841,17 @@ export const useSchematicStore = create<SchematicState & SchematicActions>()((se
   // Query helpers
   // ========================================
 
-  getActiveSheetInstances: () => getActiveSheetInstances(get().schematic),
-  getActiveSheetWires: () => getActiveSheetWires(get().schematic),
-  getActiveSheetLabels: () => getActiveSheetLabels(get().schematic),
-  getSymbol: (symbolId) => get().schematic.symbols.get(symbolId),
+  getActiveSheetInstances: () => {
+    const s = get().schematic;
+    return s ? Schematic.getActiveSheetInstances(s) : [];
+  },
+  getActiveSheetWires: () => {
+    const s = get().schematic;
+    return s ? Schematic.getActiveSheetWires(s) : [];
+  },
+  getActiveSheetLabels: () => {
+    const s = get().schematic;
+    return s ? Schematic.getActiveSheetLabels(s) : [];
+  },
+  getSymbol: (symbolId) => get().schematic?.symbols.get(symbolId),
 }));

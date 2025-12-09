@@ -22,8 +22,8 @@ function StatusBar() {
   const activeTool = useSchematicStore((s) => s.activeTool);
 
   const totalSelected = selectedInstances.size + selectedWires.size;
-  const componentCount = schematic.symbolInstances.size;
-  const netCount = schematic.nets.size;
+  const componentCount = schematic?.symbolInstances.size ?? 0;
+  const netCount = schematic?.nets.size ?? 0;
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
@@ -74,10 +74,13 @@ export function SchematicEditor() {
   const pendingSymbol = useSchematicStore((s) => s.pendingSymbol);
   const setTool = useSchematicStore((s) => s.setTool);
 
-  // Initialize library store
+  // Initialize stores
   const initializeLibraries = useLibraryStore((s) => s.initializeLibraries);
+  const initSchematic = useSchematicStore((s) => s.initSchematic);
 
   useEffect(() => {
+    // Initialize schematic if needed
+    initSchematic();
     // Initialize with dummy layer IDs for now (schematic doesn't need PCB layers)
     initializeLibraries({
       topCopper: "layer_topCu" as any,
@@ -85,7 +88,7 @@ export function SchematicEditor() {
       topFab: "layer_topFab" as any,
       topCrtYd: "layer_topCrtYd" as any,
     });
-  }, [initializeLibraries]);
+  }, [initSchematic, initializeLibraries]);
 
   // Keyboard shortcuts
   useEffect(() => {

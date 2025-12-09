@@ -215,6 +215,8 @@ function NetsListContent() {
   const schematic = useSchematicStore((s) => s.schematic);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
+  if (!schematic) return null;
+
   const nets = Array.from(schematic.nets.values());
 
   if (nets.length === 0) {
@@ -262,6 +264,8 @@ function SheetsListContent() {
   const schematic = useSchematicStore((s) => s.schematic);
   const setActiveSheet = useSchematicStore((s) => s.setActiveSheet);
 
+  if (!schematic) return null;
+
   const sheets = Array.from(schematic.sheets.values());
 
   return (
@@ -300,7 +304,7 @@ function PropertiesContent() {
 
   // Get first selected instance
   const selectedId = selectedInstances.size > 0 ? Array.from(selectedInstances)[0] : null;
-  const instance = selectedId ? schematic.symbolInstances.get(selectedId) : null;
+  const instance = selectedId && schematic ? schematic.symbolInstances.get(selectedId) : null;
   const symbol = instance ? getSymbol(instance.symbolId) : null;
 
   if (!instance || !symbol) {
@@ -381,6 +385,8 @@ function PropertiesContent() {
 
 function DesignInfoContent() {
   const schematic = useSchematicStore((s) => s.schematic);
+
+  if (!schematic) return null;
 
   const componentCount = schematic.symbolInstances.size;
   const netCount = schematic.nets.size;
