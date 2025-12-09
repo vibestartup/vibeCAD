@@ -401,4 +401,72 @@ pnpm install
 pnpm dev:web
 ```
 
-Opens at http://localhost:5173
+Opens at http://localhost:3000 (web app) and http://localhost:3001 (library server)
+
+---
+
+## KiCad Library Setup
+
+The schematic editor uses KiCad libraries for component symbols and footprints. These need to be downloaded and indexed before use.
+
+### Size Estimates
+
+| Library | Files | Disk Space | Index Time |
+|---------|-------|------------|------------|
+| kicad-symbols | 222 files | ~230 MB | ~30 sec |
+| kicad-footprints | ~300 dirs | ~500-700 MB | ~2 min |
+
+### Setup Steps
+
+#### 1. Clone Symbol Libraries
+
+```bash
+# Clone with shallow history
+git clone --depth 1 https://gitlab.com/kicad/libraries/kicad-symbols.git libraries/kicad-symbols
+
+# Copy to expected location
+mkdir -p app/libraries/kicad/symbols
+cp libraries/kicad-symbols/*.kicad_sym app/libraries/kicad/symbols/
+```
+
+#### 2. Clone Footprint Libraries (Optional - larger download)
+
+```bash
+# Clone with shallow history (~500-700MB)
+git clone --depth 1 https://gitlab.com/kicad/libraries/kicad-footprints.git libraries/kicad-footprints
+
+# Copy to expected location
+mkdir -p app/libraries/kicad/footprints
+cp -r libraries/kicad-footprints/*.pretty app/libraries/kicad/footprints/
+```
+
+#### 3. Build the Index
+
+```bash
+pnpm index-libraries
+```
+
+This creates `app/data/library-index.json` with component metadata for fast searching.
+
+### Library Structure
+
+```
+app/libraries/kicad/
+├── symbols/           # *.kicad_sym files
+│   ├── Device.kicad_sym
+│   ├── Connector.kicad_sym
+│   └── ...
+└── footprints/        # *.pretty directories
+    ├── Resistor_SMD.pretty/
+    │   ├── R_0402_1005Metric.kicad_mod
+    │   └── ...
+    └── ...
+```
+
+### Re-indexing
+
+Run `pnpm index-libraries` after adding new libraries or updating existing ones.
+
+### Custom Libraries
+
+Place custom `.kicad_sym` files in `app/libraries/kicad/symbols/` and custom `.pretty` directories in `app/libraries/kicad/footprints/`, then re-index.
