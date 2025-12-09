@@ -364,6 +364,31 @@ function AnnotationRenderer({ annotation, isSelected, onSelect }: AnnotationRend
 }
 
 // ============================================================================
+// Helper Functions
+// ============================================================================
+
+function findViewAtPosition(pos: Vec2, drawing: Drawing): DrawingView | null {
+  for (const view of drawing.views.values()) {
+    // Simple bounding box check
+    const bbox = view.projectionResult?.boundingBox ?? { min: [-40, -40], max: [40, 40] };
+    const viewX = view.position[0];
+    const viewY = view.position[1];
+    const halfWidth = (bbox.max[0] - bbox.min[0]) / 2 + 10;
+    const halfHeight = (bbox.max[1] - bbox.min[1]) / 2 + 10;
+
+    if (
+      pos[0] >= viewX - halfWidth &&
+      pos[0] <= viewX + halfWidth &&
+      pos[1] >= viewY - halfHeight &&
+      pos[1] <= viewY + halfHeight
+    ) {
+      return view;
+    }
+  }
+  return null;
+}
+
+// ============================================================================
 // Main Component
 // ============================================================================
 
@@ -389,6 +414,13 @@ export function DrawingCanvas() {
   const editorMode = useDrawingStore((s) => s.editorMode);
   const pendingViewPlacement = useDrawingStore((s) => s.pendingViewPlacement);
   const confirmViewPlacement = useDrawingStore((s) => s.confirmViewPlacement);
+  const pendingDimension = useDrawingStore((s) => s.pendingDimension);
+  const setDimensionFirstPoint = useDrawingStore((s) => s.setDimensionFirstPoint);
+  const confirmDimension = useDrawingStore((s) => s.confirmDimension);
+  const cancelDimension = useDrawingStore((s) => s.cancelDimension);
+
+  // Track mouse position for dimension preview
+  const [mousePos, setMousePos] = useState<Vec2 | null>(null);
 
   // Get sheet dimensions, with fallback for null drawing
   const sheet = drawing?.sheet ?? { width: 420, height: 297, margins: { top: 10, bottom: 10, left: 10, right: 10 }, size: "A3" as const, orientation: "landscape" as const };
@@ -423,6 +455,9 @@ export function DrawingCanvas() {
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [setSheetZoom]);
 
+  // Check if we're in dimension creation mode
+  const isDimensionMode = editorMode.startsWith("dimension-");
+
   // Handle pan
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -434,12 +469,35 @@ export function DrawingCanvas() {
         // Place view on click
         const pos = screenToSheet(e.clientX, e.clientY);
         confirmViewPlacement(pos);
+      } else if (e.button === 0 && isDimensionMode && pendingDimension) {
+        // Handle dimension point placement
+        const pos = screenToSheet(e.clientX, e.clientY);
+
+        // Find which view was clicked (if any)
+        const clickedView = drawing ? findViewAtPosition(pos, drawing) : null;
+
+        if (!pendingDimension.firstPoint) {
+          // Set first point
+          if (clickedView) {
+            setDimensionFirstPoint(clickedView.id, pos);
+          } else {
+            // Allow placing dimension even without a view
+            setDimensionFirstPoint("" as any, pos);
+          }
+        } else {
+          // Confirm dimension with second point
+          confirmDimension(pos);
+        }
       } else if (e.button === 0) {
         // Left click - clear selection if clicking on background
         clearSelection();
+      } else if (e.button === 2 && isDimensionMode) {
+        // Right click to cancel dimension
+        e.preventDefault();
+        cancelDimension();
       }
     },
-    [sheetPan, sheetZoom, editorMode, pendingViewPlacement, confirmViewPlacement, clearSelection, screenToSheet]
+    [sheetPan, sheetZoom, editorMode, pendingViewPlacement, confirmViewPlacement, clearSelection, screenToSheet, isDimensionMode, pendingDimension, drawing, setDimensionFirstPoint, confirmDimension, cancelDimension]
   );
 
   const handleMouseMove = useCallback(
@@ -449,13 +507,27 @@ export function DrawingCanvas() {
         const newPanY = (e.clientY - panStart[1]) / sheetZoom;
         setSheetPan([newPanX, newPanY]);
       }
+
+      // Track mouse position for dimension preview
+      if (isDimensionMode) {
+        const pos = screenToSheet(e.clientX, e.clientY);
+        setMousePos(pos);
+      }
     },
-    [isPanning, panStart, sheetZoom, setSheetPan]
+    [isPanning, panStart, sheetZoom, setSheetPan, isDimensionMode, screenToSheet]
   );
 
   const handleMouseUp = useCallback(() => {
     setIsPanning(false);
   }, []);
+
+  // Handle right-click context menu
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    if (isDimensionMode) {
+      e.preventDefault();
+      cancelDimension();
+    }
+  }, [isDimensionMode, cancelDimension]);
 
   // Calculate viewBox to center the sheet
   const viewBoxWidth = sheet.width + 40;
@@ -469,7 +541,7 @@ export function DrawingCanvas() {
         ref={svgRef}
         style={{
           ...styles.svg,
-          cursor: isPanning ? "grabbing" : editorMode === "place-view" ? "crosshair" : "default",
+          cursor: isPanning ? "grabbing" : (editorMode === "place-view" || isDimensionMode) ? "crosshair" : "default",
         }}
         viewBox={`${viewBoxX / sheetZoom} ${viewBoxY / sheetZoom} ${viewBoxWidth / sheetZoom} ${viewBoxHeight / sheetZoom}`}
         preserveAspectRatio="xMidYMid meet"
@@ -477,6 +549,7 @@ export function DrawingCanvas() {
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onContextMenu={handleContextMenu}
       >
         {/* Sheet shadow */}
         <rect x={3} y={3} width={sheet.width} height={sheet.height} {...styles.sheetShadow} />
@@ -568,6 +641,74 @@ export function DrawingCanvas() {
               Click to place view
             </text>
           </g>
+        )}
+
+        {/* Dimension creation preview */}
+        {isDimensionMode && pendingDimension && (
+          <g>
+            {/* First point marker */}
+            {pendingDimension.firstPoint && (
+              <>
+                <circle
+                  cx={pendingDimension.firstPoint.position[0]}
+                  cy={pendingDimension.firstPoint.position[1]}
+                  r={2}
+                  fill="#ff6600"
+                />
+                {/* Preview line to cursor */}
+                {mousePos && (
+                  <>
+                    <line
+                      x1={pendingDimension.firstPoint.position[0]}
+                      y1={pendingDimension.firstPoint.position[1]}
+                      x2={mousePos[0]}
+                      y2={mousePos[1]}
+                      stroke="#ff6600"
+                      strokeWidth={0.5}
+                      strokeDasharray="2,2"
+                    />
+                    <circle cx={mousePos[0]} cy={mousePos[1]} r={2} fill="#ff6600" opacity={0.5} />
+                    {/* Preview dimension value */}
+                    <text
+                      x={(pendingDimension.firstPoint.position[0] + mousePos[0]) / 2}
+                      y={(pendingDimension.firstPoint.position[1] + mousePos[1]) / 2 - 5}
+                      {...styles.dimensionText}
+                      fill="#ff6600"
+                    >
+                      {Math.sqrt(
+                        Math.pow(mousePos[0] - pendingDimension.firstPoint.position[0], 2) +
+                        Math.pow(mousePos[1] - pendingDimension.firstPoint.position[1], 2)
+                      ).toFixed(1)}
+                    </text>
+                  </>
+                )}
+              </>
+            )}
+            {/* Cursor hint when no first point yet */}
+            {!pendingDimension.firstPoint && mousePos && (
+              <>
+                <circle cx={mousePos[0]} cy={mousePos[1]} r={2} fill="#ff6600" opacity={0.5} />
+                <text x={mousePos[0] + 5} y={mousePos[1] - 5} fontSize={3} fill="#ff6600">
+                  Click first point
+                </text>
+              </>
+            )}
+          </g>
+        )}
+
+        {/* Mode hint */}
+        {isDimensionMode && (
+          <text
+            x={10}
+            y={sheet.height - 5}
+            fontSize={3}
+            fill="#666"
+            fontFamily="sans-serif"
+          >
+            {pendingDimension?.firstPoint
+              ? "Click second point (Right-click to cancel)"
+              : "Click first point (Right-click to cancel)"}
+          </text>
         )}
       </svg>
     </div>
