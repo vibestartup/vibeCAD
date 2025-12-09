@@ -286,7 +286,7 @@ export interface OccApi {
 // Projection Types
 // ============================================================================
 
-export type ProjectedEdgeType = "visible" | "hidden" | "silhouette" | "sewn" | "outline";
+export type ProjectedEdgeType = "visible" | "hidden" | "silhouette" | "sewn" | "outline" | "section";
 
 export interface ProjectedEdge2D {
   type: ProjectedEdgeType;
