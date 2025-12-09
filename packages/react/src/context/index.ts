@@ -7,7 +7,7 @@ export {
   useKernelContext,
   useKernel,
   useOcc,
-  useSlvs,
+  useGcs,
 } from "./KernelContext";
 
 export {

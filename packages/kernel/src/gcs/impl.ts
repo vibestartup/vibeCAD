@@ -1,10 +1,17 @@
 /**
- * SlvsApi implementation using PlaneGCS from FreeCAD.
+ * GcsApi implementation using PlaneGCS from FreeCAD.
+ *
+ * PlaneGCS is the constraint solver used by FreeCAD's Sketcher workbench.
+ *
+ * ## Status: IMPLEMENTED but NOT WIRED UP
+ *
+ * This code works, but constraint solving is not yet connected to the UI.
+ * See `PLAN-SKETCH-CONSTRAINTS.md` for the integration plan.
  */
 
 import type { GcsWrapper } from "@salusoft89/planegcs";
 import type {
-  SlvsApi,
+  GcsApi,
   GroupHandle,
   EntityHandle,
   ConstraintHandle,
@@ -25,11 +32,7 @@ let nextGroupId = 1;
 let nextGlobalEntityId = 1;
 let nextGlobalConstraintId = 1;
 
-function genId(prefix: string): string {
-  return `${prefix}_${nextGlobalEntityId++}`;
-}
-
-export class SlvsApiImpl implements SlvsApi {
+export class GcsApiImpl implements GcsApi {
   private groups: Map<GroupHandle, Group> = new Map();
   private gcsFactory: () => GcsWrapper;
 
@@ -67,7 +70,6 @@ export class SlvsApiImpl implements SlvsApi {
     const entityId = nextGlobalEntityId++;
     const pointId = `pt_${entityId}`;
 
-    // Add point to planegcs using the correct format
     group.gcs.push_primitives_and_params([
       {
         type: "point" as const,
@@ -83,11 +85,9 @@ export class SlvsApiImpl implements SlvsApi {
   }
 
   getPoint2d(pointId: EntityHandle): { x: number; y: number } {
-    // Find the point across all groups
-    for (const group of this.groups.values()) {
+    for (const group of Array.from(this.groups.values())) {
       const point = group.points.get(pointId);
       if (point) {
-        // Get updated value from GCS
         const primitives = group.gcs.sketch_index.get_primitives();
         const ptData = primitives.find((p: any) => p.id === point.pointId);
         if (ptData && ptData.type === "point") {
@@ -157,12 +157,10 @@ export class SlvsApiImpl implements SlvsApi {
     const endPt = group.points.get(end);
     if (!centerPt || !startPt || !endPt) throw new Error("Points not found for arc");
 
-    // Calculate radius from center to start
     const dx = startPt.x - centerPt.x;
     const dy = startPt.y - centerPt.y;
     const radius = Math.sqrt(dx * dx + dy * dy);
 
-    // Calculate angles
     const startAngle = Math.atan2(startPt.y - centerPt.y, startPt.x - centerPt.x);
     const endAngle = Math.atan2(endPt.y - centerPt.y, endPt.x - centerPt.x);
 
@@ -284,7 +282,6 @@ export class SlvsApiImpl implements SlvsApi {
     const group = this.getGroup(groupId);
     const constraintId = nextGlobalConstraintId++;
 
-    // Determine entity types and add appropriate tangent constraint
     const circle1 = group.circles.get(e1);
     const circle2 = group.circles.get(e2);
     const line1 = group.lines.get(e1);
@@ -292,30 +289,15 @@ export class SlvsApiImpl implements SlvsApi {
 
     if (circle1 && line2) {
       group.gcs.push_primitives_and_params([
-        {
-          type: "tangent_lc" as const,
-          id: `c_${constraintId}`,
-          l_id: line2.id,
-          c_id: circle1.id,
-        },
+        { type: "tangent_lc" as const, id: `c_${constraintId}`, l_id: line2.id, c_id: circle1.id },
       ]);
     } else if (line1 && circle2) {
       group.gcs.push_primitives_and_params([
-        {
-          type: "tangent_lc" as const,
-          id: `c_${constraintId}`,
-          l_id: line1.id,
-          c_id: circle2.id,
-        },
+        { type: "tangent_lc" as const, id: `c_${constraintId}`, l_id: line1.id, c_id: circle2.id },
       ]);
     } else if (circle1 && circle2) {
       group.gcs.push_primitives_and_params([
-        {
-          type: "tangent_cc" as const,
-          id: `c_${constraintId}`,
-          c1_id: circle1.id,
-          c2_id: circle2.id,
-        },
+        { type: "tangent_cc" as const, id: `c_${constraintId}`, c1_id: circle1.id, c2_id: circle2.id },
       ]);
     }
 
@@ -333,23 +315,12 @@ export class SlvsApiImpl implements SlvsApi {
     const circle2 = group.circles.get(e2);
 
     if (line1 && line2) {
-      // Use equal_length constraint for lines
       group.gcs.push_primitives_and_params([
-        {
-          type: "equal_length" as const,
-          id: `c_${constraintId}`,
-          l1_id: line1.id,
-          l2_id: line2.id,
-        },
+        { type: "equal_length" as const, id: `c_${constraintId}`, l1_id: line1.id, l2_id: line2.id },
       ]);
     } else if (circle1 && circle2) {
       group.gcs.push_primitives_and_params([
-        {
-          type: "equal_radius_cc" as const,
-          id: `c_${constraintId}`,
-          c1_id: circle1.id,
-          c2_id: circle2.id,
-        },
+        { type: "equal_radius_cc" as const, id: `c_${constraintId}`, c1_id: circle1.id, c2_id: circle2.id },
       ]);
     }
 
@@ -365,13 +336,7 @@ export class SlvsApiImpl implements SlvsApi {
     if (!lineData || !pointData) throw new Error("Line or point not found");
 
     group.gcs.push_primitives_and_params([
-      {
-        type: "p2l_distance" as const,
-        id: `c_${constraintId}`,
-        p_id: pointData.pointId,
-        l_id: lineData.id,
-        distance: 0,
-      },
+      { type: "p2l_distance" as const, id: `c_${constraintId}`, p_id: pointData.pointId, l_id: lineData.id, distance: 0 },
     ]);
 
     group.constraints.add(constraintId);
@@ -385,43 +350,19 @@ export class SlvsApiImpl implements SlvsApi {
     const pointData = group.points.get(pt);
     if (!lineData || !pointData) throw new Error("Line or point not found");
 
-    // Get line endpoints
     const p1 = group.points.get(lineData.p1);
     const p2 = group.points.get(lineData.p2);
     if (!p1 || !p2) throw new Error("Line endpoints not found");
 
-    // Constrain point to be at midpoint using difference constraints:
-    // pt.x = (p1.x + p2.x) / 2 => 2*pt.x - p1.x - p2.x = 0
-    // We use: pt.x - p1.x = p2.x - pt.x (symmetric around pt)
-    // Using proportional: (pt.x - p1.x) / (p2.x - pt.x) = 1
-
-    // Actually simpler: use two difference constraints
-    // diff1: pt.x - p1.x = d (where d is half the total)
-    // diff2: p2.x - pt.x = d (same d)
-    // This means: pt.x - p1.x = p2.x - pt.x => 2*pt.x = p1.x + p2.x
-
-    // Use p2p_symmetric_ppp: p1 and p2 are symmetric about pt
-    // This constrains pt to be at the midpoint of p1 and p2
     group.gcs.push_primitives_and_params([
-      {
-        type: "p2p_symmetric_ppp" as const,
-        id: `c_${constraintId}`,
-        p1_id: p1.pointId,
-        p2_id: p2.pointId,
-        p_id: pointData.pointId,
-      },
+      { type: "p2p_symmetric_ppp" as const, id: `c_${constraintId}`, p1_id: p1.pointId, p2_id: p2.pointId, p_id: pointData.pointId },
     ]);
 
     group.constraints.add(constraintId);
     return constraintId;
   }
 
-  addDistance(
-    groupId: GroupHandle,
-    p1: EntityHandle,
-    p2: EntityHandle,
-    distance: number
-  ): ConstraintHandle {
+  addDistance(groupId: GroupHandle, p1: EntityHandle, p2: EntityHandle, distance: number): ConstraintHandle {
     const group = this.getGroup(groupId);
     const constraintId = nextGlobalConstraintId++;
 
@@ -430,25 +371,14 @@ export class SlvsApiImpl implements SlvsApi {
     if (!pt1 || !pt2) throw new Error("Points not found");
 
     group.gcs.push_primitives_and_params([
-      {
-        type: "p2p_distance" as const,
-        id: `c_${constraintId}`,
-        p1_id: pt1.pointId,
-        p2_id: pt2.pointId,
-        distance,
-      },
+      { type: "p2p_distance" as const, id: `c_${constraintId}`, p1_id: pt1.pointId, p2_id: pt2.pointId, distance },
     ]);
 
     group.constraints.add(constraintId);
     return constraintId;
   }
 
-  addAngle(
-    groupId: GroupHandle,
-    l1: EntityHandle,
-    l2: EntityHandle,
-    angleRad: number
-  ): ConstraintHandle {
+  addAngle(groupId: GroupHandle, l1: EntityHandle, l2: EntityHandle, angleRad: number): ConstraintHandle {
     const group = this.getGroup(groupId);
     const constraintId = nextGlobalConstraintId++;
     const line1 = group.lines.get(l1);
@@ -456,13 +386,7 @@ export class SlvsApiImpl implements SlvsApi {
     if (!line1 || !line2) throw new Error("Lines not found");
 
     group.gcs.push_primitives_and_params([
-      {
-        type: "l2l_angle_ll" as const,
-        id: `c_${constraintId}`,
-        l1_id: line1.id,
-        l2_id: line2.id,
-        angle: angleRad * (180 / Math.PI), // planegcs uses degrees
-      },
+      { type: "l2l_angle_ll" as const, id: `c_${constraintId}`, l1_id: line1.id, l2_id: line2.id, angle: angleRad * (180 / Math.PI) },
     ]);
 
     group.constraints.add(constraintId);
@@ -476,24 +400,14 @@ export class SlvsApiImpl implements SlvsApi {
     if (!circleData) throw new Error(`Circle ${circle} not found`);
 
     group.gcs.push_primitives_and_params([
-      {
-        type: "circle_radius" as const,
-        id: `c_${constraintId}`,
-        c_id: circleData.id,
-        radius,
-      },
+      { type: "circle_radius" as const, id: `c_${constraintId}`, c_id: circleData.id, radius },
     ]);
 
     group.constraints.add(constraintId);
     return constraintId;
   }
 
-  addHorizontalDistance(
-    groupId: GroupHandle,
-    p1: EntityHandle,
-    p2: EntityHandle,
-    distance: number
-  ): ConstraintHandle {
+  addHorizontalDistance(groupId: GroupHandle, p1: EntityHandle, p2: EntityHandle, distance: number): ConstraintHandle {
     const group = this.getGroup(groupId);
     const constraintId = nextGlobalConstraintId++;
 
@@ -501,27 +415,15 @@ export class SlvsApiImpl implements SlvsApi {
     const pt2 = group.points.get(p2);
     if (!pt1 || !pt2) throw new Error("Points not found");
 
-    // Use difference constraint: pt2.x - pt1.x = distance
     group.gcs.push_primitives_and_params([
-      {
-        type: "difference" as const,
-        id: `c_${constraintId}`,
-        param1: { o_id: pt2.pointId, prop: "x" as const },
-        param2: { o_id: pt1.pointId, prop: "x" as const },
-        difference: distance,
-      },
+      { type: "difference" as const, id: `c_${constraintId}`, param1: { o_id: pt2.pointId, prop: "x" as const }, param2: { o_id: pt1.pointId, prop: "x" as const }, difference: distance },
     ]);
 
     group.constraints.add(constraintId);
     return constraintId;
   }
 
-  addVerticalDistance(
-    groupId: GroupHandle,
-    p1: EntityHandle,
-    p2: EntityHandle,
-    distance: number
-  ): ConstraintHandle {
+  addVerticalDistance(groupId: GroupHandle, p1: EntityHandle, p2: EntityHandle, distance: number): ConstraintHandle {
     const group = this.getGroup(groupId);
     const constraintId = nextGlobalConstraintId++;
 
@@ -529,15 +431,8 @@ export class SlvsApiImpl implements SlvsApi {
     const pt2 = group.points.get(p2);
     if (!pt1 || !pt2) throw new Error("Points not found");
 
-    // Use difference constraint: pt2.y - pt1.y = distance
     group.gcs.push_primitives_and_params([
-      {
-        type: "difference" as const,
-        id: `c_${constraintId}`,
-        param1: { o_id: pt2.pointId, prop: "y" as const },
-        param2: { o_id: pt1.pointId, prop: "y" as const },
-        difference: distance,
-      },
+      { type: "difference" as const, id: `c_${constraintId}`, param1: { o_id: pt2.pointId, prop: "y" as const }, param2: { o_id: pt1.pointId, prop: "y" as const }, difference: distance },
     ]);
 
     group.constraints.add(constraintId);
@@ -551,9 +446,8 @@ export class SlvsApiImpl implements SlvsApi {
       const result = group.gcs.solve();
       group.gcs.apply_solution();
 
-      // Update point positions from solution
       const primitives = group.gcs.sketch_index.get_primitives();
-      for (const [entityId, point] of group.points) {
+      for (const [, point] of Array.from(group.points)) {
         const ptData = primitives.find((p: any) => p.id === point.pointId);
         if (ptData && ptData.type === "point") {
           point.x = ptData.x as number;
@@ -561,27 +455,16 @@ export class SlvsApiImpl implements SlvsApi {
         }
       }
 
-      // Get DOF - planegcs returns it directly from solve or we estimate
-      let dof = 0;
-      try {
-        // Estimate DOF from result
-        dof = result === 0 ? 0 : -1;
-      } catch {
-        dof = 0;
-      }
+      const dof = result === 0 ? 0 : -1;
 
       return {
-        ok: result === 0, // 0 = success in planegcs
+        ok: result === 0,
         dof,
         status: result === 0 ? "ok" : "inconsistent",
       };
     } catch (error) {
-      console.error("[SLVS] Solve error:", error);
-      return {
-        ok: false,
-        dof: -1,
-        status: "inconsistent",
-      };
+      console.error("[GCS] Solve error:", error);
+      return { ok: false, dof: -1, status: "inconsistent" };
     }
   }
 }

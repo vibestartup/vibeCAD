@@ -3,7 +3,7 @@
  *
  * This package provides TypeScript bindings to:
  * - OpenCascade (OCC) for solid modeling
- * - SolveSpace (SLVS) for constraint solving
+ * - PlaneGCS (GCS) for 2D constraint solving
  */
 
 // OpenCascade
@@ -18,27 +18,27 @@ export {
   type VertexHandle,
 } from "./occ";
 
-// SolveSpace
+// Geometric Constraint Solver (PlaneGCS)
 export {
-  loadSlvs,
-  getSlvs,
-  type SlvsApi,
+  loadGcs,
+  getGcs,
+  type GcsApi,
   type SolveResult,
   type GroupHandle,
   type EntityHandle,
   type ConstraintHandle,
-} from "./slvs";
+} from "./gcs";
 
 // ============================================================================
 // Combined Loader
 // ============================================================================
 
 import { loadOcc, type OccApi } from "./occ";
-import { loadSlvs, type SlvsApi } from "./slvs";
+import { loadGcs, type GcsApi } from "./gcs";
 
 export interface Kernel {
   occ: OccApi;
-  slvs: SlvsApi;
+  gcs: GcsApi;
 }
 
 let kernelInstance: Kernel | null = null;
@@ -52,9 +52,9 @@ export async function loadKernel(): Promise<Kernel> {
     return kernelInstance;
   }
 
-  const [occ, slvs] = await Promise.all([loadOcc(), loadSlvs()]);
+  const [occ, gcs] = await Promise.all([loadOcc(), loadGcs()]);
 
-  kernelInstance = { occ, slvs };
+  kernelInstance = { occ, gcs };
   return kernelInstance;
 }
 

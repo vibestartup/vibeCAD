@@ -1,36 +1,34 @@
 /**
- * Constraint solver bindings using PlaneGCS (FreeCAD).
+ * Geometric Constraint Solver (GCS) bindings using PlaneGCS (FreeCAD).
  */
 
 export type {
-  SlvsApi,
+  GcsApi,
   SolveResult,
   GroupHandle,
   EntityHandle,
   ConstraintHandle,
 } from "./api";
 
-export type { PlaneGcsInstance } from "./loader";
-
 // ============================================================================
 // Loader
 // ============================================================================
 
-import type { SlvsApi } from "./api";
-import { SlvsApiImpl } from "./impl";
+import type { GcsApi } from "./api";
+import { GcsApiImpl } from "./impl";
 import { GcsWrapper, init_planegcs_module } from "@salusoft89/planegcs";
 
-let slvsInstance: SlvsApi | null = null;
-let loadingPromise: Promise<SlvsApi> | null = null;
+let gcsInstance: GcsApi | null = null;
+let loadingPromise: Promise<GcsApi> | null = null;
 let gcsModule: any = null;
 
 /**
  * Load the constraint solver WASM module.
  * Returns a singleton instance.
  */
-export async function loadSlvs(): Promise<SlvsApi> {
-  if (slvsInstance) {
-    return slvsInstance;
+export async function loadGcs(): Promise<GcsApi> {
+  if (gcsInstance) {
+    return gcsInstance;
   }
 
   if (loadingPromise) {
@@ -38,26 +36,24 @@ export async function loadSlvs(): Promise<SlvsApi> {
   }
 
   loadingPromise = (async () => {
-    // Load PlaneGCS module
     gcsModule = await init_planegcs_module();
     console.log("[kernel] PlaneGCS WASM loaded successfully");
 
-    // Create a factory that creates new GcsWrapper instances
     const gcsFactory = () => {
       const gcsSystem = new gcsModule.GcsSystem();
       return new GcsWrapper(gcsSystem);
     };
 
-    slvsInstance = new SlvsApiImpl(gcsFactory);
-    return slvsInstance;
+    gcsInstance = new GcsApiImpl(gcsFactory);
+    return gcsInstance;
   })();
 
   return loadingPromise;
 }
 
 /**
- * Get the loaded SLVS instance, or null if not loaded.
+ * Get the loaded GCS instance, or null if not loaded.
  */
-export function getSlvs(): SlvsApi | null {
-  return slvsInstance;
+export function getGcs(): GcsApi | null {
+  return gcsInstance;
 }

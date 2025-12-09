@@ -1,5 +1,5 @@
 /**
- * Kernel context - provides access to OCC and SLVS APIs.
+ * Kernel context - provides access to OCC and GCS (constraint solver) APIs.
  */
 
 import React, { createContext, useContext, useEffect, useState } from "react";
@@ -120,8 +120,8 @@ export function useOcc() {
 }
 
 /**
- * Get the SLVS API, throwing if not loaded.
+ * Get the GCS (constraint solver) API, throwing if not loaded.
  */
-export function useSlvs() {
-  return useKernel().slvs;
+export function useGcs() {
+  return useKernel().gcs;
 }

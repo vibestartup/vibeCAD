@@ -1,5 +1,27 @@
 /**
- * SolveSpace constraint solver API interface.
+ * Geometric Constraint Solver (GCS) API interface.
+ *
+ * This interface abstracts the underlying 2D constraint solver.
+ * Currently implemented using PlaneGCS from FreeCAD (@salusoft89/planegcs).
+ *
+ * ## Why PlaneGCS?
+ *
+ * We evaluated SolveSpace (libslvs) but chose PlaneGCS because:
+ * - Purpose-built for 2D sketch constraints (exactly what we need)
+ * - Active npm package with WASM support
+ * - SolveSpace's WASM port is experimental/broken (see github.com/solvespace/solvespace/issues/1037)
+ *
+ * ## Future: Assembly Constraints
+ *
+ * For 3D assembly constraints (mates), we'll need a separate solver since PlaneGCS is 2D-only.
+ * Options: build libslvs to WASM, custom solver, or physics-based approach.
+ *
+ * ## Current Status
+ *
+ * - **Implemented:** Full PlaneGCS wrapper in `impl.ts`
+ * - **NOT WIRED UP:** Constraint solving not yet connected to sketch UI
+ *
+ * See `PLAN-SKETCH-CONSTRAINTS.md` for the integration plan.
  */
 
 export type GroupHandle = number;
@@ -12,7 +34,7 @@ export interface SolveResult {
   status: "ok" | "over" | "under" | "inconsistent";
 }
 
-export interface SlvsApi {
+export interface GcsApi {
   // ============================================================================
   // Group Management
   // ============================================================================
