@@ -360,7 +360,7 @@ export function PcbCanvas() {
         if (pendingFootprint) {
           // Place the pending footprint
           const fp = getFootprint(pendingFootprint.footprintId);
-          const refDes = fp ? `U${pcb.instances.size + 1}` : "U?";
+          const refDes = fp && pcb ? `U${pcb.instances.size + 1}` : "U?";
           placeFootprint(snappedPos, refDes);
         } else if (mode === "route") {
           if (routing) {
@@ -379,7 +379,7 @@ export function PcbCanvas() {
         }
       }
     },
-    [screenToPcb, snapPoint, mode, routing, pendingFootprint, pcb.instances.size, getFootprint, placeFootprint, addRoutePoint, startRoute, clearSelection]
+    [screenToPcb, snapPoint, mode, routing, pendingFootprint, pcb, getFootprint, placeFootprint, addRoutePoint, startRoute, clearSelection]
   );
 
   const handleMouseMove = useCallback(
@@ -449,7 +449,7 @@ export function PcbCanvas() {
   // Draw the canvas
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !pcb) return;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -608,6 +608,15 @@ export function PcbCanvas() {
     pcbToScreen,
     getFootprint,
   ]);
+
+  // Show loading state if PCB is not initialized yet
+  if (!pcb) {
+    return (
+      <div ref={containerRef} style={{ ...styles.container, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ color: "#888" }}>Loading PCB...</span>
+      </div>
+    );
+  }
 
   // Get visible layers for layer panel
   const visibleLayers = Array.from(pcb.layers.entries()).filter(([_, layer]) => true);
@@ -891,17 +900,18 @@ function drawFootprintInstance(
 
     const padX = pad.position[0] * scale;
     const padY = -pad.position[1] * scale;
-    const padW = pad.size[0] * scale;
-    const padH = pad.size[1] * scale;
+    // Get size from pad.shape (width/height for rect, diameter for circle)
+    const padW = (pad.shape.width || pad.shape.diameter || 1) * scale;
+    const padH = (pad.shape.height || pad.shape.diameter || 1) * scale;
 
-    if (pad.shape === "rect") {
+    if (pad.shape.type === "rect") {
       ctx.fillRect(padX - padW / 2, padY - padH / 2, padW, padH);
-    } else if (pad.shape === "circle" || pad.shape === "oval") {
+    } else if (pad.shape.type === "circle" || pad.shape.type === "oval") {
       ctx.beginPath();
       ctx.ellipse(padX, padY, padW / 2, padH / 2, 0, 0, Math.PI * 2);
       ctx.fill();
-    } else if (pad.shape === "roundrect") {
-      const radius = Math.min(padW, padH) * (pad.roundRectRatio || 0.25);
+    } else if (pad.shape.type === "roundrect") {
+      const radius = Math.min(padW, padH) * (pad.shape.cornerRadius || 0.25);
       roundRect(ctx, padX - padW / 2, padY - padH / 2, padW, padH, radius);
       ctx.fill();
     }
@@ -917,55 +927,61 @@ function drawFootprintInstance(
   }
 
   // Draw graphics (silkscreen, etc.)
-  for (const [graphicId, graphic] of footprint.graphics) {
-    const layer = layers.get(graphic.layerId);
-    if (!layer || !layerVisibility.get(graphic.layerId)) continue;
+  // footprint.graphics is Map<LayerId, FootprintGraphic[]>
+  for (const [layerId, graphicsList] of footprint.graphics) {
+    const layer = layers.get(layerId);
+    if (!layer || !layerVisibility.get(layerId)) continue;
 
     ctx.strokeStyle = getLayerColor(layer);
-    ctx.lineWidth = (graphic.lineWidth || 0.15) * scale;
 
-    if (graphic.type === "line") {
-      ctx.beginPath();
-      ctx.moveTo(graphic.start[0] * scale, -graphic.start[1] * scale);
-      ctx.lineTo(graphic.end[0] * scale, -graphic.end[1] * scale);
-      ctx.stroke();
-    } else if (graphic.type === "circle") {
-      ctx.beginPath();
-      ctx.arc(
-        graphic.center[0] * scale,
-        -graphic.center[1] * scale,
-        graphic.radius * scale,
-        0,
-        Math.PI * 2
-      );
-      ctx.stroke();
-    } else if (graphic.type === "rect") {
-      ctx.strokeRect(
-        graphic.start[0] * scale,
-        -graphic.start[1] * scale,
-        (graphic.end[0] - graphic.start[0]) * scale,
-        -(graphic.end[1] - graphic.start[1]) * scale
-      );
-    } else if (graphic.type === "arc") {
-      ctx.beginPath();
-      ctx.arc(
-        graphic.center[0] * scale,
-        -graphic.center[1] * scale,
-        graphic.radius * scale,
-        (-graphic.startAngle * Math.PI) / 180,
-        (-graphic.endAngle * Math.PI) / 180,
-        true
-      );
-      ctx.stroke();
-    } else if (graphic.type === "poly") {
-      if (graphic.points.length >= 2) {
+    for (const graphic of graphicsList) {
+      // FootprintText has thickness instead of width
+      const lineWidth = graphic.type === "text" ? graphic.thickness : graphic.width;
+      ctx.lineWidth = (lineWidth || 0.15) * scale;
+
+      if (graphic.type === "line") {
         ctx.beginPath();
-        ctx.moveTo(graphic.points[0][0] * scale, -graphic.points[0][1] * scale);
-        for (let i = 1; i < graphic.points.length; i++) {
-          ctx.lineTo(graphic.points[i][0] * scale, -graphic.points[i][1] * scale);
-        }
-        ctx.closePath();
+        ctx.moveTo(graphic.start[0] * scale, -graphic.start[1] * scale);
+        ctx.lineTo(graphic.end[0] * scale, -graphic.end[1] * scale);
         ctx.stroke();
+      } else if (graphic.type === "circle") {
+        ctx.beginPath();
+        ctx.arc(
+          graphic.center[0] * scale,
+          -graphic.center[1] * scale,
+          graphic.radius * scale,
+          0,
+          Math.PI * 2
+        );
+        ctx.stroke();
+      } else if (graphic.type === "rect") {
+        ctx.strokeRect(
+          graphic.corner1[0] * scale,
+          -graphic.corner1[1] * scale,
+          (graphic.corner2[0] - graphic.corner1[0]) * scale,
+          -(graphic.corner2[1] - graphic.corner1[1]) * scale
+        );
+      } else if (graphic.type === "arc") {
+        ctx.beginPath();
+        ctx.arc(
+          graphic.center[0] * scale,
+          -graphic.center[1] * scale,
+          graphic.radius * scale,
+          (-graphic.startAngle * Math.PI) / 180,
+          (-graphic.endAngle * Math.PI) / 180,
+          true
+        );
+        ctx.stroke();
+      } else if (graphic.type === "polygon") {
+        if (graphic.points.length >= 2) {
+          ctx.beginPath();
+          ctx.moveTo(graphic.points[0][0] * scale, -graphic.points[0][1] * scale);
+          for (let i = 1; i < graphic.points.length; i++) {
+            ctx.lineTo(graphic.points[i][0] * scale, -graphic.points[i][1] * scale);
+          }
+          ctx.closePath();
+          ctx.stroke();
+        }
       }
     }
   }
@@ -1009,7 +1025,7 @@ function drawDrcViolation(
   toScreen: (x: number, y: number) => { x: number; y: number },
   zoom: number
 ) {
-  const pos = toScreen(violation.position[0], violation.position[1]);
+  const pos = toScreen(violation.location[0], violation.location[1]);
 
   // Draw violation marker
   ctx.strokeStyle = DRC_VIOLATION_COLOR;

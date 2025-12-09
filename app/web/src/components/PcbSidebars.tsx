@@ -163,6 +163,10 @@ function ComponentsListContent() {
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
+  if (!pcb) {
+    return <div style={styles.emptyState}>Loading PCB...</div>;
+  }
+
   const instances = Array.from(pcb.instances.values());
 
   // Group by reference prefix
@@ -245,6 +249,10 @@ function LayersContent() {
   const toggleLayerVisibility = usePcbStore((s) => s.toggleLayerVisibility);
   const showAllLayers = usePcbStore((s) => s.showAllLayers);
   const hideAllLayers = usePcbStore((s) => s.hideAllLayers);
+
+  if (!pcb) {
+    return <div style={styles.emptyState}>Loading PCB...</div>;
+  }
 
   const layers = Array.from(pcb.layers.values());
 
@@ -348,6 +356,10 @@ function NetsContent() {
   const pcb = usePcbStore((s) => s.pcb);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
+  if (!pcb) {
+    return <div style={styles.emptyState}>Loading PCB...</div>;
+  }
+
   const nets = Array.from(pcb.nets.entries());
 
   if (nets.length === 0) {
@@ -406,7 +418,7 @@ function PropertiesContent() {
 
   // Get first selected instance
   const selectedId = selectedInstances.size > 0 ? Array.from(selectedInstances)[0] : null;
-  const instance = selectedId ? pcb.instances.get(selectedId) : null;
+  const instance = selectedId && pcb ? pcb.instances.get(selectedId) : null;
   const footprint = instance ? getFootprint(instance.footprintId) : null;
 
   if (!instance || !footprint) {
@@ -473,7 +485,7 @@ function PropertiesContent() {
           <div key={padId} style={styles.row}>
             <span style={styles.label}>{pad.name || padId}</span>
             <span style={styles.value}>
-              {pad.shape} {pad.size[0].toFixed(2)}×{pad.size[1].toFixed(2)}
+              {pad.shape.type} {(pad.shape.width || pad.shape.diameter || 0).toFixed(2)}×{(pad.shape.height || pad.shape.diameter || 0).toFixed(2)}
             </span>
           </div>
         ))}
@@ -497,7 +509,7 @@ function DrcContent() {
   const clearDrc = usePcbStore((s) => s.clearDrc);
   const drcRunning = usePcbStore((s) => s.drcRunning);
 
-  const violations = pcb.drcViolations || [];
+  const violations = pcb?.drcViolations || [];
 
   return (
     <div>
@@ -541,7 +553,7 @@ function DrcContent() {
 
         {violations.length === 0 ? (
           <div style={styles.emptyState}>
-            {pcb.drcViolations === undefined
+            {pcb?.drcViolations === undefined
               ? "Run DRC to check for violations."
               : "No violations found! ✓"}
           </div>
@@ -553,32 +565,34 @@ function DrcContent() {
               </div>
               <div style={{ color: "#ccc" }}>{violation.message}</div>
               <div style={{ color: "#888", marginTop: 4 }}>
-                at ({violation.position[0].toFixed(2)}, {violation.position[1].toFixed(2)})
+                at ({violation.location[0].toFixed(2)}, {violation.location[1].toFixed(2)})
               </div>
             </div>
           ))
         )}
       </div>
 
-      <div style={styles.section}>
-        <div style={styles.sectionTitle}>Design Rules</div>
-        <div style={styles.row}>
-          <span style={styles.label}>Min Trace Width</span>
-          <span style={styles.value}>{pcb.designRules.minTraceWidth} mm</span>
+      {pcb && (
+        <div style={styles.section}>
+          <div style={styles.sectionTitle}>Design Rules</div>
+          <div style={styles.row}>
+            <span style={styles.label}>Min Trace Width</span>
+            <span style={styles.value}>{pcb.designRules.minTraceWidth} mm</span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.label}>Min Clearance</span>
+            <span style={styles.value}>{pcb.designRules.minTraceClearance} mm</span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.label}>Min Via Diameter</span>
+            <span style={styles.value}>{pcb.designRules.minViaDiameter} mm</span>
+          </div>
+          <div style={styles.row}>
+            <span style={styles.label}>Min Via Drill</span>
+            <span style={styles.value}>{pcb.designRules.minViaDrill} mm</span>
+          </div>
         </div>
-        <div style={styles.row}>
-          <span style={styles.label}>Min Clearance</span>
-          <span style={styles.value}>{pcb.designRules.minClearance} mm</span>
-        </div>
-        <div style={styles.row}>
-          <span style={styles.label}>Min Via Diameter</span>
-          <span style={styles.value}>{pcb.designRules.minViaDiameter} mm</span>
-        </div>
-        <div style={styles.row}>
-          <span style={styles.label}>Min Via Drill</span>
-          <span style={styles.value}>{pcb.designRules.minViaDrill} mm</span>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -589,6 +603,10 @@ function DrcContent() {
 
 function BoardInfoContent() {
   const pcb = usePcbStore((s) => s.pcb);
+
+  if (!pcb) {
+    return <div style={styles.emptyState}>Loading PCB...</div>;
+  }
 
   const instanceCount = pcb.instances.size;
   const traceCount = pcb.traces.size;

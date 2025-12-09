@@ -576,9 +576,12 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     // ========================================
 
     addFootprintToLibrary: (footprint) => {
-      set((state) => ({
-        pcb: Pcb.addFootprint(state.pcb, footprint),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.addFootprint(state.pcb, footprint),
+        };
+      });
     },
 
     startPlaceFootprint: (footprintId) => {
@@ -626,7 +629,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     placeFootprint: (position, refDes, value = "") => {
       const { pcb, pendingFootprint, gridSize, snapToGrid: snap } = get();
-      if (!pendingFootprint) return null;
+      if (!pendingFootprint || !pcb) return null;
 
       const footprint = pcb.footprints.get(pendingFootprint.footprintId);
       if (!footprint) return null;
@@ -649,9 +652,12 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
         side: pendingFootprint.side,
       };
 
-      set((state) => ({
-        pcb: Pcb.addFootprintInstance(state.pcb, instance),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.addFootprintInstance(state.pcb, instance),
+        };
+      });
 
       return instance.id;
     },
@@ -662,7 +668,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     moveSelectedInstances: (delta) => {
       const { pcb, selectedInstances, gridSize, snapToGrid: snap } = get();
-      if (selectedInstances.size === 0) return;
+      if (selectedInstances.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -684,7 +690,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     rotateSelectedInstances: (angle = 90) => {
       const { pcb, selectedInstances } = get();
-      if (selectedInstances.size === 0) return;
+      if (selectedInstances.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -701,7 +707,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     flipSelectedInstances: () => {
       const { pcb, selectedInstances } = get();
-      if (selectedInstances.size === 0) return;
+      if (selectedInstances.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -718,7 +724,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     lockSelectedInstances: () => {
       const { pcb, selectedInstances } = get();
-      if (selectedInstances.size === 0) return;
+      if (selectedInstances.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -735,7 +741,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     unlockSelectedInstances: () => {
       const { pcb, selectedInstances } = get();
-      if (selectedInstances.size === 0) return;
+      if (selectedInstances.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -752,7 +758,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     deleteSelectedInstances: () => {
       const { pcb, selectedInstances } = get();
-      if (selectedInstances.size === 0) return;
+      if (selectedInstances.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -776,7 +782,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     startRoute: (position, netId, startPad) => {
       const { activeLayer, gridSize, snapToGrid: snap, pcb } = get();
-      if (!activeLayer) return;
+      if (!activeLayer || !pcb) return;
 
       const snappedPos = snap ? snapToGrid(position, gridSize) : position;
 
@@ -830,11 +836,14 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
         netId
       );
 
-      set((state) => ({
-        pcb: Pcb.addTrace(state.pcb, trace),
-        routing: null,
-        mode: "select",
-      }));
+      set((state) => {
+        if (!state.pcb) return { routing: null, mode: "select" as const };
+        return {
+          pcb: Pcb.addTrace(state.pcb, trace),
+          routing: null,
+          mode: "select" as const,
+        };
+      });
 
       return trace.id;
     },
@@ -857,7 +866,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     switchRouteLayer: () => {
       const { routing, pcb } = get();
-      if (!routing) return;
+      if (!routing || !pcb) return;
 
       const topLayer = Pcb.getTopCopperLayer(pcb);
       const bottomLayer = Pcb.getBottomCopperLayer(pcb);
@@ -874,7 +883,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     placeViaAndSwitchLayer: () => {
       const { routing, pcb, gridSize, snapToGrid: snap } = get();
-      if (!routing || routing.points.length === 0) return null;
+      if (!routing || routing.points.length === 0 || !pcb) return null;
 
       const topLayer = Pcb.getTopCopperLayer(pcb);
       const bottomLayer = Pcb.getBottomCopperLayer(pcb);
@@ -896,15 +905,18 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
       const newLayer = routing.layerId === topLayer ? bottomLayer : topLayer;
 
-      set((state) => ({
-        pcb: Pcb.addVia(state.pcb, via),
-        routing: {
-          ...state.routing!,
-          layerId: newLayer,
-          points: [snappedPos], // Start new segment from via position
-        },
-        activeLayer: newLayer,
-      }));
+      set((state) => {
+        if (!state.pcb || !state.routing) return state;
+        return {
+          pcb: Pcb.addVia(state.pcb, via),
+          routing: {
+            ...state.routing,
+            layerId: newLayer,
+            points: [snappedPos], // Start new segment from via position
+          },
+          activeLayer: newLayer,
+        };
+      });
 
       return via.id;
     },
@@ -915,7 +927,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     deleteSelectedTraces: () => {
       const { pcb, selectedTraces } = get();
-      if (selectedTraces.size === 0) return;
+      if (selectedTraces.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -932,14 +944,18 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     setTraceNet: (traceId, netId) => {
       const { pcb } = get();
+      if (!pcb) return;
       const trace = pcb.traces.get(traceId);
       if (!trace) return;
 
       get().pushHistory();
 
-      set((state) => ({
-        pcb: Pcb.updateTrace(state.pcb, { ...trace, netId }),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.updateTrace(state.pcb, { ...trace, netId }),
+        };
+      });
     },
 
     // ========================================
@@ -948,6 +964,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     placeVia: (position, netId) => {
       const { pcb, gridSize, snapToGrid: snap } = get();
+      if (!pcb) return null;
 
       const topLayer = Pcb.getTopCopperLayer(pcb);
       const bottomLayer = Pcb.getBottomCopperLayer(pcb);
@@ -966,16 +983,19 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
         bottomLayer
       );
 
-      set((state) => ({
-        pcb: Pcb.addVia(state.pcb, via),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.addVia(state.pcb, via),
+        };
+      });
 
       return via.id;
     },
 
     deleteSelectedVias: () => {
       const { pcb, selectedVias } = get();
-      if (selectedVias.size === 0) return;
+      if (selectedVias.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -1042,11 +1062,14 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
         locked: false,
       };
 
-      set((state) => ({
-        pcb: Pcb.addCopperPour(state.pcb, pour),
-        zoneDrawing: null,
-        mode: "select",
-      }));
+      set((state) => {
+        if (!state.pcb) return { zoneDrawing: null, mode: "select" as const };
+        return {
+          pcb: Pcb.addCopperPour(state.pcb, pour),
+          zoneDrawing: null,
+          mode: "select" as const,
+        };
+      });
 
       return pour.id;
     },
@@ -1060,7 +1083,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     deleteSelectedZones: () => {
       const { pcb, selectedPours } = get();
-      if (selectedPours.size === 0) return;
+      if (selectedPours.size === 0 || !pcb) return;
 
       get().pushHistory();
 
@@ -1086,14 +1109,18 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     setNetClass: (netId, classId) => {
       const { pcb } = get();
+      if (!pcb) return;
       const net = pcb.nets.get(netId);
       if (!net) return;
 
       get().pushHistory();
 
-      set((state) => ({
-        pcb: Pcb.setNet(state.pcb, netId, { ...net, classId }),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.setNet(state.pcb, netId, { ...net, classId }),
+        };
+      });
     },
 
     // ========================================
@@ -1106,17 +1133,23 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       // TODO: Implement actual DRC
       // For now, just clear violations after a delay
       setTimeout(() => {
-        set((state) => ({
-          pcb: Pcb.setDrcViolations(state.pcb, []),
-          drcRunning: false,
-        }));
+        set((state) => {
+          if (!state.pcb) return { drcRunning: false };
+          return {
+            pcb: Pcb.setDrcViolations(state.pcb, []),
+            drcRunning: false,
+          };
+        });
       }, 500);
     },
 
     clearDrc: () => {
-      set((state) => ({
-        pcb: Pcb.setDrcViolations(state.pcb, undefined),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.setDrcViolations(state.pcb, undefined),
+        };
+      });
     },
 
     toggleDrcViolations: () => {
@@ -1198,6 +1231,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     selectAll: () => {
       const { pcb } = get();
+      if (!pcb) return;
       set({
         selectedInstances: new Set(pcb.instances.keys()),
         selectedTraces: new Set(pcb.traces.keys()),
@@ -1248,9 +1282,12 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     setBoardOutline: (outline) => {
       get().pushHistory();
-      set((state) => ({
-        pcb: Pcb.setBoardOutline(state.pcb, outline),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.setBoardOutline(state.pcb, outline),
+        };
+      });
     },
 
     // ========================================
@@ -1259,9 +1296,12 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     setDesignRules: (rules) => {
       get().pushHistory();
-      set((state) => ({
-        pcb: Pcb.setDesignRules(state.pcb, rules),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.setDesignRules(state.pcb, rules),
+        };
+      });
     },
 
     // ========================================
@@ -1269,15 +1309,21 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     // ========================================
 
     linkSchematic: (path) => {
-      set((state) => ({
-        pcb: Pcb.setLinkedSchematic(state.pcb, path),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.setLinkedSchematic(state.pcb, path),
+        };
+      });
     },
 
     unlinkSchematic: () => {
-      set((state) => ({
-        pcb: Pcb.setLinkedSchematic(state.pcb, undefined),
-      }));
+      set((state) => {
+        if (!state.pcb) return state;
+        return {
+          pcb: Pcb.setLinkedSchematic(state.pcb, undefined),
+        };
+      });
     },
 
     // ========================================
@@ -1301,14 +1347,14 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     // Query helpers
     // ========================================
 
-    getFootprint: (footprintId) => get().pcb.footprints.get(footprintId),
-    getInstance: (instanceId) => get().pcb.instances.get(instanceId),
-    getTrace: (traceId) => get().pcb.traces.get(traceId),
-    getVia: (viaId) => get().pcb.vias.get(viaId),
+    getFootprint: (footprintId) => get().pcb?.footprints.get(footprintId),
+    getInstance: (instanceId) => get().pcb?.instances.get(instanceId),
+    getTrace: (traceId) => get().pcb?.traces.get(traceId),
+    getVia: (viaId) => get().pcb?.vias.get(viaId),
 
     getActiveLayerTraces: () => {
       const { pcb, activeLayer } = get();
-      if (!activeLayer) return [];
+      if (!activeLayer || !pcb) return [];
       return Array.from(pcb.traces.values()).filter((t) => t.layerId === activeLayer);
     },
   };

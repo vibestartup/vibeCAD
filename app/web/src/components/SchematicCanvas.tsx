@@ -754,20 +754,14 @@ function drawSymbolPrimitive(
       break;
     }
     case "rect": {
-      ctx.strokeRect(
-        prim.x * SCALE,
-        -prim.y * SCALE - prim.height * SCALE,
-        prim.width * SCALE,
-        prim.height * SCALE
-      );
+      const x = Math.min(prim.corner1.x, prim.corner2.x) * SCALE;
+      const y = -Math.max(prim.corner1.y, prim.corner2.y) * SCALE;
+      const w = Math.abs(prim.corner2.x - prim.corner1.x) * SCALE;
+      const h = Math.abs(prim.corner2.y - prim.corner1.y) * SCALE;
+      ctx.strokeRect(x, y, w, h);
       if (prim.fill) {
         ctx.globalAlpha = 0.2;
-        ctx.fillRect(
-          prim.x * SCALE,
-          -prim.y * SCALE - prim.height * SCALE,
-          prim.width * SCALE,
-          prim.height * SCALE
-        );
+        ctx.fillRect(x, y, w, h);
         ctx.globalAlpha = 1.0;
       }
       break;
@@ -814,7 +808,15 @@ function drawSymbolPrimitive(
     }
     case "text": {
       ctx.font = `${prim.fontSize * SCALE}px sans-serif`;
-      ctx.textAlign = prim.align || "left";
+      // Map TextJustify to canvas text alignment
+      const justify = prim.justify || "left";
+      if (justify.includes("center")) {
+        ctx.textAlign = "center";
+      } else if (justify.includes("right")) {
+        ctx.textAlign = "right";
+      } else {
+        ctx.textAlign = "left";
+      }
       ctx.fillText(prim.text, prim.position.x * SCALE, -prim.position.y * SCALE);
       break;
     }

@@ -30,6 +30,7 @@ import {
   createBuiltinBasicsLibrary,
   Schematic,
   Pcb,
+  newId,
 } from "@vibecad/core";
 
 type Symbol = Schematic.Symbol;
@@ -496,7 +497,6 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
         if (!original) return null;
 
         // Create a copy with a new ID
-        const { newId } = require("@vibecad/core");
         const copy: Component = {
           ...original,
           id: newId("Component"),
@@ -757,14 +757,12 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
         expandedLibraries: Array.from(state.expandedLibraries),
         expandedCategories: Array.from(state.expandedCategories),
       }),
-      onRehydrate: () => {
-        return (state) => {
-          if (state) {
-            // Convert arrays back to Sets
-            state.expandedLibraries = new Set(state.expandedLibraries as unknown as ComponentLibraryId[]);
-            state.expandedCategories = new Set(state.expandedCategories as unknown as string[]);
-          }
-        };
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Convert arrays back to Sets
+          state.expandedLibraries = new Set(state.expandedLibraries as unknown as ComponentLibraryId[]);
+          state.expandedCategories = new Set(state.expandedCategories as unknown as string[]);
+        }
       },
     }
   )

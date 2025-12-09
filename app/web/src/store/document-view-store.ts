@@ -7,7 +7,7 @@
  */
 
 import { create } from "zustand";
-import type { PartStudio } from "@vibecad/core";
+import type { PartStudio, SketchId } from "@vibecad/core";
 import type { EditorMode } from "./cad-store";
 
 // ============================================================================
@@ -37,7 +37,7 @@ export interface DocumentViewState {
   editorMode: EditorMode;
 
   // Active sketch (when in sketch mode)
-  activeSketchId: string | null;
+  activeSketchId: SketchId | null;
 
   // Selections
   objectSelection: Set<string>;
@@ -99,7 +99,7 @@ interface DocumentViewStoreState {
   updateEditorMode: (mode: EditorMode) => void;
 
   /** Update active sketch for current document */
-  updateActiveSketch: (sketchId: string | null) => void;
+  updateActiveSketch: (sketchId: SketchId | null) => void;
 
   /** Update object selection for current document */
   updateObjectSelection: (selection: Set<string>) => void;

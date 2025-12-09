@@ -249,6 +249,10 @@ function getDocumentIcon(type: DocumentType): string {
       return "\u2B22"; // Hexagon
     case "drawing":
       return "\u{1F4D0}"; // Triangular ruler (for technical drawing)
+    case "schematic":
+      return "\u26A1"; // High voltage / lightning bolt (for electronics)
+    case "pcb":
+      return "\u2339"; // APL quad (for PCB grid)
     case "image":
       return "\u{1F5BC}"; // Frame with picture
     case "text":
@@ -514,11 +518,13 @@ interface AddMenuProps {
   onClose: () => void;
   onNewPartStudio: () => void;
   onNewDrawing: () => void;
+  onNewSchematic: () => void;
+  onNewPcb: () => void;
   onUploadFile: () => void;
   onOpenLibrary: () => void;
 }
 
-function AddMenu({ onClose, onNewPartStudio, onNewDrawing, onUploadFile, onOpenLibrary }: AddMenuProps) {
+function AddMenu({ onClose, onNewPartStudio, onNewDrawing, onNewSchematic, onNewPcb, onUploadFile, onOpenLibrary }: AddMenuProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
 
   // Close on click outside
@@ -570,6 +576,37 @@ function AddMenu({ onClose, onNewPartStudio, onNewDrawing, onUploadFile, onOpenL
       <button
         style={{
           ...styles.menuItem,
+          ...(hoveredItem === "newSchematic" ? styles.menuItemHover : {}),
+        }}
+        onClick={() => {
+          onNewSchematic();
+          onClose();
+        }}
+        onMouseEnter={() => setHoveredItem("newSchematic")}
+        onMouseLeave={() => setHoveredItem(null)}
+      >
+        <span style={styles.menuItemIcon}>&#x26A1;</span>
+        <span>New Schematic</span>
+      </button>
+      <button
+        style={{
+          ...styles.menuItem,
+          ...(hoveredItem === "newPcb" ? styles.menuItemHover : {}),
+        }}
+        onClick={() => {
+          onNewPcb();
+          onClose();
+        }}
+        onMouseEnter={() => setHoveredItem("newPcb")}
+        onMouseLeave={() => setHoveredItem(null)}
+      >
+        <span style={styles.menuItemIcon}>&#x2339;</span>
+        <span>New PCB</span>
+      </button>
+      <div style={styles.menuDivider} />
+      <button
+        style={{
+          ...styles.menuItem,
           ...(hoveredItem === "upload" ? styles.menuItemHover : {}),
         }}
         onClick={() => {
@@ -609,6 +646,8 @@ function AddMenu({ onClose, onNewPartStudio, onNewDrawing, onUploadFile, onOpenL
 interface TabBarProps {
   onNewPartStudio?: () => void;
   onNewDrawing?: () => void;
+  onNewSchematic?: () => void;
+  onNewPcb?: () => void;
   onUploadFile?: () => void;
   onOpenLibrary?: () => void;
   // Legacy props for backwards compatibility
@@ -619,6 +658,8 @@ interface TabBarProps {
 export function TabBar({
   onNewPartStudio,
   onNewDrawing,
+  onNewSchematic,
+  onNewPcb,
   onUploadFile,
   onOpenLibrary,
   onNewCadDocument,
@@ -713,6 +754,8 @@ export function TabBar({
             onClose={() => setShowAddMenu(false)}
             onNewPartStudio={handleNewPartStudio}
             onNewDrawing={onNewDrawing || (() => {})}
+            onNewSchematic={onNewSchematic || (() => {})}
+            onNewPcb={onNewPcb || (() => {})}
             onUploadFile={handleUploadFile}
             onOpenLibrary={onOpenLibrary || (() => {})}
           />

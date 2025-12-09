@@ -359,15 +359,21 @@ export function DrawingCanvas() {
     [sheetZoom, sheetPan, sheet.width, sheet.height]
   );
 
-  // Handle wheel zoom
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // Handle wheel zoom (use native event listener for non-passive behavior)
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
-      setSheetZoom(sheetZoom * delta);
-    },
-    [sheetZoom, setSheetZoom]
-  );
+      const currentZoom = useDrawingStore.getState().sheetZoom;
+      setSheetZoom(currentZoom * delta);
+    };
+
+    svg.addEventListener("wheel", handleWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheel);
+  }, [setSheetZoom]);
 
   // Handle pan
   const handleMouseDown = useCallback(
@@ -419,7 +425,6 @@ export function DrawingCanvas() {
         }}
         viewBox={`${viewBoxX / sheetZoom} ${viewBoxY / sheetZoom} ${viewBoxWidth / sheetZoom} ${viewBoxHeight / sheetZoom}`}
         preserveAspectRatio="xMidYMid meet"
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}

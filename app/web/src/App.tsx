@@ -5,6 +5,8 @@ import {
   useTabsStore,
   createCadTab,
   createDrawingTab,
+  createSchematicTab,
+  createPcbTab,
   createImageTabFromFile,
   createRawTabFromFile,
   createTextTabFromFile,
@@ -27,8 +29,11 @@ import {
 } from "./store/tabs-store";
 import { useCadStore } from "./store/cad-store";
 import { useDrawingStore } from "./store/drawing-store";
+import { useSchematicStore } from "./store/schematic-store";
+import { usePcbStore } from "./store/pcb-store";
 import { useDocumentViewStore } from "./store/document-view-store";
-import { createPartStudioWithCube, createDrawing } from "@vibecad/core";
+// Import as namespace to avoid module initialization timing issues
+import * as VibeCadCore from "@vibecad/core";
 import type { TabDefinition } from "./components/TabbedSidebar";
 
 // Import viewers
@@ -50,6 +55,8 @@ import { OpTimelineContent } from "./components/OpTimeline";
 import { PropertiesContent, ParametersContent, RenderContent } from "./components/PropertiesPanel";
 import { ImageEditorSidebar } from "./components/ImageEditorSidebar";
 import { DrawingEditor } from "./components/drawing";
+import { SchematicEditor } from "./pages/SchematicEditor";
+import { PcbEditor } from "./pages/PcbEditor";
 import { captureThumbnail } from "./utils/viewport-capture";
 import { serializeDocument, downloadFile, useFileStore } from "./store/file-store";
 
@@ -303,7 +310,7 @@ export const App: React.FC = () => {
       // Document not in store - this shouldn't happen normally since we add when creating
       // But handle it gracefully by creating a new one
       console.warn(`[App] CAD document ${cadDocId} not found in store, creating new`);
-      const newStudio = createPartStudioWithCube(cadTab.name);
+      const newStudio = VibeCadCore.createPartStudioWithCube(cadTab.name);
       // Track that we're loading this studio ID
       lastLoadedStudioIdRef.current = newStudio.id;
       docViewStore.initDocument(cadDocId, newStudio);
@@ -321,7 +328,7 @@ export const App: React.FC = () => {
     // Skip if we just loaded this studio (prevents infinite loop)
     if (lastLoadedStudioIdRef.current === studio.id) {
       lastLoadedStudioIdRef.current = null;
-      prevStudioRef.current = { id: studio.id, modifiedAt: studio.modifiedAt };
+      prevStudioRef.current = { id: studio.id, modifiedAt: studio.meta.modifiedAt };
       return;
     }
 
@@ -329,12 +336,12 @@ export const App: React.FC = () => {
     if (
       prevStudioRef.current &&
       prevStudioRef.current.id === studio.id &&
-      prevStudioRef.current.modifiedAt === studio.modifiedAt
+      prevStudioRef.current.modifiedAt === studio.meta.modifiedAt
     ) {
       return;
     }
 
-    prevStudioRef.current = { id: studio.id, modifiedAt: studio.modifiedAt };
+    prevStudioRef.current = { id: studio.id, modifiedAt: studio.meta.modifiedAt };
     docViewStore.updateStudio(activeDocumentId, studio);
   }, [studio, activeDocumentId, docViewStore]);
 
@@ -351,7 +358,7 @@ export const App: React.FC = () => {
       docViewStore.updateOpSelection(cadStore.opSelection);
     }
 
-    const newStudio = createPartStudioWithCube("Untitled");
+    const newStudio = VibeCadCore.createPartStudioWithCube("Untitled");
     const tab = createCadTab(newStudio.name, newStudio.id);
 
     // Initialize document in view store
@@ -364,13 +371,35 @@ export const App: React.FC = () => {
 
   // Create new Drawing
   const handleNewDrawing = useCallback(() => {
-    const newDrawing = createDrawing("Untitled Drawing");
+    const newDrawing = VibeCadCore.createDrawing("Untitled Drawing");
     const tab = createDrawingTab(newDrawing.name, newDrawing.id, []);
 
     // Set drawing in drawing store
     useDrawingStore.getState().setDrawing(newDrawing);
 
     openTab(tab);
+  }, [openTab]);
+
+  // Create new Schematic
+  const handleNewSchematic = useCallback(() => {
+    // Initialize the schematic store (it will create a new schematic if null)
+    useSchematicStore.getState().initSchematic();
+    const schematic = useSchematicStore.getState().schematic;
+    if (schematic) {
+      const tab = createSchematicTab(schematic.name, schematic.id);
+      openTab(tab);
+    }
+  }, [openTab]);
+
+  // Create new PCB
+  const handleNewPcb = useCallback(() => {
+    // Initialize the PCB store (it will create a new PCB if null)
+    usePcbStore.getState().initPcb();
+    const pcb = usePcbStore.getState().pcb;
+    if (pcb) {
+      const tab = createPcbTab(pcb.name, pcb.id);
+      openTab(tab);
+    }
   }, [openTab]);
 
   // Open file dialog
@@ -407,7 +436,7 @@ export const App: React.FC = () => {
                 useDocumentViewStore.getState().updateStudio(currentActiveDocId, cadStore.studio);
               }
 
-              const newStudio = createPartStudioWithCube(
+              const newStudio = VibeCadCore.createPartStudioWithCube(
                 file.name.replace(/\.vibecad\.json$/, "").replace(/\.json$/, "").replace(/\.vibecad$/, "")
               );
               const tab = createCadTab(newStudio.name, newStudio.id);
@@ -600,6 +629,10 @@ export const App: React.FC = () => {
         );
       case "drawing":
         return <DrawingEditor />;
+      case "schematic":
+        return <SchematicEditor />;
+      case "pcb":
+        return <PcbEditor />;
       case "image":
         return <ImageViewer document={activeTab as ImageDocument} />;
       case "text":
@@ -632,11 +665,10 @@ export const App: React.FC = () => {
           onOpenLibrary={() => setLibraryOpen(true)}
           onSaveProject={handleSaveProject}
           onDownloadProject={handleDownloadProject}
-          onNewProject={() => {
-            if (confirm("Create a new project? Unsaved changes will be lost.")) {
-              resetDocument();
-            }
-          }}
+          onNewProject={handleNewCadDocument}
+          onNewDrawing={handleNewDrawing}
+          onNewSchematic={handleNewSchematic}
+          onNewPcb={handleNewPcb}
           onOpenAbout={() => setAboutOpen(true)}
         />
       );
@@ -693,6 +725,8 @@ export const App: React.FC = () => {
       <TabBar
         onNewPartStudio={handleNewCadDocument}
         onNewDrawing={handleNewDrawing}
+        onNewSchematic={handleNewSchematic}
+        onNewPcb={handleNewPcb}
         onUploadFile={handleOpenFile}
         onOpenLibrary={() => setLibraryOpen(true)}
       />
