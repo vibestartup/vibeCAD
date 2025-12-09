@@ -24,10 +24,10 @@ function StatusBar() {
   const routing = usePcbStore((s) => s.routing);
 
   const totalSelected = selectedInstances.size + selectedTraces.size + selectedVias.size;
-  const instanceCount = pcb.instances.size;
-  const traceCount = pcb.traces.size;
-  const viaCount = pcb.vias.size;
-  const layer = activeLayer ? pcb.layers.get(activeLayer) : null;
+  const instanceCount = pcb?.instances.size ?? 0;
+  const traceCount = pcb?.traces.size ?? 0;
+  const viaCount = pcb?.vias.size ?? 0;
+  const layer = activeLayer && pcb ? pcb.layers.get(activeLayer) : null;
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 16, width: "100%" }}>
@@ -90,11 +90,20 @@ export function PcbEditor() {
   const placeViaAndSwitchLayer = usePcbStore((s) => s.placeViaAndSwitchLayer);
   const runDrc = usePcbStore((s) => s.runDrc);
   const pcb = usePcbStore((s) => s.pcb);
+  const initPcb = usePcbStore((s) => s.initPcb);
 
-  // Initialize library store
+  // Initialize stores
   const initializeLibraries = useLibraryStore((s) => s.initializeLibraries);
 
+  // Initialize PCB on mount
   useEffect(() => {
+    initPcb();
+  }, [initPcb]);
+
+  // Initialize libraries after PCB is ready
+  useEffect(() => {
+    if (!pcb) return;
+
     // Get layer IDs from PCB
     const layers = pcb.layers;
     let topCopper: any = null;
@@ -117,7 +126,7 @@ export function PcbEditor() {
         topCrtYd,
       });
     }
-  }, [pcb.layers, initializeLibraries]);
+  }, [pcb, initializeLibraries]);
 
   // Keyboard shortcuts
   useEffect(() => {

@@ -14,7 +14,8 @@ import type {
   PadId,
   NetClassId,
 } from "@vibecad/core";
-import { Vec2, Pcb } from "@vibecad/core";
+// Import Pcb namespace - access functions through namespace to avoid module init timing issues
+import { Vec2, Pcb, newId } from "@vibecad/core";
 
 // Re-export types from Pcb namespace for convenience
 type PcbDocument = Pcb.PcbDocument;
@@ -27,41 +28,6 @@ type DesignRules = Pcb.DesignRules;
 type DrcViolation = Pcb.DrcViolation;
 type PcbNet = Pcb.PcbNet;
 type PcbNetClass = Pcb.PcbNetClass;
-
-// Destructure functions from Pcb namespace
-const {
-  createPcbDocument,
-  createPcbDocumentWithBoard,
-  addFootprint,
-  addFootprintInstance,
-  updateFootprintInstance,
-  deleteFootprintInstance,
-  addTrace,
-  updateTrace,
-  deleteTrace,
-  addVia,
-  deleteVia,
-  addCopperPour,
-  updateCopperPour,
-  deleteCopperPour,
-  setNet,
-  setDesignRules,
-  setDrcViolations,
-  setLinkedSchematic,
-  setBoardOutline,
-  getTopCopperLayer,
-  getBottomCopperLayer,
-  getBoardBounds,
-  createFootprintInstance,
-  moveFootprintInstance,
-  rotateFootprintInstance,
-  flipFootprintInstance,
-  setFootprintInstanceLocked,
-  createTrace,
-  createTraceFromPoints,
-  createThroughVia,
-  extendTrace,
-} = Pcb;
 import { HistoryState, createHistory, pushState, undo as historyUndo, redo as historyRedo } from "@vibecad/core";
 
 // ============================================================================
@@ -99,11 +65,11 @@ export type RoutingMode = "single" | "diff_pair" | "bus";
 // ============================================================================
 
 interface PcbState {
-  // Document
-  pcb: PcbDocument;
+  // Document (null until initialized)
+  pcb: PcbDocument | null;
 
-  // History
-  historyState: HistoryState<PcbDocument>;
+  // History (null until initialized)
+  historyState: HistoryState<PcbDocument> | null;
 
   // View state
   viewOffset: { x: number; y: number };
@@ -178,6 +144,7 @@ interface PcbState {
 
 interface PcbActions {
   // Document management
+  initPcb: () => void; // Initialize PCB if null (call on component mount)
   setPcb: (doc: PcbDocument) => void;
   newPcb: (name: string, width?: number, height?: number) => void;
 
@@ -339,25 +306,16 @@ function getNextRefDes(pcb: PcbDocument, prefix: string): string {
 // ============================================================================
 
 export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
-  const initialPcb = createPcbDocumentWithBoard("Untitled PCB", 100, 100);
-  const topLayer = getTopCopperLayer(initialPcb);
-
-  // Initialize layer visibility
-  const initialLayerVisibility = new Map<LayerId, boolean>();
-  for (const layerId of initialPcb.layers.keys()) {
-    initialLayerVisibility.set(layerId, true);
-  }
-
   return {
-    // Initial state
-    pcb: initialPcb,
-    historyState: createHistory(initialPcb),
+    // Initial state - null until initPcb() is called
+    pcb: null,
+    historyState: null,
 
     viewOffset: { x: 0, y: 0 },
     zoom: 1,
 
-    layerVisibility: initialLayerVisibility,
-    activeLayer: topLayer,
+    layerVisibility: new Map(),
+    activeLayer: null,
 
     mode: "select",
     activeTool: "select",
@@ -393,6 +351,26 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     // Document management
     // ========================================
 
+    initPcb: () => {
+      if (get().pcb === null) {
+        const initialPcb = Pcb.createPcbDocumentWithBoard("Untitled PCB", 100, 100);
+        const topLayer = Pcb.getTopCopperLayer(initialPcb);
+
+        // Initialize layer visibility
+        const layerVisibility = new Map<LayerId, boolean>();
+        for (const layerId of initialPcb.layers.keys()) {
+          layerVisibility.set(layerId, true);
+        }
+
+        set({
+          pcb: initialPcb,
+          historyState: createHistory(initialPcb),
+          layerVisibility,
+          activeLayer: topLayer,
+        });
+      }
+    },
+
     setPcb: (doc) => {
       const layerVisibility = new Map<LayerId, boolean>();
       for (const layerId of doc.layers.keys()) {
@@ -403,7 +381,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
         pcb: doc,
         historyState: createHistory(doc),
         layerVisibility,
-        activeLayer: getTopCopperLayer(doc),
+        activeLayer: Pcb.getTopCopperLayer(doc),
         selectedInstances: new Set(),
         selectedTraces: new Set(),
         selectedVias: new Set(),
@@ -415,7 +393,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     },
 
     newPcb: (name, width = 100, height = 100) => {
-      const doc = createPcbDocumentWithBoard(name, width, height);
+      const doc = Pcb.createPcbDocumentWithBoard(name, width, height);
       const layerVisibility = new Map<LayerId, boolean>();
       for (const layerId of doc.layers.keys()) {
         layerVisibility.set(layerId, true);
@@ -425,7 +403,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
         pcb: doc,
         historyState: createHistory(doc),
         layerVisibility,
-        activeLayer: getTopCopperLayer(doc),
+        activeLayer: Pcb.getTopCopperLayer(doc),
         selectedInstances: new Set(),
         selectedTraces: new Set(),
         selectedVias: new Set(),
@@ -443,13 +421,15 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     // ========================================
 
     pushHistory: () => {
-      set((state) => ({
-        historyState: pushState(state.historyState, state.pcb),
-      }));
+      set((state) => {
+        if (!state.historyState || !state.pcb) return state;
+        return { historyState: pushState(state.historyState, state.pcb) };
+      });
     },
 
     undo: () => {
       const { historyState } = get();
+      if (!historyState) return;
       const result = historyUndo(historyState);
       if (result) {
         set({
@@ -465,6 +445,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     redo: () => {
       const { historyState } = get();
+      if (!historyState) return;
       const result = historyRedo(historyState);
       if (result) {
         set({
@@ -478,8 +459,8 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       }
     },
 
-    canUndo: () => get().historyState.past.length > 0,
-    canRedo: () => get().historyState.future.length > 0,
+    canUndo: () => (get().historyState?.past.length ?? 0) > 0,
+    canRedo: () => (get().historyState?.future.length ?? 0) > 0,
 
     // ========================================
     // View
@@ -504,7 +485,8 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     fitBoard: () => {
       const { pcb } = get();
-      const bounds = getBoardBounds(pcb);
+      if (!pcb) return;
+      const bounds = Pcb.getBoardBounds(pcb);
       // TODO: Calculate proper view offset and zoom to fit board
       set({ viewOffset: { x: 0, y: 0 }, zoom: 1 });
     },
@@ -517,7 +499,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     setActiveLayer: (layerId) => {
       const { pcb } = get();
-      if (pcb.layers.has(layerId)) {
+      if (pcb?.layers.has(layerId)) {
         set({ activeLayer: layerId });
       }
     },
@@ -595,7 +577,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     addFootprintToLibrary: (footprint) => {
       set((state) => ({
-        pcb: addFootprint(state.pcb, footprint),
+        pcb: Pcb.addFootprint(state.pcb, footprint),
       }));
     },
 
@@ -653,7 +635,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
       const snappedPos = snap ? snapToGrid(position, gridSize) : position;
 
-      let instance = createFootprintInstance(
+      let instance = Pcb.createFootprintInstance(
         pendingFootprint.footprintId,
         snappedPos,
         refDes,
@@ -668,7 +650,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       };
 
       set((state) => ({
-        pcb: addFootprintInstance(state.pcb, instance),
+        pcb: Pcb.addFootprintInstance(state.pcb, instance),
       }));
 
       return instance.id;
@@ -693,7 +675,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
             instance.position[1] + delta[1],
           ];
           const snappedPos = snap ? snapToGrid(newPos, gridSize) : newPos;
-          doc = updateFootprintInstance(doc, moveFootprintInstance(instance, snappedPos));
+          doc = Pcb.updateFootprintInstance(doc, Pcb.moveFootprintInstance(instance, snappedPos));
         }
       }
 
@@ -710,7 +692,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       for (const instanceId of selectedInstances) {
         const instance = doc.instances.get(instanceId);
         if (instance && !instance.locked) {
-          doc = updateFootprintInstance(doc, rotateFootprintInstance(instance, angle));
+          doc = Pcb.updateFootprintInstance(doc, Pcb.rotateFootprintInstance(instance, angle));
         }
       }
 
@@ -727,7 +709,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       for (const instanceId of selectedInstances) {
         const instance = doc.instances.get(instanceId);
         if (instance && !instance.locked) {
-          doc = updateFootprintInstance(doc, flipFootprintInstance(instance));
+          doc = Pcb.updateFootprintInstance(doc, Pcb.flipFootprintInstance(instance));
         }
       }
 
@@ -744,7 +726,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       for (const instanceId of selectedInstances) {
         const instance = doc.instances.get(instanceId);
         if (instance) {
-          doc = updateFootprintInstance(doc, setFootprintInstanceLocked(instance, true));
+          doc = Pcb.updateFootprintInstance(doc, Pcb.setFootprintInstanceLocked(instance, true));
         }
       }
 
@@ -761,7 +743,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       for (const instanceId of selectedInstances) {
         const instance = doc.instances.get(instanceId);
         if (instance) {
-          doc = updateFootprintInstance(doc, setFootprintInstanceLocked(instance, false));
+          doc = Pcb.updateFootprintInstance(doc, Pcb.setFootprintInstanceLocked(instance, false));
         }
       }
 
@@ -778,7 +760,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       for (const instanceId of selectedInstances) {
         const instance = doc.instances.get(instanceId);
         if (instance && !instance.locked) {
-          doc = deleteFootprintInstance(doc, instanceId);
+          doc = Pcb.deleteFootprintInstance(doc, instanceId);
         }
       }
 
@@ -841,7 +823,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       get().pushHistory();
 
       const netId = routing.netId || ("unrouted" as NetId);
-      const trace = createTraceFromPoints(
+      const trace = Pcb.createTraceFromPoints(
         routing.points,
         routing.traceWidth,
         routing.layerId,
@@ -849,7 +831,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       );
 
       set((state) => ({
-        pcb: addTrace(state.pcb, trace),
+        pcb: Pcb.addTrace(state.pcb, trace),
         routing: null,
         mode: "select",
       }));
@@ -877,8 +859,8 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       const { routing, pcb } = get();
       if (!routing) return;
 
-      const topLayer = getTopCopperLayer(pcb);
-      const bottomLayer = getBottomCopperLayer(pcb);
+      const topLayer = Pcb.getTopCopperLayer(pcb);
+      const bottomLayer = Pcb.getBottomCopperLayer(pcb);
 
       if (!topLayer || !bottomLayer) return;
 
@@ -894,8 +876,8 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       const { routing, pcb, gridSize, snapToGrid: snap } = get();
       if (!routing || routing.points.length === 0) return null;
 
-      const topLayer = getTopCopperLayer(pcb);
-      const bottomLayer = getBottomCopperLayer(pcb);
+      const topLayer = Pcb.getTopCopperLayer(pcb);
+      const bottomLayer = Pcb.getBottomCopperLayer(pcb);
       if (!topLayer || !bottomLayer) return null;
 
       get().pushHistory();
@@ -903,7 +885,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       const lastPoint = routing.points[routing.points.length - 1];
       const snappedPos = snap ? snapToGrid(lastPoint, gridSize) : lastPoint;
 
-      const via = createThroughVia(
+      const via = Pcb.createThroughVia(
         snappedPos,
         routing.netId || ("unrouted" as NetId),
         pcb.designRules.minViaDiameter,
@@ -915,7 +897,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       const newLayer = routing.layerId === topLayer ? bottomLayer : topLayer;
 
       set((state) => ({
-        pcb: addVia(state.pcb, via),
+        pcb: Pcb.addVia(state.pcb, via),
         routing: {
           ...state.routing!,
           layerId: newLayer,
@@ -939,7 +921,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
       let doc = pcb;
       for (const traceId of selectedTraces) {
-        doc = deleteTrace(doc, traceId);
+        doc = Pcb.deleteTrace(doc, traceId);
       }
 
       set({
@@ -956,7 +938,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       get().pushHistory();
 
       set((state) => ({
-        pcb: updateTrace(state.pcb, { ...trace, netId }),
+        pcb: Pcb.updateTrace(state.pcb, { ...trace, netId }),
       }));
     },
 
@@ -967,15 +949,15 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     placeVia: (position, netId) => {
       const { pcb, gridSize, snapToGrid: snap } = get();
 
-      const topLayer = getTopCopperLayer(pcb);
-      const bottomLayer = getBottomCopperLayer(pcb);
+      const topLayer = Pcb.getTopCopperLayer(pcb);
+      const bottomLayer = Pcb.getBottomCopperLayer(pcb);
       if (!topLayer || !bottomLayer) return null;
 
       get().pushHistory();
 
       const snappedPos = snap ? snapToGrid(position, gridSize) : position;
 
-      const via = createThroughVia(
+      const via = Pcb.createThroughVia(
         snappedPos,
         netId,
         pcb.designRules.minViaDiameter,
@@ -985,7 +967,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       );
 
       set((state) => ({
-        pcb: addVia(state.pcb, via),
+        pcb: Pcb.addVia(state.pcb, via),
       }));
 
       return via.id;
@@ -999,7 +981,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
       let doc = pcb;
       for (const viaId of selectedVias) {
-        doc = deleteVia(doc, viaId);
+        doc = Pcb.deleteVia(doc, viaId);
       }
 
       set({
@@ -1045,27 +1027,23 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
       get().pushHistory();
 
-      // Import createCopperPour at runtime to avoid circular deps
-      const { newId } = require("@vibecad/core");
       const pour: CopperPour = {
         id: newId("CopperPour"),
         layerId: activeLayer,
         netId: zoneDrawing.netId || ("" as NetId),
         outline: zoneDrawing.points,
-        cutouts: [],
         priority: 0,
         fillType: "solid",
-        thermalRelief: {
-          enabled: true,
-          gap: 0.5,
-          spokeWidth: 0.5,
-        },
+        clearance: 0.2,
+        minWidth: 0.2,
+        thermalReliefGap: 0.5,
+        thermalReliefSpokeWidth: 0.5,
+        padConnection: "thermal_relief",
         locked: false,
-        needsRefill: true,
       };
 
       set((state) => ({
-        pcb: addCopperPour(state.pcb, pour),
+        pcb: Pcb.addCopperPour(state.pcb, pour),
         zoneDrawing: null,
         mode: "select",
       }));
@@ -1088,7 +1066,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
       let doc = pcb;
       for (const pourId of selectedPours) {
-        doc = deleteCopperPour(doc, pourId);
+        doc = Pcb.deleteCopperPour(doc, pourId);
       }
 
       set({
@@ -1114,7 +1092,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       get().pushHistory();
 
       set((state) => ({
-        pcb: setNet(state.pcb, netId, { ...net, classId }),
+        pcb: Pcb.setNet(state.pcb, netId, { ...net, classId }),
       }));
     },
 
@@ -1129,7 +1107,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
       // For now, just clear violations after a delay
       setTimeout(() => {
         set((state) => ({
-          pcb: setDrcViolations(state.pcb, []),
+          pcb: Pcb.setDrcViolations(state.pcb, []),
           drcRunning: false,
         }));
       }, 500);
@@ -1137,7 +1115,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     clearDrc: () => {
       set((state) => ({
-        pcb: setDrcViolations(state.pcb, undefined),
+        pcb: Pcb.setDrcViolations(state.pcb, undefined),
       }));
     },
 
@@ -1271,7 +1249,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     setBoardOutline: (outline) => {
       get().pushHistory();
       set((state) => ({
-        pcb: setBoardOutline(state.pcb, outline),
+        pcb: Pcb.setBoardOutline(state.pcb, outline),
       }));
     },
 
@@ -1282,7 +1260,7 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
     setDesignRules: (rules) => {
       get().pushHistory();
       set((state) => ({
-        pcb: setDesignRules(state.pcb, rules),
+        pcb: Pcb.setDesignRules(state.pcb, rules),
       }));
     },
 
@@ -1292,13 +1270,13 @@ export const usePcbStore = create<PcbState & PcbActions>()((set, get) => {
 
     linkSchematic: (path) => {
       set((state) => ({
-        pcb: setLinkedSchematic(state.pcb, path),
+        pcb: Pcb.setLinkedSchematic(state.pcb, path),
       }));
     },
 
     unlinkSchematic: () => {
       set((state) => ({
-        pcb: setLinkedSchematic(state.pcb, undefined),
+        pcb: Pcb.setLinkedSchematic(state.pcb, undefined),
       }));
     },
 
