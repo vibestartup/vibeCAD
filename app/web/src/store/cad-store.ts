@@ -33,6 +33,9 @@ import type {
   CirclePrimitive,
   ArcPrimitive,
   Sketch,
+  ConstraintId,
+  ConstraintType,
+  SolveStatus,
 } from "@vibecad/core";
 import type { ExportableMesh } from "../utils/stl-export";
 import type { ShapeHandle } from "@vibecad/kernel";
@@ -46,6 +49,7 @@ import {
   touchPartStudio,
   getReferencedPoints,
   createPlaneFromNormal,
+  sketch as sketchOps,
 } from "@vibecad/core";
 import { history, HistoryState, createHistory, pushState, undo, redo } from "@vibecad/core";
 import { params } from "@vibecad/core";
@@ -234,6 +238,17 @@ interface CadState {
     scaleCenter: Vec3;
   } | null;
 
+  // Pending constraint (when user is adding a constraint in sketch mode)
+  pendingConstraint: {
+    type: ConstraintType;
+    entities: PrimitiveId[];
+    dimension?: number;  // For dimensional constraints
+  } | null;
+
+  // Current sketch solve status (for UI display)
+  currentSketchSolveStatus: SolveStatus | null;
+  currentSketchDof: number | null;
+
   // Export mesh data (populated by Viewport for export)
   exportMeshes: ExportableMesh[];
 
@@ -416,6 +431,15 @@ interface CadActions {
   setExportMeshes: (meshes: ExportableMesh[]) => void;
   setExportShapeHandles: (handles: ShapeHandle[]) => void;
   resetDocument: () => void;
+
+  // Constraint actions
+  startConstraint: (type: ConstraintType) => void;
+  addConstraintEntity: (primitiveId: PrimitiveId) => void;
+  setConstraintDimension: (value: number) => void;
+  confirmConstraint: () => void;
+  cancelConstraint: () => void;
+  deleteConstraint: (constraintId: ConstraintId) => void;
+  solveActiveSketch: () => void;
 }
 
 export type CadStore = CadState & CadActions;
@@ -462,6 +486,9 @@ function createInitialState(): CadState {
     hoveredFace: null,
     pendingPrimitive: null,
     pendingTransform: null,
+    pendingConstraint: null,
+    currentSketchSolveStatus: null,
+    currentSketchDof: null,
     exportMeshes: [],
     exportShapeHandles: [],
   };
@@ -2796,6 +2823,215 @@ export const useCadStore = create<CadStore>((set, get) => ({
   resetDocument: () => {
     set(createInitialState());
   },
+
+  // Constraint actions
+  startConstraint: (type) => {
+    set({
+      pendingConstraint: {
+        type,
+        entities: [],
+        dimension: undefined,
+      },
+      activeTool: `constraint-${type}`,
+    });
+  },
+
+  addConstraintEntity: (primitiveId) => {
+    const { pendingConstraint } = get();
+    if (!pendingConstraint) return;
+
+    // Add entity if not already in list
+    if (!pendingConstraint.entities.includes(primitiveId)) {
+      set({
+        pendingConstraint: {
+          ...pendingConstraint,
+          entities: [...pendingConstraint.entities, primitiveId],
+        },
+      });
+    }
+  },
+
+  setConstraintDimension: (value) => {
+    const { pendingConstraint } = get();
+    if (!pendingConstraint) return;
+
+    set({
+      pendingConstraint: {
+        ...pendingConstraint,
+        dimension: value,
+      },
+    });
+  },
+
+  confirmConstraint: () => {
+    const { studio, activeSketchId, pendingConstraint, historyState, kernel } = get();
+    if (!activeSketchId || !pendingConstraint) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    // Check if we have enough entities for this constraint type
+    const { type, entities, dimension } = pendingConstraint;
+    let updatedSketch: Sketch | null = null;
+
+    try {
+      switch (type) {
+        case "coincident":
+          if (entities.length >= 2) {
+            const result = sketchOps.addCoincident(sketch, entities[0], entities[1]);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "horizontal":
+          if (entities.length >= 1) {
+            const result = sketchOps.addHorizontal(sketch, ...entities);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "vertical":
+          if (entities.length >= 1) {
+            const result = sketchOps.addVertical(sketch, ...entities);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "parallel":
+          if (entities.length >= 2) {
+            const result = sketchOps.addParallel(sketch, entities[0], entities[1]);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "perpendicular":
+          if (entities.length >= 2) {
+            const result = sketchOps.addPerpendicular(sketch, entities[0], entities[1]);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "equal":
+          if (entities.length >= 2) {
+            const result = sketchOps.addEqual(sketch, entities[0], entities[1]);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "fixed":
+          if (entities.length >= 1) {
+            const result = sketchOps.addFixed(sketch, entities[0]);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "distance":
+          if (entities.length >= 2 && dimension !== undefined) {
+            const result = sketchOps.addDistance(sketch, entities[0], entities[1], dimension);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "angle":
+          if (entities.length >= 2 && dimension !== undefined) {
+            // Convert degrees to radians for angle
+            const result = sketchOps.addAngle(sketch, entities[0], entities[1], dimension * Math.PI / 180);
+            updatedSketch = result.sketch;
+          }
+          break;
+        case "radius":
+          if (entities.length >= 1 && dimension !== undefined) {
+            const result = sketchOps.addRadius(sketch, entities[0], dimension);
+            updatedSketch = result.sketch;
+          }
+          break;
+      }
+
+      if (updatedSketch) {
+        // Solve the sketch if kernel is available
+        if (kernel) {
+          try {
+            const solveResult = sketchOps.solveSketch(updatedSketch, kernel.gcs);
+            updatedSketch = sketchOps.applysolvedPositions(updatedSketch, solveResult);
+          } catch (e) {
+            console.warn("[CAD] Failed to solve sketch after adding constraint:", e);
+          }
+        }
+
+        const newSketches = new Map(studio.sketches);
+        newSketches.set(activeSketchId, updatedSketch);
+
+        const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+        set({
+          studio: newStudio,
+          historyState: pushState(historyState, newStudio),
+          pendingConstraint: null,
+          activeTool: "select",
+          currentSketchSolveStatus: updatedSketch.solveStatus ?? null,
+          currentSketchDof: updatedSketch.dof ?? null,
+        });
+      }
+    } catch (e) {
+      console.error("[CAD] Failed to add constraint:", e);
+      set({ pendingConstraint: null, activeTool: "select" });
+    }
+  },
+
+  cancelConstraint: () => {
+    set({
+      pendingConstraint: null,
+      activeTool: "select",
+    });
+  },
+
+  deleteConstraint: (constraintId) => {
+    const { studio, activeSketchId, historyState, kernel } = get();
+    if (!activeSketchId) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch) return;
+
+    let updatedSketch = sketchOps.removeConstraint(sketch, constraintId);
+
+    // Re-solve after removing constraint
+    if (kernel && updatedSketch.constraints.size > 0) {
+      try {
+        const solveResult = sketchOps.solveSketch(updatedSketch, kernel.gcs);
+        updatedSketch = sketchOps.applysolvedPositions(updatedSketch, solveResult);
+      } catch (e) {
+        console.warn("[CAD] Failed to solve sketch after removing constraint:", e);
+      }
+    }
+
+    const newSketches = new Map(studio.sketches);
+    newSketches.set(activeSketchId, updatedSketch);
+
+    const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+    set({
+      studio: newStudio,
+      historyState: pushState(historyState, newStudio),
+      currentSketchSolveStatus: updatedSketch.solveStatus ?? null,
+      currentSketchDof: updatedSketch.dof ?? null,
+    });
+  },
+
+  solveActiveSketch: () => {
+    const { studio, activeSketchId, historyState, kernel } = get();
+    if (!activeSketchId || !kernel) return;
+
+    const sketch = studio.sketches.get(activeSketchId);
+    if (!sketch || sketch.constraints.size === 0) return;
+
+    try {
+      const solveResult = sketchOps.solveSketch(sketch, kernel.gcs);
+      const updatedSketch = sketchOps.applysolvedPositions(sketch, solveResult);
+
+      const newSketches = new Map(studio.sketches);
+      newSketches.set(activeSketchId, updatedSketch);
+
+      const newStudio = touchPartStudio({ ...studio, sketches: newSketches });
+      set({
+        studio: newStudio,
+        historyState: pushState(historyState, newStudio),
+        currentSketchSolveStatus: updatedSketch.solveStatus ?? null,
+        currentSketchDof: updatedSketch.dof ?? null,
+      });
+    } catch (e) {
+      console.error("[CAD] Failed to solve sketch:", e);
+    }
+  },
 }));
 
 // ============================================================================
@@ -2818,3 +3054,6 @@ export const selectIsRebuilding = (state: CadStore) => state.isRebuilding;
 export const selectTimelinePosition = (state: CadStore) => state.timelinePosition;
 export const selectExportMeshes = (state: CadStore) => state.exportMeshes;
 export const selectExportShapeHandles = (state: CadStore) => state.exportShapeHandles;
+export const selectPendingConstraint = (state: CadStore) => state.pendingConstraint;
+export const selectCurrentSketchSolveStatus = (state: CadStore) => state.currentSketchSolveStatus;
+export const selectCurrentSketchDof = (state: CadStore) => state.currentSketchDof;
