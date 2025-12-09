@@ -4,7 +4,7 @@
  * Combines the canvas, toolbar, and properties panel into a complete editor.
  */
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useDrawingStore } from "../../store/drawing-store";
 import { DrawingCanvas } from "./DrawingCanvas";
 import { DrawingToolbar } from "./DrawingToolbar";
@@ -233,6 +233,12 @@ export function DrawingEditor() {
   const startViewPlacement = useDrawingStore((s) => s.startViewPlacement);
   const isRecomputing = useDrawingStore((s) => s.isRecomputing);
   const recomputeViews = useDrawingStore((s) => s.recomputeViews);
+  const initDrawing = useDrawingStore((s) => s.initDrawing);
+
+  // Initialize drawing on mount
+  useEffect(() => {
+    initDrawing();
+  }, [initDrawing]);
 
   const handleAddView = useCallback(() => {
     setShowAddViewModal(true);
@@ -250,6 +256,15 @@ export function DrawingEditor() {
   }, [recomputeViews]);
 
   const totalSelected = selectedViews.size + selectedDimensions.size + selectedAnnotations.size;
+
+  // Show loading state while drawing initializes
+  if (!drawing) {
+    return (
+      <div style={{ ...styles.container, alignItems: "center", justifyContent: "center" }}>
+        <span style={{ color: "#888" }}>Loading drawing...</span>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.container}>

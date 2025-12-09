@@ -122,6 +122,8 @@ function SheetProperties() {
 
   const sheetSizes: SheetSize[] = ["A4", "A3", "A2", "A1", "A0", "Letter", "Tabloid"];
 
+  if (!drawing) return null;
+
   return (
     <div style={styles.section}>
       <div style={styles.sectionTitle}>Sheet</div>
@@ -164,7 +166,7 @@ function ViewProperties() {
   const selectedViews = useDrawingStore((s) => s.selectedViews);
   const updateView = useDrawingStore((s) => s.updateView);
 
-  if (selectedViews.size === 0) return null;
+  if (!drawing || selectedViews.size === 0) return null;
 
   const viewId = Array.from(selectedViews)[0];
   const view = drawing.views.get(viewId);
@@ -306,7 +308,7 @@ function DimensionProperties() {
   const selectedDimensions = useDrawingStore((s) => s.selectedDimensions);
   const updateDimension = useDrawingStore((s) => s.updateDimension);
 
-  if (selectedDimensions.size === 0) return null;
+  if (!drawing || selectedDimensions.size === 0) return null;
 
   const dimId = Array.from(selectedDimensions)[0];
   const dim = drawing.dimensions.get(dimId);

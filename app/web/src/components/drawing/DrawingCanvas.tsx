@@ -342,7 +342,8 @@ export function DrawingCanvas() {
   const pendingViewPlacement = useDrawingStore((s) => s.pendingViewPlacement);
   const confirmViewPlacement = useDrawingStore((s) => s.confirmViewPlacement);
 
-  const { sheet } = drawing;
+  // Get sheet dimensions, with fallback for null drawing
+  const sheet = drawing?.sheet ?? { width: 420, height: 297, margins: { top: 10, bottom: 10, left: 10, right: 10 }, size: "A3" as const, orientation: "landscape" as const };
 
   // Convert screen coordinates to sheet coordinates
   const screenToSheet = useCallback(
@@ -450,7 +451,7 @@ export function DrawingCanvas() {
         </g>
 
         {/* Views */}
-        {Array.from(drawing.views.values()).map((view) => (
+        {drawing && Array.from(drawing.views.values()).map((view) => (
           <ViewRenderer
             key={view.id}
             view={view}
@@ -462,7 +463,7 @@ export function DrawingCanvas() {
         ))}
 
         {/* Dimensions */}
-        {Array.from(drawing.dimensions.values()).map((dim) => (
+        {drawing && Array.from(drawing.dimensions.values()).map((dim) => (
           <DimensionRenderer
             key={dim.id}
             dimension={dim}
@@ -472,7 +473,7 @@ export function DrawingCanvas() {
         ))}
 
         {/* Annotations */}
-        {Array.from(drawing.annotations.values()).map((ann) => (
+        {drawing && Array.from(drawing.annotations.values()).map((ann) => (
           <AnnotationRenderer
             key={ann.id}
             annotation={ann}
@@ -487,13 +488,13 @@ export function DrawingCanvas() {
           <line x1={0} y1={20} x2={170} y2={20} {...styles.titleBlock} />
           <line x1={85} y1={0} x2={85} y2={20} {...styles.titleBlock} />
           <text x={5} y={12} fontSize={3} fontFamily="sans-serif">
-            {drawing.name}
+            {drawing?.name || "Untitled"}
           </text>
           <text x={90} y={12} fontSize={2.5} fontFamily="sans-serif">
-            Scale: {drawing.sheet.size}
+            Scale: {sheet.size}
           </text>
           <text x={5} y={32} fontSize={2.5} fontFamily="sans-serif">
-            {drawing.titleBlock?.drawnBy || "vibeCAD"}
+            {drawing?.titleBlock?.drawnBy || "vibeCAD"}
           </text>
         </g>
 

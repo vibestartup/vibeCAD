@@ -67,8 +67,8 @@ export interface SourceCache {
 // ============================================================================
 
 interface DrawingState {
-  // Main drawing data
-  drawing: Drawing;
+  // Main drawing data (null until initialized)
+  drawing: Drawing | null;
 
   // Source geometry cache (loaded .vibecad files)
   sourceCache: Map<string, SourceCache>;
@@ -116,6 +116,7 @@ interface DrawingState {
 
 interface DrawingActions {
   // Drawing management
+  initDrawing: () => void; // Initialize drawing if null (call on component mount)
   setDrawing: (drawing: Drawing) => void;
   newDrawing: (name?: string, sheetSize?: SheetSize) => void;
   setSheetSize: (size: SheetSize) => void;
@@ -186,12 +187,9 @@ type DrawingStore = DrawingState & DrawingActions;
 // Store Implementation
 // ============================================================================
 
-// Create initial drawing lazily to avoid module initialization issues
-const getInitialDrawing = (): Drawing => coreFunctions.createDrawing("Untitled Drawing");
-
 export const useDrawingStore = create<DrawingStore>((set, get) => ({
-  // Initial state
-  drawing: getInitialDrawing(),
+  // Initial state - drawing is null until initDrawing() is called
+  drawing: null,
   sourceCache: new Map(),
   editorMode: "select",
   activeTool: "select",
@@ -209,6 +207,13 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   isRecomputing: false,
 
   // Drawing management
+  initDrawing: () => {
+    // Only initialize if not already initialized
+    if (get().drawing === null) {
+      set({ drawing: coreFunctions.createDrawing("Untitled Drawing") });
+    }
+  },
+
   setDrawing: (drawing) => set({ drawing }),
 
   newDrawing: (name = "Untitled Drawing", sheetSize = "A3") => {
@@ -225,6 +230,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 
   setSheetSize: (size) => {
     set((state) => {
+      if (!state.drawing) return state;
       const sheet = state.drawing.sheet;
       const SHEET_SIZES: Record<string, { width: number; height: number }> = {
         A4: { width: 210, height: 297 },
@@ -253,22 +259,27 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 
   // View management
   addView: (view) => {
-    set((state) => ({
-      drawing: coreFunctions.addView(state.drawing, view),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return { drawing: coreFunctions.addView(state.drawing, view) };
+    });
   },
 
   updateView: (viewId, updates) => {
-    set((state) => ({
-      drawing: coreFunctions.updateView(state.drawing, viewId, updates),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return { drawing: coreFunctions.updateView(state.drawing, viewId, updates) };
+    });
   },
 
   removeView: (viewId) => {
-    set((state) => ({
-      drawing: coreFunctions.removeView(state.drawing, viewId),
-      selectedViews: new Set([...state.selectedViews].filter((id) => id !== viewId)),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return {
+        drawing: coreFunctions.removeView(state.drawing, viewId),
+        selectedViews: new Set([...state.selectedViews].filter((id) => id !== viewId)),
+      };
+    });
   },
 
   setViewProjection: (viewId, projection) => {
@@ -285,13 +296,15 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 
   // Dimension management
   addDimension: (dim) => {
-    set((state) => ({
-      drawing: coreFunctions.addDimension(state.drawing, dim),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return { drawing: coreFunctions.addDimension(state.drawing, dim) };
+    });
   },
 
   updateDimension: (dimId, updates) => {
     set((state) => {
+      if (!state.drawing) return state;
       const dim = state.drawing.dimensions.get(dimId);
       if (!dim) return state;
       const newDims = new Map(state.drawing.dimensions);
@@ -303,24 +316,31 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   },
 
   removeDimension: (dimId) => {
-    set((state) => ({
-      drawing: coreFunctions.removeDimension(state.drawing, dimId),
-      selectedDimensions: new Set([...state.selectedDimensions].filter((id) => id !== dimId)),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return {
+        drawing: coreFunctions.removeDimension(state.drawing, dimId),
+        selectedDimensions: new Set([...state.selectedDimensions].filter((id) => id !== dimId)),
+      };
+    });
   },
 
   // Annotation management
   addAnnotation: (ann) => {
-    set((state) => ({
-      drawing: coreFunctions.addAnnotation(state.drawing, ann),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return { drawing: coreFunctions.addAnnotation(state.drawing, ann) };
+    });
   },
 
   removeAnnotation: (annId) => {
-    set((state) => ({
-      drawing: coreFunctions.removeAnnotation(state.drawing, annId),
-      selectedAnnotations: new Set([...state.selectedAnnotations].filter((id) => id !== annId)),
-    }));
+    set((state) => {
+      if (!state.drawing) return state;
+      return {
+        drawing: coreFunctions.removeAnnotation(state.drawing, annId),
+        selectedAnnotations: new Set([...state.selectedAnnotations].filter((id) => id !== annId)),
+      };
+    });
   },
 
   // Selection
@@ -372,6 +392,7 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 
   deleteSelected: () => {
     const state = get();
+    if (!state.drawing) return;
 
     // Delete selected views
     let drawing = state.drawing;
@@ -452,17 +473,20 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 
   confirmViewPlacement: (position) => {
     const state = get();
-    if (!state.pendingViewPlacement) return;
+    if (!state.pendingViewPlacement || !state.drawing) return;
 
     const { sourcePath, projection, scale } = state.pendingViewPlacement;
     const view = coreFunctions.createDrawingView(`View ${state.drawing.views.size + 1}`, sourcePath, projection, position, scale);
 
-    set((s) => ({
-      drawing: coreFunctions.addView(s.drawing, view),
-      pendingViewPlacement: null,
-      editorMode: "select",
-      activeTool: "select",
-    }));
+    set((s) => {
+      if (!s.drawing) return s;
+      return {
+        drawing: coreFunctions.addView(s.drawing, view),
+        pendingViewPlacement: null,
+        editorMode: "select" as const,
+        activeTool: "select" as const,
+      };
+    });
   },
 
   // Dimension workflow
@@ -569,10 +593,10 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
 // ============================================================================
 
 export const selectDrawing = (state: DrawingStore) => state.drawing;
-export const selectViews = (state: DrawingStore) => state.drawing.views;
-export const selectDimensions = (state: DrawingStore) => state.drawing.dimensions;
-export const selectAnnotations = (state: DrawingStore) => state.drawing.annotations;
-export const selectSheet = (state: DrawingStore) => state.drawing.sheet;
+export const selectViews = (state: DrawingStore) => state.drawing?.views ?? new Map();
+export const selectDimensions = (state: DrawingStore) => state.drawing?.dimensions ?? new Map();
+export const selectAnnotations = (state: DrawingStore) => state.drawing?.annotations ?? new Map();
+export const selectSheet = (state: DrawingStore) => state.drawing?.sheet ?? null;
 export const selectSelectedViews = (state: DrawingStore) => state.selectedViews;
 export const selectEditorMode = (state: DrawingStore) => state.editorMode;
 export const selectActiveTool = (state: DrawingStore) => state.activeTool;
