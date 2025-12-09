@@ -1,10 +1,13 @@
 /**
  * Schematic Document - top-level container for a schematic design.
+ *
+ * Design: 1 file = 1 schematic = 1 tab
+ * Each schematic file contains a single sheet. Multi-sheet designs are
+ * implemented as separate files that can reference each other via ports.
  */
 
 import {
   SchematicDocId,
-  SheetId,
   SymbolId,
   SymbolInstanceId,
   NetId,
@@ -19,7 +22,7 @@ import {
 import { Symbol } from "./symbol";
 import { SymbolInstance } from "./instance";
 import { Net, Wire, Junction, NetLabel, Port, NetClass } from "./net";
-import { Sheet, createSheet } from "./sheet";
+import { SheetSize, createSheetSize } from "./sheet";
 
 // ============================================================================
 // Schematic Document
@@ -40,9 +43,8 @@ export interface SchematicDocument {
   id: SchematicDocId;
   name: string;
 
-  // Multi-sheet support
-  sheets: Map<SheetId, Sheet>;
-  activeSheetId: SheetId;
+  // Sheet size (for display/printing)
+  sheetSize: SheetSize;
 
   // Symbols (library of symbol definitions used in this schematic)
   symbols: Map<SymbolId, Symbol>;
@@ -80,13 +82,11 @@ export interface SchematicDocument {
  */
 export function createSchematicDocument(name: string): SchematicDocument {
   const now = Date.now();
-  const sheet = createSheet("Sheet 1", 1);
 
   return {
     id: newId("SchematicDoc"),
     name,
-    sheets: new Map([[sheet.id, sheet]]),
-    activeSheetId: sheet.id,
+    sheetSize: createSheetSize("A4", true),
     symbols: new Map(),
     symbolInstances: new Map(),
     nets: new Map(),
@@ -123,94 +123,13 @@ export function touchSchematicDocument(doc: SchematicDocument): SchematicDocumen
 }
 
 /**
- * Set the active sheet.
+ * Set the document's sheet size.
  */
-export function setActiveSheet(
+export function setDocumentSheetSize(
   doc: SchematicDocument,
-  sheetId: SheetId
+  size: SheetSize
 ): SchematicDocument {
-  if (!doc.sheets.has(sheetId)) {
-    return doc;
-  }
-  return touchSchematicDocument({ ...doc, activeSheetId: sheetId });
-}
-
-/**
- * Add a new sheet.
- */
-export function addSheet(doc: SchematicDocument, sheet: Sheet): SchematicDocument {
-  const newSheets = new Map(doc.sheets);
-  newSheets.set(sheet.id, sheet);
-  return touchSchematicDocument({ ...doc, sheets: newSheets });
-}
-
-/**
- * Update a sheet.
- */
-export function updateSheet(doc: SchematicDocument, sheet: Sheet): SchematicDocument {
-  if (!doc.sheets.has(sheet.id)) {
-    return doc;
-  }
-  const newSheets = new Map(doc.sheets);
-  newSheets.set(sheet.id, sheet);
-  return touchSchematicDocument({ ...doc, sheets: newSheets });
-}
-
-/**
- * Delete a sheet.
- */
-export function deleteSheet(doc: SchematicDocument, sheetId: SheetId): SchematicDocument {
-  if (doc.sheets.size <= 1) {
-    return doc; // Cannot delete last sheet
-  }
-
-  const sheet = doc.sheets.get(sheetId);
-  if (!sheet) {
-    return doc;
-  }
-
-  // Remove all elements on this sheet
-  let updatedDoc = { ...doc };
-
-  // Remove instances
-  const newInstances = new Map(doc.symbolInstances);
-  for (const instanceId of sheet.symbolInstances) {
-    newInstances.delete(instanceId);
-  }
-  updatedDoc.symbolInstances = newInstances;
-
-  // Remove wires
-  const newWires = new Map(doc.wires);
-  for (const wireId of sheet.wires) {
-    newWires.delete(wireId);
-  }
-  updatedDoc.wires = newWires;
-
-  // Remove labels
-  const newLabels = new Map(doc.netLabels);
-  for (const labelId of sheet.labels) {
-    newLabels.delete(labelId);
-  }
-  updatedDoc.netLabels = newLabels;
-
-  // Remove ports
-  const newPorts = new Map(doc.ports);
-  for (const portId of sheet.ports) {
-    newPorts.delete(portId);
-  }
-  updatedDoc.ports = newPorts;
-
-  // Remove sheet
-  const newSheets = new Map(doc.sheets);
-  newSheets.delete(sheetId);
-  updatedDoc.sheets = newSheets;
-
-  // Update active sheet if needed
-  if (updatedDoc.activeSheetId === sheetId) {
-    updatedDoc.activeSheetId = newSheets.keys().next().value!;
-  }
-
-  return touchSchematicDocument(updatedDoc);
+  return touchSchematicDocument({ ...doc, sheetSize: size });
 }
 
 /**
@@ -231,21 +150,6 @@ export function addSymbolInstance(
 ): SchematicDocument {
   const newInstances = new Map(doc.symbolInstances);
   newInstances.set(instance.id, instance);
-
-  // Add to sheet
-  const sheet = doc.sheets.get(instance.sheetId);
-  if (sheet) {
-    const newSheetInstances = new Set(sheet.symbolInstances);
-    newSheetInstances.add(instance.id);
-    const newSheets = new Map(doc.sheets);
-    newSheets.set(sheet.id, { ...sheet, symbolInstances: newSheetInstances });
-    return touchSchematicDocument({
-      ...doc,
-      symbolInstances: newInstances,
-      sheets: newSheets,
-    });
-  }
-
   return touchSchematicDocument({ ...doc, symbolInstances: newInstances });
 }
 
@@ -271,28 +175,11 @@ export function deleteSymbolInstance(
   doc: SchematicDocument,
   instanceId: SymbolInstanceId
 ): SchematicDocument {
-  const instance = doc.symbolInstances.get(instanceId);
-  if (!instance) {
+  if (!doc.symbolInstances.has(instanceId)) {
     return doc;
   }
-
   const newInstances = new Map(doc.symbolInstances);
   newInstances.delete(instanceId);
-
-  // Remove from sheet
-  const sheet = doc.sheets.get(instance.sheetId);
-  if (sheet) {
-    const newSheetInstances = new Set(sheet.symbolInstances);
-    newSheetInstances.delete(instanceId);
-    const newSheets = new Map(doc.sheets);
-    newSheets.set(sheet.id, { ...sheet, symbolInstances: newSheetInstances });
-    return touchSchematicDocument({
-      ...doc,
-      symbolInstances: newInstances,
-      sheets: newSheets,
-    });
-  }
-
   return touchSchematicDocument({ ...doc, symbolInstances: newInstances });
 }
 
@@ -302,21 +189,6 @@ export function deleteSymbolInstance(
 export function addWire(doc: SchematicDocument, wire: Wire): SchematicDocument {
   const newWires = new Map(doc.wires);
   newWires.set(wire.id, wire);
-
-  // Add to sheet
-  const sheet = doc.sheets.get(wire.sheetId);
-  if (sheet) {
-    const newSheetWires = new Set(sheet.wires);
-    newSheetWires.add(wire.id);
-    const newSheets = new Map(doc.sheets);
-    newSheets.set(sheet.id, { ...sheet, wires: newSheetWires });
-    return touchSchematicDocument({
-      ...doc,
-      wires: newWires,
-      sheets: newSheets,
-    });
-  }
-
   return touchSchematicDocument({ ...doc, wires: newWires });
 }
 
@@ -324,28 +196,11 @@ export function addWire(doc: SchematicDocument, wire: Wire): SchematicDocument {
  * Delete a wire.
  */
 export function deleteWire(doc: SchematicDocument, wireId: WireId): SchematicDocument {
-  const wire = doc.wires.get(wireId);
-  if (!wire) {
+  if (!doc.wires.has(wireId)) {
     return doc;
   }
-
   const newWires = new Map(doc.wires);
   newWires.delete(wireId);
-
-  // Remove from sheet
-  const sheet = doc.sheets.get(wire.sheetId);
-  if (sheet) {
-    const newSheetWires = new Set(sheet.wires);
-    newSheetWires.delete(wireId);
-    const newSheets = new Map(doc.sheets);
-    newSheets.set(sheet.id, { ...sheet, wires: newSheetWires });
-    return touchSchematicDocument({
-      ...doc,
-      wires: newWires,
-      sheets: newSheets,
-    });
-  }
-
   return touchSchematicDocument({ ...doc, wires: newWires });
 }
 
@@ -383,6 +238,21 @@ export function addJunction(
 }
 
 /**
+ * Delete a junction.
+ */
+export function deleteJunction(
+  doc: SchematicDocument,
+  junctionId: JunctionId
+): SchematicDocument {
+  if (!doc.junctions.has(junctionId)) {
+    return doc;
+  }
+  const newJunctions = new Map(doc.junctions);
+  newJunctions.delete(junctionId);
+  return touchSchematicDocument({ ...doc, junctions: newJunctions });
+}
+
+/**
  * Add a net label.
  */
 export function addNetLabel(
@@ -391,22 +261,49 @@ export function addNetLabel(
 ): SchematicDocument {
   const newLabels = new Map(doc.netLabels);
   newLabels.set(label.id, label);
-
-  // Add to sheet
-  const sheet = doc.sheets.get(label.sheetId);
-  if (sheet) {
-    const newSheetLabels = new Set(sheet.labels);
-    newSheetLabels.add(label.id);
-    const newSheets = new Map(doc.sheets);
-    newSheets.set(sheet.id, { ...sheet, labels: newSheetLabels });
-    return touchSchematicDocument({
-      ...doc,
-      netLabels: newLabels,
-      sheets: newSheets,
-    });
-  }
-
   return touchSchematicDocument({ ...doc, netLabels: newLabels });
+}
+
+/**
+ * Delete a net label.
+ */
+export function deleteNetLabel(
+  doc: SchematicDocument,
+  labelId: NetLabelId
+): SchematicDocument {
+  if (!doc.netLabels.has(labelId)) {
+    return doc;
+  }
+  const newLabels = new Map(doc.netLabels);
+  newLabels.delete(labelId);
+  return touchSchematicDocument({ ...doc, netLabels: newLabels });
+}
+
+/**
+ * Add a port.
+ */
+export function addPort(
+  doc: SchematicDocument,
+  port: Port
+): SchematicDocument {
+  const newPorts = new Map(doc.ports);
+  newPorts.set(port.id, port);
+  return touchSchematicDocument({ ...doc, ports: newPorts });
+}
+
+/**
+ * Delete a port.
+ */
+export function deletePort(
+  doc: SchematicDocument,
+  portId: PortId
+): SchematicDocument {
+  if (!doc.ports.has(portId)) {
+    return doc;
+  }
+  const newPorts = new Map(doc.ports);
+  newPorts.delete(portId);
+  return touchSchematicDocument({ ...doc, ports: newPorts });
 }
 
 /**
@@ -446,41 +343,38 @@ export function renameSchematicDocument(
 // ============================================================================
 
 /**
- * Get all instances on the active sheet.
+ * Get all symbol instances.
  */
-export function getActiveSheetInstances(
-  doc: SchematicDocument
-): SymbolInstance[] {
-  const sheet = doc.sheets.get(doc.activeSheetId);
-  if (!sheet) return [];
-
-  return Array.from(sheet.symbolInstances)
-    .map((id) => doc.symbolInstances.get(id))
-    .filter((inst): inst is SymbolInstance => inst !== undefined);
+export function getAllInstances(doc: SchematicDocument): SymbolInstance[] {
+  return Array.from(doc.symbolInstances.values());
 }
 
 /**
- * Get all wires on the active sheet.
+ * Get all wires.
  */
-export function getActiveSheetWires(doc: SchematicDocument): Wire[] {
-  const sheet = doc.sheets.get(doc.activeSheetId);
-  if (!sheet) return [];
-
-  return Array.from(sheet.wires)
-    .map((id) => doc.wires.get(id))
-    .filter((wire): wire is Wire => wire !== undefined);
+export function getAllWires(doc: SchematicDocument): Wire[] {
+  return Array.from(doc.wires.values());
 }
 
 /**
- * Get all labels on the active sheet.
+ * Get all net labels.
  */
-export function getActiveSheetLabels(doc: SchematicDocument): NetLabel[] {
-  const sheet = doc.sheets.get(doc.activeSheetId);
-  if (!sheet) return [];
+export function getAllLabels(doc: SchematicDocument): NetLabel[] {
+  return Array.from(doc.netLabels.values());
+}
 
-  return Array.from(sheet.labels)
-    .map((id) => doc.netLabels.get(id))
-    .filter((label): label is NetLabel => label !== undefined);
+/**
+ * Get all junctions.
+ */
+export function getAllJunctions(doc: SchematicDocument): Junction[] {
+  return Array.from(doc.junctions.values());
+}
+
+/**
+ * Get all ports.
+ */
+export function getAllPorts(doc: SchematicDocument): Port[] {
+  return Array.from(doc.ports.values());
 }
 
 /**
@@ -523,4 +417,29 @@ export function findInstanceByRefDes(
  */
 export function getNetNames(doc: SchematicDocument): string[] {
   return Array.from(doc.nets.values()).map((n) => n.name);
+}
+
+// ============================================================================
+// Legacy API compatibility
+// ============================================================================
+
+/**
+ * @deprecated Use getAllInstances instead. Kept for backward compatibility.
+ */
+export function getActiveSheetInstances(doc: SchematicDocument): SymbolInstance[] {
+  return getAllInstances(doc);
+}
+
+/**
+ * @deprecated Use getAllWires instead. Kept for backward compatibility.
+ */
+export function getActiveSheetWires(doc: SchematicDocument): Wire[] {
+  return getAllWires(doc);
+}
+
+/**
+ * @deprecated Use getAllLabels instead. Kept for backward compatibility.
+ */
+export function getActiveSheetLabels(doc: SchematicDocument): NetLabel[] {
+  return getAllLabels(doc);
 }

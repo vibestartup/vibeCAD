@@ -387,3 +387,51 @@ export function createVccSymbol(): Symbol {
   sym.bounds = calculateSymbolBounds(sym);
   return sym;
 }
+
+/**
+ * Create a basic inductor symbol.
+ */
+export function createInductorSymbol(): Symbol {
+  const sym = createSymbol("Inductor", "L");
+
+  // Inductor coils (arcs approximated with lines for simplicity)
+  sym.primitives = [
+    // Four humps for the coil
+    { type: "arc", center: { x: -22, y: 0 }, radius: 8, startAngle: 0, endAngle: 180, width: 2 },
+    { type: "arc", center: { x: -8, y: 0 }, radius: 8, startAngle: 0, endAngle: 180, width: 2 },
+    { type: "arc", center: { x: 6, y: 0 }, radius: 8, startAngle: 0, endAngle: 180, width: 2 },
+    { type: "arc", center: { x: 20, y: 0 }, radius: 8, startAngle: 0, endAngle: 180, width: 2 },
+  ];
+
+  // Pins
+  const pin1 = createPin("1", "1", { x: -50, y: 0 }, "right", "passive");
+  const pin2 = createPin("2", "2", { x: 50, y: 0 }, "left", "passive");
+  sym.pins.set(pin1.id, pin1);
+  sym.pins.set(pin2.id, pin2);
+
+  sym.bounds = calculateSymbolBounds(sym);
+  return sym;
+}
+
+/**
+ * Create a basic diode symbol.
+ */
+export function createDiodeSymbol(): Symbol {
+  const sym = createSymbol("Diode", "D");
+
+  // Triangle (anode to cathode)
+  sym.primitives = [
+    { type: "polyline", points: [{ x: -10, y: -15 }, { x: -10, y: 15 }, { x: 15, y: 0 }, { x: -10, y: -15 }], width: 2, fill: false },
+    // Cathode bar
+    { type: "line", start: { x: 15, y: -15 }, end: { x: 15, y: 15 }, width: 2 },
+  ];
+
+  // Pins
+  const anode = createPin("A", "1", { x: -30, y: 0 }, "right", "passive");
+  const cathode = createPin("K", "2", { x: 40, y: 0 }, "left", "passive");
+  sym.pins.set(anode.id, anode);
+  sym.pins.set(cathode.id, cathode);
+
+  sym.bounds = calculateSymbolBounds(sym);
+  return sym;
+}

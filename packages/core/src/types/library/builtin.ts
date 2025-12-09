@@ -7,6 +7,8 @@ import { Component, createComponent, setComponentDescription, addComponentKeywor
 import {
   createResistorSymbol,
   createCapacitorSymbol,
+  createInductorSymbol,
+  createDiodeSymbol,
   createLedSymbol,
   createNpnSymbol,
   createGroundSymbol,
@@ -42,6 +44,8 @@ export function createBuiltinBasicsLibrary(
 
   const resistorSymbol = createResistorSymbol();
   const capacitorSymbol = createCapacitorSymbol();
+  const inductorSymbol = createInductorSymbol();
+  const diodeSymbol = createDiodeSymbol();
   const ledSymbol = createLedSymbol();
   const npnSymbol = createNpnSymbol();
   const gndSymbol = createGroundSymbol();
@@ -53,6 +57,8 @@ export function createBuiltinBasicsLibrary(
     symbols: new Map([
       [resistorSymbol.id, resistorSymbol],
       [capacitorSymbol.id, capacitorSymbol],
+      [inductorSymbol.id, inductorSymbol],
+      [diodeSymbol.id, diodeSymbol],
       [ledSymbol.id, ledSymbol],
       [npnSymbol.id, npnSymbol],
       [gndSymbol.id, gndSymbol],
@@ -99,6 +105,22 @@ export function createBuiltinBasicsLibrary(
   capacitor = { ...capacitor, footprints: [fp0805.id], defaultFootprintId: fp0805.id };
   capacitor = setComponentSpec(capacitor, "package", "0805");
 
+  // Inductor
+  let inductor = createComponent("Inductor", "inductor", library.id);
+  inductor = setComponentDescription(inductor, "Generic SMD Inductor");
+  inductor = addComponentKeywords(inductor, ["inductor", "smd", "passive", "l", "coil"]);
+  inductor = { ...inductor, symbols: [inductorSymbol.id] };
+  inductor = { ...inductor, footprints: [fp0805.id], defaultFootprintId: fp0805.id };
+  inductor = setComponentSpec(inductor, "package", "0805");
+
+  // Diode
+  let diode = createComponent("Diode", "diode", library.id);
+  diode = setComponentDescription(diode, "Generic Diode");
+  diode = addComponentKeywords(diode, ["diode", "d", "rectifier"]);
+  diode = { ...diode, symbols: [diodeSymbol.id] };
+  diode = { ...diode, footprints: [fp0805.id], defaultFootprintId: fp0805.id };
+  diode = setComponentSpec(diode, "package", "0805");
+
   // LED
   let led = createComponent("LED", "led", library.id);
   led = setComponentDescription(led, "Generic SMD LED");
@@ -107,6 +129,13 @@ export function createBuiltinBasicsLibrary(
   led = { ...led, footprints: [fp0805.id], defaultFootprintId: fp0805.id };
   led = setComponentSpec(led, "package", "0805");
   led = setComponentSpec(led, "forward_voltage", 2.0);
+
+  // Transistor NPN
+  let transistor = createComponent("NPN Transistor", "transistor", library.id);
+  transistor = setComponentDescription(transistor, "Generic NPN Transistor");
+  transistor = addComponentKeywords(transistor, ["transistor", "npn", "bjt", "q"]);
+  transistor = { ...transistor, symbols: [npnSymbol.id] };
+  transistor = setComponentSpec(transistor, "type", "NPN");
 
   // Power symbols (no footprint)
   let gnd = createComponent("GND", "power", library.id);
@@ -124,7 +153,10 @@ export function createBuiltinBasicsLibrary(
     components: new Map([
       [resistor.id, resistor],
       [capacitor.id, capacitor],
+      [inductor.id, inductor],
+      [diode.id, diode],
       [led.id, led],
+      [transistor.id, transistor],
       [gnd.id, gnd],
       [vcc.id, vcc],
     ]),

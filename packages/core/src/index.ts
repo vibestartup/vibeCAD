@@ -36,3 +36,7 @@ export * as params from "./params";
 export * as history from "./history";
 export type { HistoryState } from "./history";
 export { createHistory, pushState, undo, redo, canUndo, canRedo } from "./history";
+
+// Component library system
+export * as library from "./library";
+export { libraryProviderRegistry } from "./library/provider";

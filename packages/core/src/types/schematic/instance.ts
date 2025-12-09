@@ -5,7 +5,6 @@
 import {
   SymbolInstanceId,
   SymbolId,
-  SheetId,
   newId,
 } from "../id";
 import { SchematicPoint, rotatePoint, mirrorPointX } from "./primitives";
@@ -21,6 +20,10 @@ export interface SymbolInstance {
   id: SymbolInstanceId;
   symbolId: SymbolId;
 
+  // Library component reference (optional - may be from library or user-created)
+  componentId?: string; // ComponentId from library
+  libraryId?: string; // ComponentLibraryId from library
+
   // Placement
   position: SchematicPoint;
   rotation: InstanceRotation;
@@ -32,9 +35,6 @@ export interface SymbolInstance {
 
   // Properties (component-specific: manufacturer, part number, etc.)
   properties: Map<string, string>;
-
-  // Which sheet this instance is on
-  sheetId: SheetId;
 
   // For multi-unit symbols, which unit this is (1-based)
   unit: number;
@@ -50,7 +50,6 @@ export interface SymbolInstance {
 export function createSymbolInstance(
   symbolId: SymbolId,
   position: SchematicPoint,
-  sheetId: SheetId,
   refDes: string,
   value: string = ""
 ): SymbolInstance {
@@ -63,7 +62,6 @@ export function createSymbolInstance(
     refDes,
     value,
     properties: new Map(),
-    sheetId,
     unit: 1,
   };
 }
@@ -160,6 +158,27 @@ export function setInstanceUnit(
   unit: number
 ): SymbolInstance {
   return { ...instance, unit };
+}
+
+/**
+ * Set the library component reference.
+ */
+export function setInstanceComponent(
+  instance: SymbolInstance,
+  componentId: string | undefined,
+  libraryId: string | undefined
+): SymbolInstance {
+  return { ...instance, componentId, libraryId };
+}
+
+/**
+ * Change the symbol of an instance (for variant switching).
+ */
+export function setInstanceSymbol(
+  instance: SymbolInstance,
+  symbolId: SymbolId
+): SymbolInstance {
+  return { ...instance, symbolId };
 }
 
 // ============================================================================

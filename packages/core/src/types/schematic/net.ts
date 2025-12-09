@@ -8,7 +8,6 @@ import {
   NetLabelId,
   NetClassId,
   PortId,
-  SheetId,
   SymbolInstanceId,
   PinId,
   JunctionId,
@@ -27,7 +26,6 @@ export interface Wire {
   id: WireId;
   points: SchematicPoint[]; // Orthogonal segments
   netId: NetId;
-  sheetId: SheetId;
 }
 
 // ============================================================================
@@ -41,7 +39,6 @@ export interface Junction {
   id: JunctionId;
   position: SchematicPoint;
   netId: NetId;
-  sheetId: SheetId;
 }
 
 // ============================================================================
@@ -59,7 +56,6 @@ export interface NetLabel {
   netName: string;
   style: NetLabelStyle;
   rotation: 0 | 90 | 180 | 270;
-  sheetId: SheetId;
 }
 
 // ============================================================================
@@ -69,7 +65,7 @@ export interface NetLabel {
 export type PortDirection = "input" | "output" | "bidirectional";
 
 /**
- * A port connects nets across hierarchical sheets.
+ * A port connects nets across schematic files (for hierarchical designs).
  */
 export interface Port {
   id: PortId;
@@ -77,7 +73,6 @@ export interface Port {
   direction: PortDirection;
   position: SchematicPoint;
   rotation: 0 | 90 | 180 | 270;
-  sheetId: SheetId;
   netId: NetId;
 }
 
@@ -141,14 +136,12 @@ export interface Net {
  */
 export function createWire(
   points: SchematicPoint[],
-  netId: NetId,
-  sheetId: SheetId
+  netId: NetId
 ): Wire {
   return {
     id: newId("Wire"),
     points,
     netId,
-    sheetId,
   };
 }
 
@@ -157,14 +150,12 @@ export function createWire(
  */
 export function createJunction(
   position: SchematicPoint,
-  netId: NetId,
-  sheetId: SheetId
+  netId: NetId
 ): Junction {
   return {
     id: newId("Junction"),
     position,
     netId,
-    sheetId,
   };
 }
 
@@ -174,8 +165,7 @@ export function createJunction(
 export function createNetLabel(
   position: SchematicPoint,
   netName: string,
-  style: NetLabelStyle,
-  sheetId: SheetId
+  style: NetLabelStyle
 ): NetLabel {
   return {
     id: newId("NetLabel"),
@@ -183,7 +173,6 @@ export function createNetLabel(
     netName,
     style,
     rotation: 0,
-    sheetId,
   };
 }
 
@@ -194,7 +183,6 @@ export function createPort(
   name: string,
   direction: PortDirection,
   position: SchematicPoint,
-  sheetId: SheetId,
   netId: NetId
 ): Port {
   return {
@@ -203,7 +191,6 @@ export function createPort(
     direction,
     position,
     rotation: 0,
-    sheetId,
     netId,
   };
 }
