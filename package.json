@@ -8,11 +8,14 @@
     "dev:web": "turbo run dev --filter=@vibecad/web --filter=@vibecad/server",
     "dev:web-only": "turbo run dev --filter=@vibecad/web",
     "dev:server": "turbo run dev --filter=@vibecad/server",
+    "setup:libraries": "bash scripts/setup-libraries.sh && pnpm index-libraries",
+    "setup:libraries:symbols-only": "bash scripts/setup-libraries.sh --symbols-only && pnpm index-libraries",
     "index-libraries": "pnpm --filter=@vibecad/server index-libraries",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean && rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo",
-    "clean:all": "rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo app/web/dist && turbo run clean",
+    "clean:deep": "rimraf .turbo node_modules/.cache app/web/node_modules/.vite packages/*/dist packages/*/.turbo app/web/dist && turbo run clean",
+    "clean:libraries": "rimraf libraries/kicad-symbols libraries/kicad-footprints app/libraries/kicad app/data/library-index.json",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {

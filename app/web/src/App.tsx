@@ -1158,7 +1158,8 @@ export const App: React.FC = () => {
         ];
       case "schematic":
         return [
-          { id: "sch-components", label: "Components", content: <SchematicComponentsContent /> },
+          { id: "sch-library", label: "Library", content: <SchematicLibraryContent /> },
+          { id: "sch-components", label: "Placed", content: <SchematicComponentsContent /> },
           { id: "sch-nets", label: "Nets", content: <SchematicNetsContent /> },
         ];
       case "pcb":
@@ -1192,7 +1193,6 @@ export const App: React.FC = () => {
       case "schematic":
         return [
           { id: "sch-props", label: "Properties", content: <SchematicPropertiesContent /> },
-          { id: "sch-library", label: "Library", content: <SchematicLibraryContent /> },
           { id: "sch-info", label: "Info", content: <SchematicInfoContent /> },
         ];
       case "pcb":
