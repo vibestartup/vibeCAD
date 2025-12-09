@@ -46,3 +46,11 @@ yarn-error.log*
 *.swo
 *~
 
+# KiCad Libraries (downloaded via setup script)
+libraries/kicad-symbols/
+libraries/kicad-footprints/
+app/libraries/kicad/
+
+# Library index (generated)
+app/data/library-index.json
+
