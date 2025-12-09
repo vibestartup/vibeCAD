@@ -105,6 +105,12 @@ interface DrawingState {
     sourcePath: string;
     projection: ViewProjection;
     scale: number;
+    showHiddenLines?: boolean;
+    showCenterLines?: boolean;
+    sectionPlane?: {
+      origin: Vec3;
+      normal: Vec3;
+    };
   } | null;
 
   // Pending dimension (first point selected)
@@ -169,7 +175,16 @@ interface DrawingActions {
   zoomToFit: () => void;
 
   // View placement workflow
-  startViewPlacement: (sourcePath: string, projection?: ViewProjection, scale?: number) => void;
+  startViewPlacement: (
+    sourcePath: string,
+    projection?: ViewProjection,
+    scale?: number,
+    options?: {
+      showHiddenLines?: boolean;
+      showCenterLines?: boolean;
+      sectionPlane?: { origin: Vec3; normal: Vec3 };
+    }
+  ) => void;
   cancelViewPlacement: () => void;
   confirmViewPlacement: (position: Vec2) => void;
 
@@ -466,9 +481,16 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
   },
 
   // View placement workflow
-  startViewPlacement: (sourcePath, projection = "front", scale = 1) => {
+  startViewPlacement: (sourcePath, projection = "front", scale = 1, options) => {
     set({
-      pendingViewPlacement: { sourcePath, projection, scale },
+      pendingViewPlacement: {
+        sourcePath,
+        projection,
+        scale,
+        showHiddenLines: options?.showHiddenLines,
+        showCenterLines: options?.showCenterLines,
+        sectionPlane: options?.sectionPlane,
+      },
       editorMode: "place-view",
       activeTool: "view",
     });
@@ -486,8 +508,19 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
     const state = get();
     if (!state.pendingViewPlacement || !state.drawing) return;
 
-    const { sourcePath, projection, scale } = state.pendingViewPlacement;
-    const view = coreFunctions.createDrawingView(`View ${state.drawing.views.size + 1}`, sourcePath, projection, position, scale);
+    const { sourcePath, projection, scale, showHiddenLines, showCenterLines, sectionPlane } = state.pendingViewPlacement;
+    let view = coreFunctions.createDrawingView(`View ${state.drawing.views.size + 1}`, sourcePath, projection, position, scale);
+
+    // Apply display options
+    if (showHiddenLines !== undefined) {
+      view = { ...view, showHiddenLines };
+    }
+    if (showCenterLines !== undefined) {
+      view = { ...view, showCenterLines };
+    }
+    if (sectionPlane && projection === "section") {
+      view = { ...view, sectionPlane };
+    }
 
     set((s) => {
       if (!s.drawing) return s;
@@ -624,13 +657,35 @@ export const useDrawingStore = create<DrawingStore>((set, get) => ({
         const upDir = coreFunctions.getProjectionUp(view.projection);
 
         try {
-          // Project the shape
-          const occResult = kernel.occ.projectTo2D(
-            shapeHandle,
-            viewDir as Vec3,
-            upDir as Vec3,
-            view.scale
-          );
+          // Project the shape (use section projection for section views)
+          let occResult;
+          if (view.projection === "section" && view.sectionPlane) {
+            // For section views, use the section plane normal as the view direction
+            const sectionNormal = view.sectionPlane.normal;
+            const sectionOrigin = view.sectionPlane.origin;
+            // View perpendicular to the section plane
+            const sectionViewDir: Vec3 = [sectionNormal[0], sectionNormal[1], sectionNormal[2]];
+            // Calculate a sensible up vector (perpendicular to section normal)
+            let sectionUp: Vec3 = [0, 0, 1];
+            if (Math.abs(sectionNormal[2]) > 0.9) {
+              sectionUp = [0, 1, 0];
+            }
+            occResult = kernel.occ.projectSection(
+              shapeHandle,
+              sectionOrigin,
+              sectionNormal,
+              sectionViewDir,
+              sectionUp,
+              view.scale
+            );
+          } else {
+            occResult = kernel.occ.projectTo2D(
+              shapeHandle,
+              viewDir as Vec3,
+              upDir as Vec3,
+              view.scale
+            );
+          }
 
           // Convert OCC projection result to drawing projection result
           const projectionResult: ViewProjectionResult = {

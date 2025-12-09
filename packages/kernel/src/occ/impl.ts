@@ -1264,6 +1264,113 @@ export class OccApiImpl implements OccApi {
     ];
   }
 
+  /**
+   * Create a section view by cutting the shape with a plane.
+   * Projects the visible edges and the section cut lines.
+   */
+  projectSection(
+    shape: ShapeHandle,
+    planeOrigin: Vec3,
+    planeNormal: Vec3,
+    viewDir: Vec3,
+    upDir: Vec3,
+    scale: number = 1.0
+  ): ProjectionResult {
+    const shapeObj = this.store.get(shape);
+
+    const edges: ProjectedEdge2D[] = [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    // Build projection transformation
+    const vd = this.normalize(viewDir);
+    const up = this.normalize(upDir);
+    const right = this.cross(up, vd);
+    const correctedUp = this.cross(vd, right);
+
+    try {
+      // Create the section plane
+      const origin = new this.oc.gp_Pnt_3(planeOrigin[0], planeOrigin[1], planeOrigin[2]);
+      const normal = new this.oc.gp_Dir_4(planeNormal[0], planeNormal[1], planeNormal[2]);
+      const plane = new this.oc.gp_Pln_3(origin, normal);
+
+      // Create section algorithm
+      const section = new this.oc.BRepAlgoAPI_Section_3(shapeObj, plane, false);
+      section.Build();
+
+      if (section.IsDone()) {
+        const sectionShape = section.Shape();
+
+        // Extract section edges (the cut lines - marked as "section" type)
+        const sectionExplorer = new this.oc.TopExp_Explorer_2(
+          sectionShape,
+          this.oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+          this.oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+        );
+
+        while (sectionExplorer.More()) {
+          const edge = this.oc.TopoDS.Edge_1(sectionExplorer.Current());
+          const points: [number, number][] = [];
+
+          try {
+            const curve = new this.oc.BRepAdaptor_Curve_2(edge);
+            const first = curve.FirstParameter();
+            const last = curve.LastParameter();
+            const numSegments = Math.max(2, Math.min(50, Math.ceil((last - first) * 10)));
+
+            for (let i = 0; i <= numSegments; i++) {
+              const t = first + (i / numSegments) * (last - first);
+              const pnt3d = curve.Value(t);
+
+              // Project 3D point to 2D
+              const px = pnt3d.X(), py = pnt3d.Y(), pz = pnt3d.Z();
+              const x2d = (px * right[0] + py * right[1] + pz * right[2]) * scale;
+              const y2d = (px * correctedUp[0] + py * correctedUp[1] + pz * correctedUp[2]) * scale;
+
+              points.push([x2d, y2d]);
+
+              minX = Math.min(minX, x2d);
+              minY = Math.min(minY, y2d);
+              maxX = Math.max(maxX, x2d);
+              maxY = Math.max(maxY, y2d);
+            }
+
+            if (points.length > 0) {
+              edges.push({ type: "section", points });
+            }
+          } catch (e) {
+            console.warn("[OCC] Failed to project section edge:", e);
+          }
+
+          sectionExplorer.Next();
+        }
+      }
+
+      // Also project the visible edges of the original shape
+      // using the same view direction (half-section showing the inside)
+      const visibleResult = this.projectTo2D(shape, viewDir, upDir, scale);
+      edges.push(...visibleResult.edges);
+
+      // Update bounding box
+      if (visibleResult.boundingBox.min[0] < minX) minX = visibleResult.boundingBox.min[0];
+      if (visibleResult.boundingBox.min[1] < minY) minY = visibleResult.boundingBox.min[1];
+      if (visibleResult.boundingBox.max[0] > maxX) maxX = visibleResult.boundingBox.max[0];
+      if (visibleResult.boundingBox.max[1] > maxY) maxY = visibleResult.boundingBox.max[1];
+
+    } catch (err) {
+      console.error("[OCC] Section projection failed:", err);
+      // Fallback to regular projection
+      return this.projectTo2D(shape, viewDir, upDir, scale);
+    }
+
+    return {
+      edges,
+      boundingBox: {
+        min: [minX === Infinity ? 0 : minX, minY === Infinity ? 0 : minY],
+        max: [maxX === -Infinity ? 0 : maxX, maxY === -Infinity ? 0 : maxY],
+      },
+    };
+  }
+
   // ============================================================================
   // Memory Management
   // ============================================================================

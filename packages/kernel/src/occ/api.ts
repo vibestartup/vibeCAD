@@ -254,6 +254,26 @@ export interface OccApi {
     scale?: number
   ): ProjectionResult;
 
+  /**
+   * Create a section view by cutting a shape with a plane and projecting the result.
+   * Returns the projected edges including the section cut line.
+   *
+   * @param shape - The 3D shape to section
+   * @param planeOrigin - Origin point of the section plane
+   * @param planeNormal - Normal vector of the section plane
+   * @param viewDir - View direction for projection (perpendicular to plane normal for standard sections)
+   * @param upDir - Up direction for the view
+   * @param scale - Scale factor (default 1.0)
+   */
+  projectSection(
+    shape: ShapeHandle,
+    planeOrigin: Vec3,
+    planeNormal: Vec3,
+    viewDir: Vec3,
+    upDir: Vec3,
+    scale?: number
+  ): ProjectionResult;
+
   // ============================================================================
   // Memory Management
   // ============================================================================

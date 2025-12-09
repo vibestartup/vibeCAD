@@ -77,11 +77,6 @@ function StatusBar() {
 // Add View Modal
 // ============================================================================
 
-interface AddViewModalProps {
-  onClose: () => void;
-  onConfirm: (sourcePath: string, projection: ViewProjection, scale: number) => void;
-}
-
 const modalStyles = {
   overlay: {
     position: "fixed" as const,
@@ -161,20 +156,55 @@ const modalStyles = {
   },
 };
 
+interface AddViewModalProps {
+  onClose: () => void;
+  onConfirm: (sourcePath: string, projection: ViewProjection, scale: number, options?: ViewOptions) => void;
+}
+
+interface ViewOptions {
+  showHiddenLines: boolean;
+  showCenterLines: boolean;
+  sectionPlane?: {
+    origin: [number, number, number];
+    normal: [number, number, number];
+  };
+}
+
 function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
   const [sourceType, setSourceType] = useState<"current" | "file">("current");
   const [sourcePath, setSourcePath] = useState("./part.vibecad");
   const [projection, setProjection] = useState<ViewProjection>("front");
   const [scale, setScale] = useState(1);
+  const [showHiddenLines, setShowHiddenLines] = useState(false);
+  const [showCenterLines, setShowCenterLines] = useState(true);
 
-  const projections: ViewProjection[] = [
+  // Section view configuration
+  const [isSectionView, setIsSectionView] = useState(false);
+  const [sectionOrigin, setSectionOrigin] = useState<[number, number, number]>([0, 0, 0]);
+  const [sectionNormal, setSectionNormal] = useState<[number, number, number]>([1, 0, 0]);
+
+  const standardProjections: ViewProjection[] = [
     "front", "back", "top", "bottom", "left", "right",
+  ];
+
+  const pictorialProjections: ViewProjection[] = [
     "isometric", "dimetric", "trimetric",
   ];
 
   const handleConfirm = () => {
     const finalPath = sourceType === "current" ? CURRENT_PART_PATH : sourcePath;
-    onConfirm(finalPath, projection, scale);
+    const finalProjection = isSectionView ? "section" as ViewProjection : projection;
+    const options: ViewOptions = {
+      showHiddenLines,
+      showCenterLines,
+    };
+    if (isSectionView) {
+      options.sectionPlane = {
+        origin: sectionOrigin,
+        normal: sectionNormal,
+      };
+    }
+    onConfirm(finalPath, finalProjection, scale, options);
     onClose();
   };
 
@@ -212,7 +242,7 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
               style={modalStyles.input}
               type="text"
               value={sourcePath}
-              onChange={(e) => setSourcePath(e.target.value)}
+              onChange={(e) => setSourcePath((e.target as HTMLInputElement).value)}
               placeholder="./part.vibecad"
             />
           )}
@@ -224,19 +254,84 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
         </div>
 
         <div style={modalStyles.field}>
-          <label style={modalStyles.label}>Projection</label>
-          <select
-            style={modalStyles.select}
-            value={projection}
-            onChange={(e) => setProjection(e.target.value as ViewProjection)}
-          >
-            {projections.map((p) => (
-              <option key={p} value={p}>
-                {p.charAt(0).toUpperCase() + p.slice(1)}
-              </option>
-            ))}
-          </select>
+          <label style={modalStyles.label}>View Type</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+            <button
+              style={{
+                ...modalStyles.button,
+                flex: 1,
+                ...(!isSectionView ? modalStyles.buttonPrimary : modalStyles.buttonSecondary),
+              }}
+              onClick={() => setIsSectionView(false)}
+            >
+              Standard
+            </button>
+            <button
+              style={{
+                ...modalStyles.button,
+                flex: 1,
+                ...(isSectionView ? modalStyles.buttonPrimary : modalStyles.buttonSecondary),
+              }}
+              onClick={() => setIsSectionView(true)}
+            >
+              Section
+            </button>
+          </div>
         </div>
+
+        {!isSectionView && (
+          <div style={modalStyles.field}>
+            <label style={modalStyles.label}>Projection</label>
+            <select
+              style={modalStyles.select}
+              value={projection}
+              onChange={(e) => setProjection((e.target as HTMLSelectElement).value as ViewProjection)}
+            >
+              <optgroup label="Orthographic">
+                {standardProjections.map((p) => (
+                  <option key={p} value={p}>
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Pictorial">
+                {pictorialProjections.map((p) => (
+                  <option key={p} value={p}>
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+          </div>
+        )}
+
+        {isSectionView && (
+          <div style={modalStyles.field}>
+            <label style={modalStyles.label}>Section Plane Normal</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["X", "Y", "Z"].map((axis, i) => (
+                <button
+                  key={axis}
+                  style={{
+                    ...modalStyles.button,
+                    flex: 1,
+                    ...(sectionNormal[i] !== 0 ? modalStyles.buttonPrimary : modalStyles.buttonSecondary),
+                  }}
+                  onClick={() => {
+                    const newNormal: [number, number, number] = [0, 0, 0];
+                    newNormal[i] = 1;
+                    setSectionNormal(newNormal);
+                  }}
+                >
+                  {axis}
+                </button>
+              ))}
+            </div>
+            <div style={{ color: "#888", fontSize: 11, marginTop: 4 }}>
+              Section plane passes through origin, perpendicular to {sectionNormal[0] ? "X" : sectionNormal[1] ? "Y" : "Z"} axis
+            </div>
+          </div>
+        )}
 
         <div style={modalStyles.field}>
           <label style={modalStyles.label}>Scale (1:X)</label>
@@ -248,10 +343,32 @@ function AddViewModal({ onClose, onConfirm }: AddViewModalProps) {
             max={100}
             value={1 / scale}
             onChange={(e) => {
-              const val = parseFloat(e.target.value);
+              const val = parseFloat((e.target as HTMLInputElement).value);
               if (val > 0) setScale(1 / val);
             }}
           />
+        </div>
+
+        <div style={modalStyles.field}>
+          <label style={modalStyles.label}>Display Options</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#ccc", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showHiddenLines}
+                onChange={(e) => setShowHiddenLines((e.target as HTMLInputElement).checked)}
+              />
+              Show hidden lines
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#ccc", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={showCenterLines}
+                onChange={(e) => setShowCenterLines((e.target as HTMLInputElement).checked)}
+              />
+              Show center lines
+            </label>
+          </div>
         </div>
 
         <div style={modalStyles.buttons}>
@@ -311,8 +428,8 @@ export function DrawingEditor() {
   }, []);
 
   const handleConfirmAddView = useCallback(
-    (sourcePath: string, projection: ViewProjection, scale: number) => {
-      startViewPlacement(sourcePath, projection, scale);
+    (sourcePath: string, projection: ViewProjection, scale: number, options?: ViewOptions) => {
+      startViewPlacement(sourcePath, projection, scale, options);
     },
     [startViewPlacement]
   );

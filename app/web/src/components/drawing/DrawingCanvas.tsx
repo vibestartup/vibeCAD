@@ -96,6 +96,11 @@ const styles = {
     strokeDasharray: "8,2,2,2",
     fill: "none",
   },
+  sectionEdge: {
+    stroke: "#000000",
+    strokeWidth: 0.7,
+    fill: "none",
+  },
   titleBlock: {
     stroke: "#000000",
     strokeWidth: 0.5,
@@ -152,6 +157,8 @@ function ViewRenderer({ view, isSelected, isHovered, onSelect, onHover }: ViewRe
       case "silhouette":
       case "outline":
         return { ...styles.projectedEdge, strokeWidth: 0.5 };
+      case "section":
+        return styles.sectionEdge;
       default:
         return styles.projectedEdge;
     }
